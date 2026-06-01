@@ -144,10 +144,16 @@ def _charge_power_kw(sig: dict) -> float:
 
 
 def _is_charging(sig: dict) -> bool:
-    """Whether the car is actually charging. Requires the cable plugged in (1149) AND
-    a meaningful charge current (1178) — without the plug check, the high pack current
-    while DRIVING (discharge/regen) is mistaken for charging, fragmenting trips and
+    """Whether the car is actually charging. Charging only happens while PARKED, so the
+    car must be stationary (gear P, speed ~0); plus the cable plugged in (1149) AND a
+    meaningful charge current (1178). The motion gate is essential: during regen braking
+    the pack current is strongly negative (same sign as charging) AND 1149 reads 1
+    spuriously, so without it driving is mistaken for charging — fragmenting trips and
     creating phantom charge sessions. Signal 1939 (AC fan mode) is NOT used."""
+    if _si(sig, "1010") not in (None, 0):   # gear R/N/D → moving, cannot be charging
+        return False
+    if (_sf(sig, "1319") or 0) > 2.0:       # speed > 2 km/h → moving (gear signal may lag)
+        return False
     if _si(sig, "1149") in (None, 0):   # cable not connected → cannot be charging
         return False
     current   = _sf(sig, "1178")

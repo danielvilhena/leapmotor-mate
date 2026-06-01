@@ -201,9 +201,18 @@ def save_fresh_signals(signals: dict) -> None:
     def sigf(key, default=0.0): return float(signals.get(key) or default)
 
     def _is_charging() -> bool:
-        """Charging requires the cable plugged in (1149) AND a real charge current (1178)
-        — the plug check prevents the high pack current while driving being read as
-        charging. Signal 1939 (AC fan mode) is not used."""
+        """Charging only happens while PARKED, so the car must be stationary (gear P,
+        speed ~0); plus the cable plugged in (1149) AND a real charge current (1178). The
+        motion gate is essential: during regen the pack current is strongly negative (same
+        sign as charging) and 1149 reads 1 spuriously, so without it driving is mistaken
+        for charging. Signal 1939 (AC fan mode) is not used."""
+        if int(signals.get("1010") or 0) != 0:   # gear R/N/D → moving
+            return False
+        try:
+            if float(signals.get("1319") or 0) > 2.0:   # speed > 2 km/h → moving
+                return False
+        except (TypeError, ValueError):
+            pass
         if int(signals.get("1149") or 0) == 0:
             return False
         cur = signals.get("1178"); volt = signals.get("1177"); rem = signals.get("1200")
