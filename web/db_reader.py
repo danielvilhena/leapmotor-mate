@@ -583,3 +583,23 @@ def get_charge_stats() -> dict:
            WHERE ended_at IS NOT NULL"""
     ).fetchone()
     return dict(row) if row else {}
+
+
+def get_ac_dc_stats() -> dict:
+    """Count + energy of AC vs DC charge sessions. DC = charge_type 'DC', or (when not
+    set) a measured peak power above 11 kW (AC tops out at ~11 kW; DC is faster)."""
+    db = _get()
+    rows = db.execute(
+        "SELECT charge_type, max_power_kw, energy_added_kwh FROM charges WHERE ended_at IS NOT NULL"
+    ).fetchall()
+    ac = {"count": 0, "kwh": 0.0}
+    dc = {"count": 0, "kwh": 0.0}
+    for r in rows:
+        ct = r["charge_type"]
+        is_dc = ct == "DC" or (ct is None and (r["max_power_kw"] or 0) > 11)
+        b = dc if is_dc else ac
+        b["count"] += 1
+        b["kwh"] += r["energy_added_kwh"] or 0
+    ac["kwh"] = round(ac["kwh"], 1)
+    dc["kwh"] = round(dc["kwh"], 1)
+    return {"ac": ac, "dc": dc, "total": ac["count"] + dc["count"]}

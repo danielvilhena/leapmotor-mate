@@ -63,6 +63,9 @@ _T: dict[str, dict[str, str]] = {
         "not_enough_gps":       "Not enough GPS points",
         # Charges
         "charges_title":        "Charges",
+        "ac_dc_distribution":   "AC vs DC Distribution",
+        "ac_charge":            "AC",
+        "dc_charge":            "DC",
         "sessions_recorded":    "sessions recorded",
         "sessions":             "Sessions",
         "total_energy":         "Total energy",
@@ -258,6 +261,9 @@ _T: dict[str, dict[str, str]] = {
         "not_enough_gps":       "Punti GPS insufficienti",
         # Charges
         "charges_title":        "Ricariche",
+        "ac_dc_distribution":   "Distribuzione AC vs DC",
+        "ac_charge":            "AC",
+        "dc_charge":            "DC",
         "sessions_recorded":    "sessioni registrate",
         "sessions":             "Sessioni",
         "total_energy":         "Energia totale",

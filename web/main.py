@@ -107,7 +107,7 @@ async def charges_page(request: Request, highlight: int = 0):
         page="charges", vehicle=vehicle, grouped=grouped,
         stats=stats, total=total, highlight=highlight,
         charge_types=db_reader.CHARGE_TYPES, prices=prices,
-        status=status,
+        status=status, ac_dc=db_reader.get_ac_dc_stats(),
     ))
 
 
