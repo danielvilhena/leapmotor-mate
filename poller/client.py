@@ -144,9 +144,12 @@ def _charge_power_kw(sig: dict) -> float:
 
 
 def _is_charging(sig: dict) -> bool:
-    """Whether the car is actually charging. Determined from charge current (1178),
-    NOT signal 1939 — which is the AC fan-mode code and is non-zero whenever the
-    climate fan runs, causing false "charging". Mirrors leapmotor-ha logic."""
+    """Whether the car is actually charging. Requires the cable plugged in (1149) AND
+    a meaningful charge current (1178) — without the plug check, the high pack current
+    while DRIVING (discharge/regen) is mistaken for charging, fragmenting trips and
+    creating phantom charge sessions. Signal 1939 (AC fan mode) is NOT used."""
+    if _si(sig, "1149") in (None, 0):   # cable not connected → cannot be charging
+        return False
     current   = _sf(sig, "1178")
     remaining = _si(sig, "1200")
     power     = _charge_power_kw(sig)

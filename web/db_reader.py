@@ -201,7 +201,11 @@ def save_fresh_signals(signals: dict) -> None:
     def sigf(key, default=0.0): return float(signals.get(key) or default)
 
     def _is_charging() -> bool:
-        """Charging is read from charge current (1178), not signal 1939 (AC fan mode)."""
+        """Charging requires the cable plugged in (1149) AND a real charge current (1178)
+        — the plug check prevents the high pack current while driving being read as
+        charging. Signal 1939 (AC fan mode) is not used."""
+        if int(signals.get("1149") or 0) == 0:
+            return False
         cur = signals.get("1178"); volt = signals.get("1177"); rem = signals.get("1200")
         try:    cur = float(cur) if cur is not None else None
         except (TypeError, ValueError): cur = None
