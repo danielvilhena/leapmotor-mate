@@ -210,6 +210,22 @@ async def cmd_grid(request: Request):
     return templates.TemplateResponse(request, "partials/cmd_grid.html", _ctx(status=status))
 
 
+_BOOST_DEFAULT_S = 300   # 5 min — covers the "got in the car → started driving" window
+
+
+@app.api_route("/api/boost", methods=["GET", "POST"])
+async def boost(seconds: int = _BOOST_DEFAULT_S):
+    """Trigger fast (10s) polling for a window, so the poller catches a trip start that
+    would otherwise be missed during deep sleep. Meant to be called when you get in the
+    car (e.g. an iPhone Bluetooth shortcut, relayed by HA on the LAN — Mate stays local).
+    Coordinated with the poller via settings['boost_until']."""
+    import time
+    seconds = max(30, min(int(seconds or _BOOST_DEFAULT_S), 1800))
+    until = time.time() + seconds
+    db_reader.set_setting("boost_until", str(until))
+    return {"status": "boost on", "seconds": seconds}
+
+
 @app.get("/api/charge-plan")
 async def get_charge_plan():
     import asyncio

@@ -90,11 +90,23 @@ def main():
         try:
             data = client.get_status()
             recorder.process(data)
+            interval = recorder.poll_interval
+            # Boost window (set via POST /api/boost, e.g. an iPhone BT shortcut relayed
+            # by HA when you get in the car): poll fast so we catch the trip start that
+            # deep sleep would otherwise miss. Only matters while still parked — once
+            # DRIVING the state machine already polls at 10s.
+            try:
+                boost_until = float(db.get_setting("boost_until", "0") or 0)
+            except (TypeError, ValueError):
+                boost_until = 0.0
+            boosting = time.time() < boost_until and interval > 10
+            if boosting:
+                interval = 10
             log.info(
-                "SOC %.1f%% | Range %d km | Speed %.0f km/h | State: %-8s | Gear: %s | Next poll: %ds",
+                "SOC %.1f%% | Range %d km | Speed %.0f km/h | State: %-8s | Gear: %s | Next poll: %ds%s",
                 data.soc, data.range_km, data.speed_kmh,
-                recorder.state.value, data.gear,
-                recorder.poll_interval,
+                recorder.state.value, data.gear, interval,
+                " (boost)" if boosting else "",
             )
             recorder.mark_online()
         except KeyboardInterrupt:
@@ -103,8 +115,22 @@ def main():
         except Exception as exc:
             log.error("Poll error: %s", exc)
             recorder.mark_offline()
+            interval = recorder.poll_interval
 
-        time.sleep(recorder.poll_interval)
+        # Interruptible sleep: while parked we may be sleeping for minutes, so check the
+        # boost flag every few seconds and wake immediately if one is requested.
+        deadline = time.time() + interval
+        while True:
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                break
+            time.sleep(min(5.0, remaining))
+            if interval > 10:
+                try:
+                    if float(db.get_setting("boost_until", "0") or 0) > time.time():
+                        break   # boost just requested → poll now
+                except (TypeError, ValueError):
+                    pass
 
     client.close()
     db.close()
