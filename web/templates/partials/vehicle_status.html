@@ -2,71 +2,73 @@
   <div class="card text-slate-400 text-sm">{{ t('no_data') }} — {{ t('check_poller') }}</div>
 {% else %}
 
-{% macro openclose(state) %}
-  {% if state is none %}
-    <span class="text-xs text-slate-500">—</span>
-  {% elif state %}
-    <span class="text-xs font-semibold px-2 py-0.5 rounded-full text-amber-400 bg-amber-400/10 border border-amber-400/30">{{ t('open_state') }}</span>
+{# ── Mushroom-style info card: tinted gradient, rounded 18px, icon + label + value ── #}
+{% macro card(icon, label, value, rgb) %}
+<div style="border-radius:18px;background:linear-gradient(135deg, rgba({{ rgb }},0.16), rgba({{ rgb }},0.04));border:1px solid rgba({{ rgb }},0.24);padding:14px;display:flex;align-items:center;gap:12px">
+  <div style="width:42px;height:42px;border-radius:12px;background:rgba({{ rgb }},0.18);display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0">{{ icon }}</div>
+  <div style="min-width:0">
+    <div style="font-size:12px;color:#94a3b8;line-height:1.2">{{ label }}</div>
+    <div style="font-size:16px;font-weight:700;color:#f1f5f9;line-height:1.35">{{ value }}</div>
+  </div>
+</div>
+{% endmacro %}
+
+{% set GREEN='76,175,80' %}{% set RED='244,67,54' %}{% set BLUE='33,150,243' %}{% set CYAN='0,188,212' %}{% set AMBER='245,158,11' %}{% set GRAY='100,116,139' %}
+
+{% macro state_card(icon_closed, icon_open, label, st, open_rgb=RED) %}
+  {% if st is none %}
+    {{ card('—', label, t('no_data'), GRAY) }}
+  {% elif st %}
+    {{ card(icon_open, label, t('open_state'), open_rgb) }}
   {% else %}
-    <span class="text-xs font-semibold px-2 py-0.5 rounded-full text-green-400 bg-green-400/10 border border-green-400/30">{{ t('closed_state') }}</span>
+    {{ card(icon_closed, label, t('closed_state'), GREEN) }}
   {% endif %}
 {% endmacro %}
 
-<div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+<div class="space-y-5">
 
-  <!-- Tyre pressure (car top-view: front row on top) -->
-  <div class="card">
-    <div class="stat-label mb-3">🛞 {{ t('tyre_pressure') }}</div>
-    <div class="grid grid-cols-2 gap-3">
-      {% for pos, label in [('fl', t('tyre_fl')), ('fr', t('tyre_fr')), ('rl', t('tyre_rl')), ('rr', t('tyre_rr'))] %}
-      {% set tp = vs.tyres[pos] %}
-      <div style="border:1px solid {{ '#ef4444' if tp.low else '#334155' }};border-radius:12px;padding:12px;text-align:center;background:{{ '#ef444412' if tp.low else '#0f172a' }}">
-        <div class="text-xs text-slate-400 mb-1">{{ label }}</div>
-        <div class="text-2xl font-bold {{ 'text-red-400' if tp.low else 'text-white' }}">
-          {{ '%.2f'|format(tp.bar) if tp.bar is not none else '—' }}<span class="text-xs font-normal text-slate-400"> bar</span>
-        </div>
-        {% if tp.low %}<div class="text-xs text-red-400 mt-1">⚠ {{ t('tyre_low') }}</div>{% endif %}
-      </div>
-      {% endfor %}
-    </div>
-  </div>
-
-  <!-- Temperatures -->
-  <div class="card">
-    <div class="stat-label mb-3">🌡️ {{ t('temperatures') }}</div>
-    <div class="space-y-2">
-      {% for label, val in [(t('temp_battery'), vs.temps.battery), (t('temp_cabin'), vs.temps.cabin)] %}
-      <div class="flex items-center justify-between" style="background:#0f172a;border-radius:8px;padding:10px 14px">
-        <span class="text-sm text-slate-300">{{ label }}</span>
-        <span class="font-bold text-white">{{ '%.0f'|format(val) ~ '°C' if val is not none else '—' }}</span>
-      </div>
+  <!-- Tyre pressure -->
+  <div>
+    <div class="text-white font-semibold mb-2">🛞 {{ t('tyre_pressure') }}</div>
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      {% for tp, label in [(vs.tyres.fl, t('tyre_fl')), (vs.tyres.fr, t('tyre_fr')), (vs.tyres.rl, t('tyre_rl')), (vs.tyres.rr, t('tyre_rr'))] %}
+        {% set val = ('%.2f'|format(tp.bar) ~ ' bar') if tp.bar is not none else '—' %}
+        {% if tp.low %}{{ card('⚠️', label, val ~ ' · ' ~ t('tyre_low'), RED) }}
+        {% else %}{{ card('🛞', label, val, BLUE) }}{% endif %}
       {% endfor %}
     </div>
   </div>
 
   <!-- Doors -->
-  <div class="card">
-    <div class="stat-label mb-3">🚪 {{ t('doors') }}</div>
-    <div class="space-y-2">
-      {% for label, st in [(t('door_driver'), vs.doors.driver), (t('door_passenger'), vs.doors.passenger), (t('door_rear_left'), vs.doors.rear_left), (t('door_rear_right'), vs.doors.rear_right), (t('door_trunk'), vs.doors.trunk)] %}
-      <div class="flex items-center justify-between" style="background:#0f172a;border-radius:8px;padding:9px 14px">
-        <span class="text-sm text-slate-300">{{ label }}</span>
-        {{ openclose(st) }}
-      </div>
-      {% endfor %}
+  <div>
+    <div class="text-white font-semibold mb-2">🚪 {{ t('doors') }}</div>
+    <div class="grid grid-cols-2 lg:grid-cols-3 gap-3">
+      {{ state_card('🚪', '🚪', t('door_driver'),     vs.doors.driver) }}
+      {{ state_card('🚪', '🚪', t('door_passenger'),  vs.doors.passenger) }}
+      {{ state_card('🚪', '🚪', t('door_rear_left'),  vs.doors.rear_left) }}
+      {{ state_card('🚪', '🚪', t('door_rear_right'), vs.doors.rear_right) }}
+      {{ state_card('🧳', '🧳', t('door_trunk'),      vs.doors.trunk) }}
     </div>
   </div>
 
-  <!-- Windows -->
-  <div class="card">
-    <div class="stat-label mb-3">🪟 {{ t('windows') }}</div>
-    <div class="space-y-2">
-      {% for label, st in [(t('win_fl'), vs.windows.fl), (t('win_fr'), vs.windows.fr), (t('win_rl'), vs.windows.rl), (t('win_rr'), vs.windows.rr), (t('win_sunshade'), vs.windows.sunshade)] %}
-      <div class="flex items-center justify-between" style="background:#0f172a;border-radius:8px;padding:9px 14px">
-        <span class="text-sm text-slate-300">{{ label }}</span>
-        {{ openclose(st) }}
-      </div>
-      {% endfor %}
+  <!-- Windows + roof -->
+  <div>
+    <div class="text-white font-semibold mb-2">🪟 {{ t('windows') }}</div>
+    <div class="grid grid-cols-2 lg:grid-cols-3 gap-3">
+      {{ state_card('🪟', '🪟', t('win_fl'), vs.windows.fl) }}
+      {{ state_card('🪟', '🪟', t('win_fr'), vs.windows.fr) }}
+      {{ state_card('🪟', '🪟', t('win_rl'), vs.windows.rl) }}
+      {{ state_card('🪟', '🪟', t('win_rr'), vs.windows.rr) }}
+      {{ state_card('🌅', '🌅', t('win_sunshade'), vs.windows.sunshade, open_rgb=AMBER) }}
+    </div>
+  </div>
+
+  <!-- Temperatures -->
+  <div>
+    <div class="text-white font-semibold mb-2">🌡️ {{ t('temperatures') }}</div>
+    <div class="grid grid-cols-2 lg:grid-cols-3 gap-3">
+      {{ card('🔋', t('temp_battery'), ('%.0f'|format(vs.temps.battery) ~ '°C') if vs.temps.battery is not none else '—', BLUE) }}
+      {{ card('🌡️', t('temp_cabin'), ('%.0f'|format(vs.temps.cabin) ~ '°C') if vs.temps.cabin is not none else '—', CYAN) }}
     </div>
   </div>
 
