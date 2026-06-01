@@ -210,6 +210,21 @@ async def cmd_grid(request: Request):
     return templates.TemplateResponse(request, "partials/cmd_grid.html", _ctx(status=status))
 
 
+@app.post("/api/poll-settings", response_class=HTMLResponse)
+async def poll_settings(request: Request):
+    """Save the user-tunable poll cadence (parked / driving seconds). The poller picks
+    these up live on its next cycle."""
+    form = await request.form()
+    try:
+        parked = max(15, min(int(form.get("poll_parked", 30)), 600))
+        driving = max(5, min(int(form.get("poll_driving", 10)), 60))
+    except (ValueError, TypeError):
+        return HTMLResponse('<span style="color:#ef4444">Invalid value</span>', status_code=400)
+    db_reader.set_setting("poll_parked", str(parked))
+    db_reader.set_setting("poll_driving", str(driving))
+    return HTMLResponse(f'<span style="color:#22c55e">✓ {parked}s / {driving}s</span>')
+
+
 _BOOST_DEFAULT_S = 300   # 5 min — covers the "got in the car → started driving" window
 
 

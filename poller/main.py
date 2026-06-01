@@ -88,6 +88,14 @@ def main():
 
     while True:
         try:
+            # Apply user-tunable poll cadence (Settings) live, each cycle
+            try:
+                recorder.set_poll_intervals(
+                    int(db.get_setting("poll_parked", "30") or 30),
+                    int(db.get_setting("poll_driving", "10") or 10),
+                )
+            except (TypeError, ValueError):
+                pass
             data = client.get_status()
             recorder.process(data)
             interval = recorder.poll_interval

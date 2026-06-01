@@ -30,6 +30,10 @@ class Recorder:
     def poll_interval(self) -> int:
         return self._sm.poll_interval
 
+    def set_poll_intervals(self, parked: int, driving: int) -> None:
+        self._sm.poll_parked = parked
+        self._sm.poll_driving = driving
+
     def _resume_or_close(self, data: VehicleData) -> None:
         """At startup, reconcile sessions left open by a previous run (poller/HA
         restart, crash). If the activity is STILL ongoing, RESUME the open session

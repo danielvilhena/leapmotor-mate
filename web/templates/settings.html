@@ -42,6 +42,37 @@
     </div>
   </div>
 
+  <!-- Polling cadence -->
+  <div class="card">
+    <h2 class="font-semibold text-white mb-1">{{ t('polling_section') }}</h2>
+    <div class="text-xs text-slate-400 mb-4">{{ t('polling_desc') }}</div>
+    <form hx-post="/api/poll-settings" hx-trigger="change" hx-target="#poll-result" hx-swap="innerHTML" class="space-y-5">
+      <div>
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-sm text-white">{{ t('poll_parked_label') }}</span>
+          <span class="font-bold text-brand"><span id="pp-val">{{ settings.get('poll_parked', '30') }}</span>s</span>
+        </div>
+        <input type="range" name="poll_parked" min="15" max="300" step="15"
+               value="{{ settings.get('poll_parked', '30') }}"
+               oninput="document.getElementById('pp-val').textContent=this.value"
+               class="w-full accent-brand cursor-pointer">
+        <div class="flex justify-between text-[10px] text-slate-600 mt-1"><span>15s</span><span>5 min</span></div>
+      </div>
+      <div>
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-sm text-white">{{ t('poll_driving_label') }}</span>
+          <span class="font-bold text-brand"><span id="pd-val">{{ settings.get('poll_driving', '10') }}</span>s</span>
+        </div>
+        <input type="range" name="poll_driving" min="5" max="60" step="5"
+               value="{{ settings.get('poll_driving', '10') }}"
+               oninput="document.getElementById('pd-val').textContent=this.value"
+               class="w-full accent-brand cursor-pointer">
+        <div class="flex justify-between text-[10px] text-slate-600 mt-1"><span>5s</span><span>60s</span></div>
+      </div>
+      <div id="poll-result" class="text-xs"></div>
+    </form>
+  </div>
+
   <!-- Charge prices -->
   <div class="card">
     <h2 class="font-semibold text-white mb-1">{{ t('charge_prices') }}</h2>

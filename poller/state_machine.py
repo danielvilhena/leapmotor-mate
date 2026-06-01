@@ -46,15 +46,12 @@ class State(Enum):
     OFFLINE       = "offline"
 
 
-POLL_INTERVAL: dict[State, int] = {
-    State.UNKNOWN:       30,
-    State.PARKED_SLEEP:  300,   # 5 min — catch charge/plug start reasonably fast
-    State.PARKED_ACTIVE: 60,
-    State.PARKED_ALERT:  15,
-    State.DRIVING:       10,
-    State.CHARGING:      60,
-    State.OFFLINE:       900,
-}
+# Default poll cadence (seconds). Polling the Leapmotor cloud does NOT wake/drain the
+# car (it reads the last cloud-reported state), so a steady ~30s parked cadence is safe
+# and keeps Mate independent (no HA/boost needed to catch a trip start). User-tunable.
+DEFAULT_POLL_PARKED  = 30
+DEFAULT_POLL_DRIVING = 10
+OFFLINE_INTERVAL     = 900   # back off when the API is unreachable
 
 _PARKED_STATES = {State.PARKED_SLEEP, State.PARKED_ACTIVE, State.PARKED_ALERT}
 
@@ -69,6 +66,8 @@ class StateEvent:
 @dataclass
 class StateMachine:
     state: State = State.UNKNOWN
+    poll_parked: int           = DEFAULT_POLL_PARKED    # tunable from Settings
+    poll_driving: int          = DEFAULT_POLL_DRIVING
     _prev_fp: Optional[tuple]  = field(default=None,  repr=False)
     _last_change_ts: float     = field(default=0.0,   repr=False)
     _alert_start_ts: float     = field(default=0.0,   repr=False)
@@ -169,13 +168,19 @@ class StateMachine:
 
     def _go(self, new_state: State, data) -> StateEvent:
         event = StateEvent(from_state=self.state, to_state=new_state, data=data)
+        self.state = new_state
         log.info(
             "State: %-14s → %-14s  (poll: %ds)",
-            self.state.value, new_state.value, POLL_INTERVAL[new_state],
+            event.from_state.value, new_state.value, self.poll_interval,
         )
-        self.state = new_state
         return event
 
     @property
     def poll_interval(self) -> int:
-        return POLL_INTERVAL[self.state]
+        if self.state in (State.DRIVING, State.PARKED_ALERT):
+            return self.poll_driving        # active / drive imminent → fast
+        if self.state == State.OFFLINE:
+            return OFFLINE_INTERVAL
+        if self.state == State.UNKNOWN:
+            return min(self.poll_parked, 30)
+        return self.poll_parked             # PARKED_SLEEP/ACTIVE, CHARGING
