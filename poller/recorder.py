@@ -40,7 +40,7 @@ class Recorder:
         instead of closing it — this avoids fragmenting one physical charge/trip into
         multiple DB records. If it's no longer ongoing, close it (crash recovery)."""
         is_charging = data.charging_status > 0 or data.plug_connected
-        is_driving  = data.vehicle_state == "driving" or data.speed_kmh > 1
+        is_driving  = data.gear in ("D", "R", "N") or data.speed_kmh > 1
 
         open_charge = self._db.get_open_charge(self._vehicle_id)
         if open_charge:
@@ -90,6 +90,17 @@ class Recorder:
                 self._max_charge_kw = data.charge_power_kw
                 self._db.update_charge_max_power(self._active_charge_id, self._max_charge_kw)
 
+    # HA's leapmotor_trip ignores movements shorter than 0.5 km ("spostamento breve
+    # ignorato"). Match it: finalize the trip, then drop it if it was a short hop.
+    _MIN_TRIP_KM = 0.5
+
+    def _finalize_trip(self, data: VehicleData) -> None:
+        distance_km = self._db.finalize_trip(self._active_trip_id, data, self._regen_kwh)
+        if distance_km is not None and distance_km < self._MIN_TRIP_KM:
+            self._db.delete_trip(self._active_trip_id)
+            log.info("Trip #%d discarded — short hop %.2f km (< %.1f km)",
+                     self._active_trip_id, distance_km, self._MIN_TRIP_KM)
+
     def mark_offline(self) -> None:
         events = self._sm.mark_offline()
         for e in events:
@@ -109,14 +120,14 @@ class Recorder:
 
         elif frm == State.DRIVING and to in _PARKED_STATES:
             if self._active_trip_id and data:
-                self._db.finalize_trip(self._active_trip_id, data, self._regen_kwh)
+                self._finalize_trip(data)
             self._active_trip_id = None
             self._regen_kwh = 0.0
 
         elif to == State.CHARGING:
             if self._active_trip_id and data:
                 # Plug inserted while driving → trip closed immediately, no 20s wait
-                self._db.finalize_trip(self._active_trip_id, data, self._regen_kwh)
+                self._finalize_trip(data)
                 self._active_trip_id = None
                 self._regen_kwh = 0.0
             self._max_charge_kw = 0.0

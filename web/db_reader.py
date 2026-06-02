@@ -6,6 +6,36 @@ from pathlib import Path
 from typing import Optional
 import os
 
+# Timestamps are stored in UTC (poller uses datetime.now(timezone.utc)). The UI
+# must show local time. TZ comes from the environment (Home Assistant passes the
+# system timezone to add-ons automatically); standalone Docker sets it in compose.
+try:
+    from zoneinfo import ZoneInfo
+    _LOCAL_TZ = ZoneInfo(os.environ.get("TZ") or "Europe/Rome")
+except Exception:
+    _LOCAL_TZ = timezone.utc
+
+
+def _local_dt(s) -> Optional[datetime]:
+    """Parse a stored UTC timestamp and return it as an aware datetime in the
+    local timezone. Returns None if the value is missing/unparseable."""
+    if not s:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(s).replace(" ", "T").rstrip("Z"))
+    except Exception:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(_LOCAL_TZ)
+
+
+def _local_iso(s):
+    """Convert a stored UTC timestamp string to a local-time ISO string, so that
+    template slices like started_at[11:16] display local time. Falls back to input."""
+    dt = _local_dt(s)
+    return dt.isoformat() if dt else s
+
 # In-memory optimistic overlay: after a command, keep the expected state for
 # _OPT_TTL seconds so the poller can't overwrite it before the UI refreshes.
 _opt_overrides: dict = {}
@@ -347,10 +377,12 @@ def get_trips_grouped() -> list[dict]:
     for t in trips:
         if not t.get("started_at"):
             continue
-        try:
-            dt = datetime.fromisoformat(t["started_at"].replace(" ", "T").rstrip("Z"))
-        except Exception:
+        dt = _local_dt(t["started_at"])
+        if dt is None:
             continue
+        # Rewrite to local-time ISO so the template (started_at[11:16]) shows local
+        t["started_at"] = dt.isoformat()
+        t["ended_at"] = _local_iso(t.get("ended_at"))
 
         yr  = dt.strftime("%Y")
         mo  = dt.strftime("%B %Y")
@@ -387,8 +419,11 @@ def get_trip_detail(trip_id: int) -> Optional[dict]:
         "SELECT latitude, longitude, speed_kmh, soc FROM trip_positions WHERE trip_id = ? ORDER BY id",
         (trip_id,),
     ).fetchall()
+    trip_d = dict(trip)
+    trip_d["started_at"] = _local_iso(trip_d.get("started_at"))
+    trip_d["ended_at"] = _local_iso(trip_d.get("ended_at"))
     return {
-        **dict(trip),
+        **trip_d,
         "positions": [dict(p) for p in positions],
     }
 
@@ -399,7 +434,13 @@ def get_charges(limit: int = 50) -> list[dict]:
         "SELECT * FROM charges WHERE ended_at IS NOT NULL ORDER BY started_at DESC LIMIT ?",
         (limit,),
     ).fetchall()
-    return [dict(r) for r in rows]
+    out = []
+    for r in rows:
+        d = dict(r)
+        d["started_at"] = _local_iso(d.get("started_at"))
+        d["ended_at"] = _local_iso(d.get("ended_at"))
+        out.append(d)
+    return out
 
 
 def get_stats_grouped() -> list[dict]:
@@ -484,9 +525,8 @@ def get_stats_grouped() -> list[dict]:
         t = dict(r)
         if not t.get("started_at"):
             continue
-        try:
-            dt = datetime.fromisoformat(t["started_at"].replace(" ", "T").rstrip("Z"))
-        except Exception:
+        dt = _local_dt(t["started_at"])
+        if dt is None:
             continue
         yr, mo_key = dt.strftime("%Y"), dt.strftime("%Y-%m")
         t["label"] = dt.strftime("%d/%m %H:%M")
@@ -531,10 +571,11 @@ def get_charges_grouped() -> list[dict]:
     for c in charges:
         if not c.get("started_at"):
             continue
-        try:
-            dt = datetime.fromisoformat(c["started_at"].replace(" ", "T").rstrip("Z"))
-        except Exception:
+        dt = _local_dt(c["started_at"])
+        if dt is None:
             continue
+        c["started_at"] = dt.isoformat()
+        c["ended_at"] = _local_iso(c.get("ended_at"))
 
         yr  = dt.strftime("%Y")
         mo  = dt.strftime("%B %Y")

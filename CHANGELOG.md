@@ -3,6 +3,17 @@
 All notable changes to LeapMotor Mate are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.0.4] — 2026-06-02
+
+### Fixed
+- **Local time in the UI**: trip/charge times were shown in UTC; they are now
+  converted to the local timezone (`TZ`, which Home Assistant passes to add-ons
+  automatically; standalone Docker sets `TZ` in compose). Added `tzdata`.
+- **Trip fragmentation**: a drive was split into many records because a trip ended
+  after just ~20s of zero speed. Trip detection is now gear-based and matches the
+  HA reference: a trip ends only when gear **P** is held ~1 min (red lights / brief
+  stops in gear D no longer split it), and movements **< 0.5 km** are discarded.
+
 ## [1.0.3] — 2026-06-02
 
 ### Fixed

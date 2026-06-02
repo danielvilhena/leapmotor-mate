@@ -16,7 +16,7 @@ Transitions (all independent of HA and phone):
   PARKED_ACTIVE       → PARKED_SLEEP   no change for SLEEP_AFTER_S (30 min)
   PARKED_ALERT        → DRIVING        speed > 0 or gear D
   PARKED_ALERT        → PARKED_ACTIVE  no drive within ALERT_EXPIRES_S (5 min)
-  DRIVING             → PARKED_ACTIVE  gear P confirmed twice (2 × 10s)
+  DRIVING             → PARKED_ACTIVE  gear P held ~1 min (6 × 10s)
   ANY_PARKED          → CHARGING       charging_status > 0
   CHARGING            → PARKED_ACTIVE  charging_status == 0
   ANY                 → OFFLINE        3 consecutive API errors
@@ -33,7 +33,11 @@ log = logging.getLogger(__name__)
 
 SLEEP_AFTER_S   = 1800   # 30 min without changes → PARKED_SLEEP
 ALERT_EXPIRES_S = 300    # 5 min in PARKED_ALERT without driving → back to ACTIVE
-PARKED_CONFIRM  = 2      # consecutive parked readings to end a trip
+# End a trip only after the car has been in gear P for ~1 min — matches the HA
+# leapmotor_trip automation (gear → P, for: minutes: 1). At the 10s driving poll
+# that's 6 readings. Gear-based (not speed) so red lights / brief stops, where the
+# gear stays D, never split one drive into many trips.
+PARKED_CONFIRM  = 6      # consecutive gear-P readings to end a trip (~1 min @ 10s)
 
 
 class State(Enum):
@@ -79,7 +83,10 @@ class StateMachine:
         events: list[StateEvent] = []
         now = time.monotonic()
 
-        is_driving  = data.vehicle_state == "driving" or data.speed_kmh > 1
+        # Trip is "active" while the car is in a driving gear (D/R/N) or moving.
+        # Gear-based like HA: at a red light the gear stays D, so the trip is NOT
+        # split — only a sustained gear P ends it (see DRIVING branch below).
+        is_driving  = data.gear in ("D", "R", "N") or data.speed_kmh > 1
         # Plug inserted OR charging active = charge session
         # plug_connected alone is enough to close the trip immediately
         is_charging = data.charging_status > 0 or data.plug_connected
@@ -140,7 +147,7 @@ class StateMachine:
             if is_charging:
                 self._parked_count = 0
                 events.append(self._go(State.CHARGING, data))
-            elif not is_driving:
+            elif data.gear == "P":
                 self._parked_count += 1
                 if self._parked_count >= PARKED_CONFIRM:
                     self._parked_count = 0

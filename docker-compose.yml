@@ -11,4 +11,5 @@ services:
       - ./data:/data            # persistent DB only (code is baked into the image)
     environment:
       - DB_PATH=/data/leapmotor_mate.db
+      - TZ=Europe/Rome          # local time for the UI (HA passes this automatically to add-ons)
     restart: unless-stopped

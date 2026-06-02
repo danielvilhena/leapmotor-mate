@@ -316,6 +316,13 @@ class Database:
             trip_id, distance_km, start_soc, data.soc, duration_min,
             efficiency or 0,
         )
+        return distance_km
+
+    def delete_trip(self, trip_id: int) -> None:
+        """Remove a trip and its GPS points (used to drop sub-0.5 km hops)."""
+        self._conn.execute("DELETE FROM trip_positions WHERE trip_id = ?", (trip_id,))
+        self._conn.execute("DELETE FROM trips WHERE id = ?", (trip_id,))
+        self._conn.commit()
 
     # ── Charge ───────────────────────────────────────────────────────────────
 
