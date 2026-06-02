@@ -32,6 +32,10 @@
               class="px-4 py-1.5 rounded-full text-sm font-medium border transition-all cursor-pointer">
         🇮🇹 Italiano
       </button>
+      <button type="button" onclick="setLang('fr')" id="btn-fr"
+              class="px-4 py-1.5 rounded-full text-sm font-medium border transition-all cursor-pointer">
+        🇫🇷 Français
+      </button>
     </div>
     <h1 id="setup-title" class="text-2xl font-bold text-white mb-1">Welcome to LeapMotor Mate</h1>
     <p id="setup-subtitle" class="text-slate-400 text-sm">Configure your vehicle connection to get started</p>
@@ -209,6 +213,8 @@ const strings = {
     certToFile:    "Upload the files instead",
     certBoth:      "Both app.crt and app.key are required.",
     certSaved:     "✓ Certificate saved",
+    certCrtLabel:  "app.crt (certificate)",
+    certKeyLabel:  "app.key (private key)",
   },
   it: {
     title:         "Benvenuto in LeapMotor Mate",
@@ -239,6 +245,40 @@ const strings = {
     certToFile:    "Carica i file invece",
     certBoth:      "Servono entrambi app.crt e app.key.",
     certSaved:     "✓ Certificato salvato",
+    certCrtLabel:  "app.crt (certificato)",
+    certKeyLabel:  "app.key (chiave privata)",
+  },
+  fr: {
+    title:         "Bienvenue sur LeapMotor Mate",
+    subtitle:      "Configurez la connexion à votre véhicule pour commencer",
+    email:         "E-mail du compte Leapmotor",
+    emailPh:       "vous@exemple.com",
+    password:      "Mot de passe",
+    pin:           "Code PIN d'opération",
+    pinPh:         "PIN à 6 chiffres",
+    detectBtn:     "🔍 Détecter ma voiture",
+    detecting:     "⏳ Détection…",
+    detected:      "Voiture détectée",
+    carLine:       (model, vin) => `Leapmotor ${model} · VIN ···${vin.slice(-6)}`,
+    batteryLabel:  "Pack batterie",
+    batteryHint:   "Sélectionnez votre variante de batterie",
+    batteryAutoSet:"Batterie détectée (spéc. UE)",
+    detectFail:    "Impossible de détecter le véhicule",
+    manualEntry:   "Saisir la capacité batterie manuellement (kWh)",
+    manualHint:    "B10 Pro: 56.2 · B10 Pro Max: 67.1 · T03: 37.3 · C10 RWD: 69.9 · C10 AWD: 81.9",
+    submit:        "Connecter et démarrer",
+    required:      "E-mail, mot de passe et PIN sont obligatoires.",
+    noBattery:     "Veuillez d'abord sélectionner une variante de batterie.",
+    certTitle:     "Étape 1 — Certificat de l'app",
+    certDesc:      "Mate a besoin du certificat TLS de l'app Leapmotor (le même pour tous, pas celui de votre compte). Téléchargez les deux fichiers app.crt et app.key depuis :",
+    certBtn:       "Enregistrer le certificat",
+    certSaving:    "⏳ Enregistrement…",
+    certToPaste:   "Coller le texte PEM à la place",
+    certToFile:    "Téléverser les fichiers à la place",
+    certBoth:      "app.crt et app.key sont tous deux requis.",
+    certSaved:     "✓ Certificat enregistré",
+    certCrtLabel:  "app.crt (certificat)",
+    certKeyLabel:  "app.key (clé privée)",
   },
 };
 
@@ -314,11 +354,14 @@ function setLang(lang) {
   document.getElementById('cert-desc').textContent       = s.certDesc;
   document.getElementById('cert-btn-label').textContent  = s.certBtn;
   document.getElementById('cert-toggle-mode').textContent = certPasteMode ? s.certToFile : s.certToPaste;
+  document.getElementById('lbl-crt').textContent          = s.certCrtLabel;
+  document.getElementById('lbl-key').textContent          = s.certKeyLabel;
 
   const active   = 'px-4 py-1.5 rounded-full text-sm font-medium border transition-all cursor-pointer bg-brand/20 border-brand text-brand';
   const inactive = 'px-4 py-1.5 rounded-full text-sm font-medium border transition-all cursor-pointer border-slate-600 text-slate-400 hover:border-slate-400';
   document.getElementById('btn-en').className = lang === 'en' ? active : inactive;
   document.getElementById('btn-it').className = lang === 'it' ? active : inactive;
+  document.getElementById('btn-fr').className = lang === 'fr' ? active : inactive;
 }
 
 // ── Battery selector ──────────────────────────────────────────────────────────
@@ -515,7 +558,8 @@ function toggleVisibility(inputId, btn) {
 }
 
 // ── Init ─────────────────────────────────────────────────────────────────────
-const initLang = navigator.language.startsWith('it') ? 'it' : 'en';
+const initLang = navigator.language.startsWith('it') ? 'it'
+               : navigator.language.startsWith('fr') ? 'fr' : 'en';
 setLang('{{ prefill.language if prefill else "" }}' || initLang);
 
 // Show the cert step first unless the certificate is already present.

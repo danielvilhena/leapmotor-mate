@@ -453,7 +453,8 @@ async def run_command(name: str, background_tasks: BackgroundTasks):
     remaining = _CMD_COOLDOWN_S - (time.time() - _last_command_at)
     if remaining > 0:
         wait = int(remaining) + 1
-        label = "Attendi" if db_reader.get_language() == "it" else "Wait"
+        _wait_labels = {"it": "Attendi", "fr": "Patientez"}
+        label = _wait_labels.get(db_reader.get_language(), "Wait")
         return HTMLResponse(f'<span style="color:#fbbf24">⏳ {label} {wait}s</span>')
     _last_command_at = time.time()
 
@@ -596,9 +597,12 @@ async def setup_submit(request: Request):
 
     if not user or not pwd or not pin:
         t = i18n.get_t(lang)
+        _req_errors = {
+            "it": "Email, password e PIN sono obbligatori.",
+            "fr": "E-mail, mot de passe et PIN sont obligatoires.",
+        }
         return templates.TemplateResponse(request, "setup.html", {
-            "error": "Email, password and PIN are required." if lang == "en"
-                     else "Email, password e PIN sono obbligatori.",
+            "error": _req_errors.get(lang, "Email, password and PIN are required."),
             "prefill": dict(form),
         }, status_code=400)
 
@@ -611,7 +615,7 @@ async def setup_submit(request: Request):
     db_reader.set_setting("leapmotor_pass", pwd)
     db_reader.set_setting("leapmotor_pin", pin)
     db_reader.set_setting("battery_capacity_kwh", str(battery_kwh))
-    db_reader.set_setting("language", lang if lang in ("en", "it") else "en")
+    db_reader.set_setting("language", lang if lang in ("en", "it", "fr") else "en")
 
     # Pre-populate vehicles table so the UI shows model info before the first poller run
     if vin and car_type:

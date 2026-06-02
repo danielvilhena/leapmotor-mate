@@ -3,6 +3,19 @@
 All notable changes to LeapMotor Mate are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.0.6] — 2026-06-02
+
+### Added
+- **French language** (🇫🇷). The setup wizard now offers three languages — English,
+  Italian and French — with three flag buttons and auto-detection of French
+  browsers. The whole app is translated: overview, trips, charges, commands,
+  statistics, the vehicle page, and both wizard steps (certificate + account login).
+
+### Fixed
+- Two certificate-step labels (`app.crt`, `app.key`) were hard-coded in English
+  regardless of the chosen language; they are now translated (this also fixes
+  Italian, where they were previously shown in English too).
+
 ## [1.0.5] — 2026-06-02
 
 ### Fixed
