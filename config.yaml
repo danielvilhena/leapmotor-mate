@@ -1,5 +1,5 @@
 name: "LeapMotor Mate"
-description: "Trip tracking and remote control for Leapmotor vehicles (B10, C10, T03)"
+description: "Trip tracking, charge logging, navigation and remote control for Leapmotor vehicles (B10, C10, T03)"
 version: "1.5.0"
 slug: "leapmotor_mate"
 url: "https://github.com/ProtossBlaster/leapmotor-mate"
