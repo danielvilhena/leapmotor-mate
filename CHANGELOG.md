@@ -3,6 +3,13 @@
 All notable changes to LeapMotor Mate are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.3.1] — 2026-06-04
+
+### Changed
+- Lower the charge-detection current threshold from 3.0 A to 2.0 A so low-power
+  home charges (and the tail end of a charge) are still detected as charging. The
+  regen detection threshold is separate and unaffected.
+
 ## [1.3.0] — 2026-06-04
 
 ### Added
