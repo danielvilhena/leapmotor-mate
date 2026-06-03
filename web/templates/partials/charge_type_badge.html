@@ -1,18 +1,31 @@
-{% set ct = charge_types.get(charge.location_type, charge_types.HOME) %}
+{% set ct = charge_types.get(charge.location_type) %}
 <div id="charge-type-{{ charge.id }}" class="charge-type-selector">
   <!-- Current type badge + dropdown -->
   <div style="position:relative;display:inline-block">
+    {% if ct %}
     <button onclick="document.getElementById('ct-menu-{{ charge.id }}').classList.toggle('hidden')"
             style="background:{{ ct.color }}22;color:{{ ct.color }};border:1px solid {{ ct.color }}55;
                    padding:4px 10px;border-radius:20px;font-size:12px;font-weight:700;cursor:pointer;
                    display:flex;align-items:center;gap:5px">
       {{ ct.icon }} {{ ct.label }} <span style="font-size:9px;opacity:.7">▼</span>
     </button>
+    {% else %}
+    <button onclick="document.getElementById('ct-menu-{{ charge.id }}').classList.toggle('hidden')"
+            style="background:#f59e0b22;color:#f59e0b;border:1px solid #f59e0b88;
+                   padding:4px 10px;border-radius:20px;font-size:12px;font-weight:700;cursor:pointer;
+                   display:flex;align-items:center;gap:5px">
+      ❓ {{ t('charge_unconfirmed') }} <span style="font-size:9px;opacity:.7">▼</span>
+    </button>
+    {% endif %}
 
     <div id="ct-menu-{{ charge.id }}" class="hidden"
          style="position:absolute;right:0;top:calc(100% + 4px);z-index:50;
                 background:#1e293b;border:1px solid #334155;border-radius:10px;
                 padding:4px;min-width:150px;box-shadow:0 8px 24px rgba(0,0,0,.5)">
+      {% if not ct %}
+      <div style="padding:5px 10px 7px;margin-bottom:3px;font-size:11px;font-weight:700;
+                  color:#fbbf24;border-bottom:1px solid #334155">{{ t('charge_confirm_q') }}</div>
+      {% endif %}
       {% for key, info in charge_types.items() %}
       <form hx-post="api/charges/{{ charge.id }}/type"
             hx-target="#charge-type-{{ charge.id }}"

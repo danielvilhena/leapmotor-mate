@@ -541,10 +541,14 @@ def latest_charge_id_with_power() -> int | None:
 
 
 def charges_with_power(limit: int = 30) -> list[dict]:
-    """Recent charges that still have a power curve — raw {id, started_at, energy_added_kwh}."""
+    """Recent HOME charges (= the wallbox) that still have a power curve — raw
+    {id, started_at, energy_added_kwh}. Only HOME charges are relevant to the
+    wallbox comparison: public/away charges (and unconfirmed NULL ones) are excluded,
+    which also avoids attributing another car's wallbox session to this car."""
     db = _get()
     rows = db.execute(
-        "SELECT c.id, c.started_at, c.energy_added_kwh FROM charges c WHERE EXISTS ("
+        "SELECT c.id, c.started_at, c.energy_added_kwh FROM charges c "
+        "WHERE c.location_type = 'HOME' AND EXISTS ("
         "  SELECT 1 FROM positions p WHERE p.charging = 1"
         "  AND p.recorded_at >= c.started_at"
         "  AND (c.ended_at IS NULL OR p.recorded_at <= c.ended_at)"
@@ -552,6 +556,20 @@ def charges_with_power(limit: int = 30) -> list[dict]:
         (limit,),
     ).fetchall()
     return [dict(r) for r in rows]
+
+
+def is_home_charge(charge_id: int) -> bool:
+    """True only when the charge is tagged HOME (= the wallbox)."""
+    db = _get()
+    row = db.execute("SELECT location_type FROM charges WHERE id = ?", (charge_id,)).fetchone()
+    return bool(row) and row["location_type"] == "HOME"
+
+
+def unconfirmed_charges_count() -> int:
+    """How many charges still have no type set (location_type NULL) → need confirming."""
+    db = _get()
+    row = db.execute("SELECT COUNT(*) n FROM charges WHERE location_type IS NULL").fetchone()
+    return row["n"] if row else 0
 
 
 def latest_home_charge_cost():

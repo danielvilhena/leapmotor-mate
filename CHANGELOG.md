@@ -3,6 +3,24 @@
 All notable changes to LeapMotor Mate are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.2.0] — 2026-06-04
+
+### Added
+- **Charge type confirmation.** A new charge is no longer silently assumed to be
+  "Home": until you set its type it shows a "To confirm" badge (with a "What type
+  of charge?" prompt), and the Charges page shows how many are still pending. A
+  charge enters the wallbox comparison only once you confirm it as Home.
+
+### Changed
+- **The wallbox comparison is now scoped to Home charges**, so it stays correct
+  with multiple EVs sharing one wallbox and with public/away charging. History,
+  totals and the per‑charge overlay only consider Home charges (a wallbox charges
+  one car at a time, so a Home session means this car was on the wallbox);
+  public/away and unconfirmed charges are excluded.
+- The wallbox **live panel** now shows session metrics only while the car is
+  plugged in — otherwise the live reading could be another vehicle on the same
+  wallbox. Session cost and max available power are always shown.
+
 ## [1.1.1] — 2026-06-04
 
 ### Fixed

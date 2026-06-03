@@ -16,7 +16,7 @@ import command_client
 import i18n
 import ha_client
 
-MATE_VERSION = "1.1.1"  # bump together with the git tag + add-on config.yaml at release
+MATE_VERSION = "1.2.0"  # bump together with the git tag + add-on config.yaml at release
 
 app = FastAPI(title="LeapMotor Mate")
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
@@ -175,6 +175,7 @@ async def charges_page(request: Request, highlight: int = 0):
         stats=stats, total=total, highlight=highlight,
         charge_types=db_reader.CHARGE_TYPES, prices=prices,
         status=status, ac_dc=db_reader.get_ac_dc_stats(),
+        unconfirmed=db_reader.unconfirmed_charges_count(),
     ))
 
 
@@ -365,7 +366,12 @@ async def save_wallbox_entities(request: Request):
 async def wallbox_live(request: Request):
     wb = ha_client.get_live()
     wb["cost"] = db_reader.latest_home_charge_cost()  # cost comes from Mate's charges, not HA
-    return templates.TemplateResponse(request, "partials/wallbox_live.html", _ctx(wb=wb))
+    status = db_reader.get_latest_status()
+    # Session metrics only make sense when THIS car is on the wallbox — otherwise the
+    # live reading could be another vehicle charging on the same wallbox.
+    b10_plugged = bool(status and status.get("plug_connected"))
+    return templates.TemplateResponse(request, "partials/wallbox_live.html", _ctx(
+        wb=wb, b10_plugged=b10_plugged))
 
 
 def _integrate_kwh(points: list) -> float:
@@ -451,7 +457,7 @@ async def wallbox_compare_chart(request: Request):
     curve = db_reader.get_charge_power_curve(cid)
     return templates.TemplateResponse(request, "partials/charge_power_chart.html", _ctx(
         cid=cid, labels=curve["labels"], power=curve["power"], soc=curve["soc"],
-        wb_power=_wallbox_overlay(curve),
+        wb_power=_wallbox_overlay(curve, cid),
     ))
 
 
@@ -511,13 +517,16 @@ async def set_charge_type(request: Request, charge_id: int):
     })
 
 
-def _wallbox_overlay(curve: dict) -> list | None:
+def _wallbox_overlay(curve: dict, charge_id: int) -> list | None:
     """Wallbox power (from HA history) resampled onto the car curve's timestamps,
-    so it overlays the car's DC power on the same axis. None when unavailable."""
+    so it overlays the car's DC power on the same axis. None when unavailable.
+    Only HOME charges get the overlay — on a public/away charge the home wallbox
+    is irrelevant (and could even be charging another car)."""
     times = curve.get("times") or []
     mapping = ha_client.get_mapping()
     wallbox_on = db_reader.get_setting("wallbox_enabled", "0") == "1"
-    if not wallbox_on or not times or not ha_client.is_configured() or not mapping.get("power"):
+    if (not wallbox_on or not times or not ha_client.is_configured()
+            or not mapping.get("power") or not db_reader.is_home_charge(charge_id)):
         return None
     hist = ha_client.get_history(mapping["power"], times[0], times[-1])
     if not hist:
@@ -543,7 +552,7 @@ async def charge_power_chart(request: Request, charge_id: int):
     return templates.TemplateResponse(request, "partials/charge_power_chart.html", _ctx(
         cid=charge_id,
         labels=curve["labels"], power=curve["power"], soc=curve["soc"],
-        wb_power=_wallbox_overlay(curve),
+        wb_power=_wallbox_overlay(curve, charge_id),
     ))
 
 

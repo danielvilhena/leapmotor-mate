@@ -7,6 +7,14 @@
   <p class="text-slate-400 text-sm mt-1">{{ total }} {{ t('sessions_recorded') }}</p>
 </div>
 
+{% if unconfirmed %}
+<div class="mb-6 flex items-center gap-2 rounded-xl px-4 py-3 text-sm"
+     style="background:#f59e0b14;border:1px solid #f59e0b44;color:#fbbf24">
+  <span>❓</span>
+  <span><b>{{ unconfirmed }}</b> {{ t('charges_to_confirm') }}</span>
+</div>
+{% endif %}
+
 <!-- Charging status + limit panel -->
 <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
 
@@ -232,19 +240,32 @@ fetch('api/charge-plan').then(r => r.json()).then(d => {
                   </div>
                 </div>
                 <!-- Charge type selector (HTMX) -->
-                {% set ct = charge_types.get(c.location_type or 'HOME', charge_types['HOME']) %}
+                {% set ct = charge_types.get(c.location_type) %}
                 <div id="charge-type-{{ c.id }}" class="charge-type-selector">
                   <div style="position:relative;display:inline-block">
+                    {% if ct %}
                     <button onclick="document.getElementById('ct-menu-{{ c.id }}').classList.toggle('hidden')"
                             style="background:{{ ct.color }}22;color:{{ ct.color }};border:1px solid {{ ct.color }}55;
                                    padding:4px 10px;border-radius:20px;font-size:12px;font-weight:700;cursor:pointer;
                                    display:flex;align-items:center;gap:5px">
                       {{ ct.icon }} {{ ct.label }} <span style="font-size:9px;opacity:.7">▼</span>
                     </button>
+                    {% else %}
+                    <button onclick="document.getElementById('ct-menu-{{ c.id }}').classList.toggle('hidden')"
+                            style="background:#f59e0b22;color:#f59e0b;border:1px solid #f59e0b88;
+                                   padding:4px 10px;border-radius:20px;font-size:12px;font-weight:700;cursor:pointer;
+                                   display:flex;align-items:center;gap:5px">
+                      ❓ {{ t('charge_unconfirmed') }} <span style="font-size:9px;opacity:.7">▼</span>
+                    </button>
+                    {% endif %}
                     <div id="ct-menu-{{ c.id }}" class="hidden"
                          style="position:absolute;right:0;top:calc(100% + 4px);z-index:50;
                                 background:#1e293b;border:1px solid #334155;border-radius:10px;
                                 padding:4px;min-width:155px;box-shadow:0 8px 24px rgba(0,0,0,.5)">
+                      {% if not ct %}
+                      <div style="padding:5px 10px 7px;margin-bottom:3px;font-size:11px;font-weight:700;
+                                  color:#fbbf24;border-bottom:1px solid #334155">{{ t('charge_confirm_q') }}</div>
+                      {% endif %}
                       {% for key, info in charge_types.items() %}
                       <form hx-post="api/charges/{{ c.id }}/type"
                             hx-target="#charge-type-{{ c.id }}"
