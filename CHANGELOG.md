@@ -3,6 +3,32 @@
 All notable changes to LeapMotor Mate are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.1.0] — 2026-06-04
+
+### Added
+- **Wallbox integration (Home Assistant)** — optional. Pair a wallbox already in
+  Home Assistant to get a dedicated **Wallbox** page with: a live panel (power,
+  status, session energy, charging speed, max available power) plus the session
+  cost; a control to set the wallbox max charging current; and an **AC‑vs‑DC
+  comparison** per charge session — kWh delivered by the wallbox vs kWh into the
+  battery, with charging efficiency — as a year/month/day history with an
+  expandable power chart. Connects automatically via the Supervisor API when run
+  as an add‑on (any external access mode — HTTP, HTTPS, Nabu Casa), or via an HA
+  URL + a Long‑Lived Access Token when standalone (self‑signed HTTPS is fine).
+  Enable and configure it in **Settings → Wallbox present** (live connection
+  status + an entity picker limited to your wallbox's own sensors).
+
+### Changed
+- **Trips page redesign** — trip rows show a remaining/used SOC bar, a coloured
+  efficiency pill and a route thumbnail; the dashboard gained four summary tiles
+  (total distance, trips, average efficiency, regen). Trip distance now comes from
+  the odometer delta (more accurate than GPS).
+- **Vehicle page** restyled to match the rest of the app (slate cards/tiles).
+- **Settings** reorganised into three columns; the Wallbox card stays minimal when
+  disabled and reveals the HA connection + an expandable sensor list when enabled.
+- Quantities across the UI are shown to at most two decimals, at full precision
+  (no over‑rounding).
+
 ## [1.0.8] — 2026-06-02
 
 ### Added

@@ -16,7 +16,7 @@ import command_client
 import i18n
 import ha_client
 
-MATE_VERSION = "1.0.9"  # bump together with the git tag + add-on config.yaml at release
+MATE_VERSION = "1.1.0"  # bump together with the git tag + add-on config.yaml at release
 
 app = FastAPI(title="LeapMotor Mate")
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
