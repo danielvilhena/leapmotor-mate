@@ -137,6 +137,7 @@ Publish the car to Home Assistant as **native entities** (in parallel to the Mat
 
 ## Credits
 
+- [`kerniger/leapmotor-ha`](https://github.com/kerniger/leapmotor-ha) — original Leapmotor cloud API reverse-engineering / Home Assistant integration.
 - [`markoceri/leapmotor-api`](https://github.com/markoceri/leapmotor-api) — Python cloud client.
 - [`markoceri/leapmotor-certs`](https://github.com/markoceri/leapmotor-certs) — app certificate.
 - Inspired by [TeslaMate](https://github.com/teslamate-org/teslamate) and the Leapmotor Home Assistant integrations.
