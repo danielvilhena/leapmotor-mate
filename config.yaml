@@ -8,6 +8,12 @@ startup: "application"
 boot: "auto"
 homeassistant: "2024.1.0"
 
+# Grants the add-on access to the HA Core REST API via the Supervisor proxy
+# (http://supervisor/core) using SUPERVISOR_TOKEN — needed by the Wallbox feature
+# to read entities/history and set the charging current. Works regardless of how
+# HA is exposed externally (HTTP, HTTPS, Nabu Casa).
+homeassistant_api: true
+
 arch:
   - aarch64
   - amd64
