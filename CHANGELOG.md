@@ -3,6 +3,19 @@
 All notable changes to LeapMotor Mate are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.3.0] — 2026-06-04
+
+### Added
+- **ABRP (A Better Route Planner) live telemetry** — optional. Enable it and paste
+  your personal ABRP token in Settings, and the car's live data (SOC, position,
+  speed, power, temperatures…) is forwarded to ABRP for live route planning. Off
+  by default; nothing is sent without a token.
+- **MQTT → Home Assistant bridge** — optional. Configure a broker in Settings and
+  the car is published to Home Assistant via MQTT Discovery as native entities:
+  sensors (SOC, range, individual tyres, temperatures, charge…), binary sensors
+  (doors/windows/lock/charging), a GPS tracker, command buttons (lock/unlock,
+  trunk, find car) and a climate switch. TLS supported. Off by default.
+
 ## [1.2.0] — 2026-06-04
 
 ### Added
