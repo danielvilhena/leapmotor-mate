@@ -24,10 +24,12 @@ Supported models: **B10 · C10 · T03** (European spec).
 - **Trips** — automatic trip detection with route map, distance, energy, efficiency and regen.
 - **Charges** — charge sessions with AC/DC detection, energy added, power and a distribution chart.
 - **Wallbox (optional)** — pair a wallbox already in Home Assistant to see live charging power/status, set the max charging current, and compare **AC delivered by the wallbox** vs **DC into the battery** per session, with charging efficiency.
+- **ABRP (optional)** — forward live telemetry to **A Better Route Planner** for live route planning (enable it with your ABRP token).
+- **MQTT → Home Assistant (optional)** — publish the car to Home Assistant via **MQTT Discovery** as native entities (sensors, binary sensors, GPS tracker) plus command buttons.
 - **Statistics** — driving/AC/other energy split and a 6‑week consumption trend (from the Leapmotor cloud).
 - **Remote control** — lock, windows, trunk, panoramic roof, climate, find car, battery preheat.
 - **Independent** — polls the Leapmotor cloud directly (configurable 10–30 s). No dependency on the phone app or Home Assistant; polling the cloud does **not** wake or drain the car.
-- **Bilingual UI** — English / Italiano.
+- **Multilingual UI** — English · Italiano · Français.
 
 ## How it works
 
@@ -117,6 +119,14 @@ What you get on the new **Wallbox** page:
 - a **max‑current control** to set the wallbox charging current — note your own HA load‑balancing automations may override it;
 - an **AC‑vs‑DC comparison** per charge session (kWh delivered vs into the battery + efficiency), laid out as a year/month/day history; expand a session for its power chart. The wallbox curve uses Home Assistant's history (kept ~10 days), so the comparison appears for recent sessions.
 
+### ABRP (A Better Route Planner)
+
+Forward the car's live data to **A Better Route Planner** for live route planning. In **Settings → ABRP**, enable it and paste your personal ABRP token (in the ABRP app: *Settings → Car → Live Data*, "Generic"). It's off until you enable it, and nothing is sent without a token.
+
+### MQTT → Home Assistant
+
+Publish the car to Home Assistant as **native entities** (in parallel to the Mate UI), via MQTT Discovery. In **Settings → MQTT**, enable it and enter your broker (host, port, username/password; TLS optional). Home Assistant then auto‑creates a *Leapmotor Mate* device with sensors (SOC, range, individual tyres, temperatures, charge…), binary sensors (doors/windows/lock/charging), a GPS tracker, command buttons (lock/unlock, trunk, find car) and a climate switch. Works with any MQTT broker (e.g. the Mosquitto add‑on).
+
 ---
 
 ## Notes & disclaimer
@@ -160,10 +170,12 @@ Modelli supportati: **B10 · C10 · T03** (spec. europea).
 - **Viaggi** — rilevamento automatico con mappa del percorso, distanza, energia, efficienza e regen.
 - **Ricariche** — sessioni con rilevamento AC/DC, energia aggiunta, potenza e grafico di distribuzione.
 - **Wallbox (opzionale)** — abbina una wallbox già presente in Home Assistant per vedere potenza/stato di carica live, impostare la corrente max e confrontare l'**AC erogato dalla wallbox** con il **DC entrato in batteria** per sessione, col rendimento di carica.
+- **ABRP (opzionale)** — invia la telemetria live ad **A Better Route Planner** per la pianificazione dei percorsi (attivala col tuo token ABRP).
+- **MQTT → Home Assistant (opzionale)** — pubblica l'auto a Home Assistant via **MQTT Discovery** come entità native (sensori, binary sensor, tracker GPS) più pulsanti comando.
 - **Statistiche** — ripartizione energia guida/clima/altro e trend consumo a 6 settimane (dal cloud Leapmotor).
 - **Controllo remoto** — blocco, finestrini, bagagliaio, tetto panoramico, clima, trova auto, preriscaldo batteria.
 - **Indipendente** — interroga direttamente il cloud Leapmotor (configurabile 10–30 s). Nessuna dipendenza dall'app o da Home Assistant; interrogare il cloud **non** sveglia né scarica l'auto.
-- **UI bilingue** — Italiano / English.
+- **UI multilingua** — Italiano · English · Français.
 
 ## Come funziona
 
@@ -246,6 +258,14 @@ Cosa ottieni nella nuova pagina **Wallbox**:
 - un **pannello live** (potenza, stato, energia sessione, velocità di carica, potenza max disponibile) più il costo sessione (riusato dalle tue ricariche home);
 - un **controllo della corrente max** per impostare la corrente di carica della wallbox — nota che le tue automazioni HA di bilanciamento del carico potrebbero sovrascriverlo;
 - un **confronto AC‑vs‑DC** per sessione (kWh erogati vs entrati in batteria + rendimento), come storico anno/mese/giorno; espandi una sessione per il grafico di potenza. La curva wallbox usa lo storico di Home Assistant (conservato ~10 giorni), quindi il confronto compare per le sessioni recenti.
+
+### ABRP (A Better Route Planner)
+
+Invia i dati live dell'auto ad **A Better Route Planner** per la pianificazione dei percorsi. In **Impostazioni → ABRP**, attivala e incolla il tuo token ABRP personale (nell'app ABRP: *Impostazioni → Auto → Dati live*, "Generic"). È disattivata finché non la abiliti, e non invia nulla senza token.
+
+### MQTT → Home Assistant
+
+Pubblica l'auto a Home Assistant come **entità native** (in parallelo all'interfaccia di Mate), via MQTT Discovery. In **Impostazioni → MQTT**, attivala e inserisci il tuo broker (host, porta, utente/password; TLS opzionale). Home Assistant crea automaticamente un dispositivo *Leapmotor Mate* con sensori (SOC, autonomia, gomme singole, temperature, carica…), binary sensor (porte/finestrini/serratura/ricarica), un tracker GPS, pulsanti comando (lock/unlock, baule, trova auto) e uno switch clima. Funziona con qualsiasi broker MQTT (es. l'add‑on Mosquitto).
 
 ## Note e disclaimer
 
