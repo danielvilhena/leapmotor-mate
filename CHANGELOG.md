@@ -3,6 +3,16 @@
 All notable changes to LeapMotor Mate are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.1.1] — 2026-06-04
+
+### Fixed
+- **Wallbox in add‑on mode** — the add‑on now correctly detects the Home Assistant
+  Supervisor token. On the s6‑overlay base images the Supervisor‑provided
+  environment (including `SUPERVISOR_TOKEN`) isn't passed to the service process,
+  so the add‑on fell back to the standalone URL+token form and showed "not
+  connected". `run.sh` now loads it from the s6 container environment, and logs
+  whether the HA API is available at startup.
+
 ## [1.1.0] — 2026-06-04
 
 ### Added

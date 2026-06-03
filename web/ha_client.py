@@ -33,7 +33,7 @@ _WB_DEVICE_CLASSES = ("power", "energy", "current", "voltage")
 
 def _creds() -> tuple[str | None, str | None]:
     """Return (base_url, token). Supervisor token wins when present (add-on)."""
-    sup = os.environ.get("SUPERVISOR_TOKEN")
+    sup = os.environ.get("SUPERVISOR_TOKEN") or os.environ.get("HASSIO_TOKEN")
     if sup:
         return "http://supervisor/core", sup
     base = db_reader.get_setting("ha_url", "").strip().rstrip("/")

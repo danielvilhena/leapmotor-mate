@@ -1,11 +1,22 @@
 #!/bin/bash
 set -e
 
+# Home Assistant base images run on s6-overlay, which keeps the Supervisor-provided
+# environment (including SUPERVISOR_TOKEN) under /run/s6/container_environment
+# instead of in the process env. Load it so the optional Wallbox feature can reach
+# the HA API as an add-on. (No-op when standalone — the directory won't exist.)
+if [ -d /run/s6/container_environment ]; then
+  for _f in /run/s6/container_environment/*; do
+    [ -f "${_f}" ] && export "$(basename "${_f}")=$(cat "${_f}")"
+  done
+fi
+
 export DB_PATH="${DB_PATH:-/data/leapmotor_mate.db}"
 export CERT_DIR="/app/certs"
 
 echo "[LeapMotor Mate] Starting..."
 echo "[LeapMotor Mate] DB: ${DB_PATH}"
+echo "[LeapMotor Mate] Home Assistant API: $([ -n "${SUPERVISOR_TOKEN}" ] && echo "available (add-on mode)" || echo "not available (standalone)")"
 
 # Start poller in background
 PYTHONPATH=/app/poller python3 /app/poller/main.py &
