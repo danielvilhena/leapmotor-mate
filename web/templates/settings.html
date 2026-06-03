@@ -114,26 +114,27 @@
           ] %}
 
           {% for key, icon, label, setting_key, color in price_rows %}
-          <div style="display:flex;align-items:center;gap:12px;background:#0f172a;border-radius:10px;padding:10px 14px">
-            <span style="font-size:18px;width:24px;text-align:center">{{ icon }}</span>
-            <div style="flex:1">
-              <div style="font-size:13px;font-weight:600;color:{{ color }}">{{ label }}</div>
-              <div style="font-size:11px;color:#64748b">
-                {% if key == 'HOME' %}{{ t('home_desc') }}
-                {% elif key == 'AC' %}{{ t('ac_desc') }}
-                {% elif key == 'FAST' %}{{ t('fast_desc') }}
-                {% else %}{{ t('hpc_desc') }}
-                {% endif %}
+          <div class="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 bg-slate-950 rounded-xl p-3 sm:p-4 border border-slate-900">
+            <div class="flex items-center gap-3 flex-1">
+              <span class="text-xl w-8 text-center">{{ icon }}</span>
+              <div>
+                <div class="text-sm font-semibold" style="color:{{ color }}">{{ label }}</div>
+                <div class="text-[11px] text-slate-500">
+                  {% if key == 'HOME' %}{{ t('home_desc') }}
+                  {% elif key == 'AC' %}{{ t('ac_desc') }}
+                  {% elif key == 'FAST' %}{{ t('fast_desc') }}
+                  {% else %}{{ t('hpc_desc') }}
+                  {% endif %}
+                </div>
               </div>
             </div>
-            <div style="display:flex;align-items:center;gap:6px">
-              <span style="color:#64748b;font-size:13px">€</span>
+            <div class="flex items-center gap-2 self-end sm:self-auto">
+              <span class="text-slate-500 text-sm">€</span>
               <input type="number" name="{{ setting_key }}"
                      value="{{ settings.get(setting_key, '0.00') }}"
                      step="0.01" min="0" max="9.99"
-                     style="width:72px;background:#1e293b;border:1px solid #334155;border-radius:8px;
-                            padding:6px 10px;color:white;font-size:14px;font-weight:600;text-align:right">
-              <span style="color:#64748b;font-size:12px">/ kWh</span>
+                     class="w-20 bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-white text-sm font-semibold text-right focus:outline-none focus:border-brand">
+              <span class="text-slate-500 text-xs">/ kWh</span>
             </div>
           </div>
           {% endfor %}

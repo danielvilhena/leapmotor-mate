@@ -70,9 +70,9 @@ fetch('api/charge-plan').then(r => r.json()).then(d => {
 {% if ac_dc and ac_dc.total > 0 %}
 <div class="card mb-6">
   <h2 class="font-semibold text-white mb-3">{{ t('ac_dc_distribution') }}</h2>
-  <div class="flex items-center gap-6">
-    <div id="acdc-chart" style="width:190px;flex-shrink:0"></div>
-    <div class="flex-1 grid grid-cols-2 gap-4">
+  <div class="flex flex-col sm:flex-row items-center gap-6">
+    <div id="acdc-chart" class="w-[190px] flex-shrink-0 mx-auto sm:mx-0"></div>
+    <div class="w-full flex-1 grid grid-cols-1 xs:grid-cols-2 gap-4">
       <div style="background:#0f172a;border:1px solid #1e293b;border-radius:12px;padding:16px">
         <div class="flex items-center gap-2 mb-2">
           <span class="w-3 h-3 rounded-full" style="background:#38bdf8"></span>
@@ -126,7 +126,7 @@ fetch('api/charge-plan').then(r => r.json()).then(d => {
 
 <!-- Summary cards — 5 columns, compact -->
 {% if stats and stats.session_count %}
-<div class="grid grid-cols-3 lg:grid-cols-5 gap-3 mb-8">
+<div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-8">
 
   {% macro scard(label, value, unit, color='text-white') %}
   <div style="background:#1e293b;border:1px solid #334155;border-radius:12px;padding:12px 14px;text-align:center">
@@ -161,11 +161,11 @@ fetch('api/charge-plan').then(r => r.json()).then(d => {
         <span class="group-open:rotate-90 text-slate-400" style="transition:transform .2s;display:inline-block">▶</span>
         <span class="text-white font-bold text-lg">{{ year.label }}</span>
       </div>
-      <div class="flex items-center gap-4 text-sm">
-        <span class="text-slate-500">{{ year.count }} sessions</span>
-        <span class="text-yellow-400 font-semibold">{{ year.kwh }} kWh</span>
+      <div class="flex items-center flex-wrap justify-end gap-x-4 gap-y-1 text-sm">
+        <span class="text-slate-500 whitespace-nowrap">{{ year.count }} sessions</span>
+        <span class="text-yellow-400 font-semibold whitespace-nowrap">{{ year.kwh }} kWh</span>
         {% if year.has_cost %}
-        <span class="text-green-400 font-semibold">€{{ "%.2f"|format(year.cost) }}</span>
+        <span class="text-green-400 font-semibold whitespace-nowrap">€{{ "%.2f"|format(year.cost) }}</span>
         {% endif %}
       </div>
     </summary>
@@ -181,11 +181,11 @@ fetch('api/charge-plan').then(r => r.json()).then(d => {
             <span class="group-open/month:rotate-90 text-slate-500 text-sm" style="transition:transform .2s;display:inline-block">▶</span>
             <span class="text-slate-200 font-semibold">{{ month.label }}</span>
           </div>
-          <div class="flex items-center gap-4 text-xs">
-            <span class="text-slate-500">{{ month.count }} sessions</span>
-            <span class="text-yellow-400 font-medium">{{ month.kwh }} kWh</span>
+          <div class="flex items-center flex-wrap justify-end gap-x-4 gap-y-1 text-xs">
+            <span class="text-slate-500 whitespace-nowrap">{{ month.count }} sessions</span>
+            <span class="text-yellow-400 font-medium whitespace-nowrap">{{ month.kwh }} kWh</span>
             {% if month.has_cost %}
-            <span class="text-green-400 font-medium">€{{ "%.2f"|format(month.cost) }}</span>
+            <span class="text-green-400 font-medium whitespace-nowrap">€{{ "%.2f"|format(month.cost) }}</span>
             {% endif %}
           </div>
         </summary>
@@ -200,12 +200,12 @@ fetch('api/charge-plan').then(r => r.json()).then(d => {
               <div class="flex items-center gap-2">
                 <span class="group-open/day:rotate-90 text-slate-600 text-xs" style="transition:transform .2s;display:inline-block">▶</span>
                 <span class="text-slate-300 text-sm font-medium">{{ day.label }}</span>
-                <span class="text-slate-600 text-xs">— {{ day.count }} session{% if day.count > 1 %}s{% endif %}</span>
+                <span class="text-slate-600 text-xs hidden sm:inline">— {{ day.count }} session{% if day.count > 1 %}s{% endif %}</span>
               </div>
-              <div class="flex items-center gap-3 text-xs">
-                <span class="text-yellow-400 font-medium">{{ day.kwh }} kWh</span>
+              <div class="flex items-center flex-wrap justify-end gap-x-3 gap-y-1 text-xs">
+                <span class="text-yellow-400 font-medium whitespace-nowrap">{{ day.kwh }} kWh</span>
                 {% if day.has_cost %}
-                <span class="text-green-400 font-medium">€{{ "%.2f"|format(day.cost) }}</span>
+                <span class="text-green-400 font-medium whitespace-nowrap">€{{ "%.2f"|format(day.cost) }}</span>
                 {% endif %}
               </div>
             </summary>

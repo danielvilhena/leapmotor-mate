@@ -114,13 +114,12 @@
     </script>
     <!-- Speed bar -->
     <div style="padding:12px 16px 14px; background:#1e293b; border-top:1px solid #334155">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-        <span style="font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:.05em">{{ t('speed_profile') }}</span>
-        <span style="font-size:11px;color:#64748b">
-          <span style="color:#22c55e">■</span> 0-40
-          <span style="color:#fbbf24;margin-left:8px">■</span> 40-80
-          <span style="color:#e63946;margin-left:8px">■</span> 80+
-          <span style="color:#64748b;margin-left:4px">km/h</span>
+      <div class="flex flex-col sm:flex-row justify-between sm:items-center gap-2 mb-2">
+        <span style="font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:.06em">{{ t('speed_profile') }}</span>
+        <span class="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500">
+          <span class="whitespace-nowrap"><span class="text-green-500">■</span> 0-40 km/h</span>
+          <span class="whitespace-nowrap"><span class="text-yellow-400">■</span> 40-80 km/h</span>
+          <span class="whitespace-nowrap"><span class="text-red-500">■</span> 80+ km/h</span>
         </span>
       </div>
       <canvas id="speed-bar" style="width:100%;height:40px;display:block"></canvas>
