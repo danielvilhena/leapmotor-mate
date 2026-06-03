@@ -127,11 +127,6 @@ def is_setup_complete() -> bool:
     return get_setting("setup_complete") == "1"
 
 
-def set_sunshade_state(open: int) -> None:
-    """Persist the sunshade state from the last command (signal 1724 is unreliable for shade)."""
-    set_setting("sunshade_last_state", str(open))
-
-
 def get_language() -> str:
     return get_setting("language", "en")
 
@@ -325,11 +320,6 @@ def get_latest_status() -> Optional[dict]:
     # Apply in-memory optimistic overrides if still within TTL
     if time.time() < _opt_expiry and _opt_overrides:
         d.update(_opt_overrides)
-    # Sunshade: signal 1724 is the panoramic glass (always non-zero on B10), not the shade.
-    # Override with the last command we sent, stored in settings.
-    shade_state = get_setting("sunshade_last_state", "")
-    if shade_state != "" and "sunshade_open" not in _opt_overrides:
-        d["sunshade_open"] = int(shade_state)
     # Charge power: positions stores current/voltage, not a power column. Compute it
     # (|I×V|), only when the charge current is meaningful (>=3A). Signal 49 is NOT a
     # power (it's the left-mirror-heating flag) and must never be used here.

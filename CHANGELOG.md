@@ -3,6 +3,20 @@
 All notable changes to LeapMotor Mate are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.6.3] — 2026-06-04
+
+### Changed
+- **Vehicle page redesigned with Material Design icons.** Doors, trunk, windows,
+  panoramic roof, tyres and temperatures now use clear, car-specific icons instead
+  of emoji (windows even switch between open/closed icons). Self-contained inline
+  SVGs — no external icon font.
+
+### Fixed
+- **Panoramic roof shows its real state.** The Vehicle page now reads the roof
+  position live from the car (signal 1724), consistent with the Commands page,
+  instead of relying on the last command / showing "no data".
+- **Version number is now visible on mobile** (in the top bar), not only on desktop.
+
 ## [1.6.2] — 2026-06-04
 
 ### Fixed

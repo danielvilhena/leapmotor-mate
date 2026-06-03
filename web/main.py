@@ -17,7 +17,7 @@ import i18n
 import ha_client
 import geocode
 
-MATE_VERSION = "1.6.2"  # bump together with the git tag + add-on config.yaml at release
+MATE_VERSION = "1.6.3"  # bump together with the git tag + add-on config.yaml at release
 
 app = FastAPI(title="LeapMotor Mate")
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
@@ -311,11 +311,6 @@ async def vehicle_status_api(request: Request):
     import asyncio
     signals = await asyncio.get_event_loop().run_in_executor(None, command_client.get_fresh_signals)
     vs = _parse_vehicle_status(signals) if signals else None
-    if vs:
-        # Signal 1724 on the B10 is the fixed panoramic glass (always non-zero), not the
-        # shade — use the state tracked from commands instead (None if never set).
-        shade = db_reader.get_setting("sunshade_last_state", "")
-        vs["windows"]["sunshade"] = (shade == "1") if shade != "" else None
     return templates.TemplateResponse(request, "partials/vehicle_status.html", _ctx(vs=vs))
 
 
@@ -896,7 +891,7 @@ _FIELD_CHECK = {
     "is_locked":       lambda sig: int(sig.get("1298") or 0) == 1,
     "trunk_open":      lambda sig: int(sig.get("1281") or 0) != 0,
     "windows_open":    lambda sig: any(int(sig.get(k) or 0) != 0 for k in ("1693","1694","1695","1696")),
-    # sunshade_open intentionally omitted: signal 1724 is panoramic glass (always non-zero on B10)
+    "sunshade_open":   lambda sig: int(sig.get("1724") or 0) != 0,   # 1724 = shade opening % (0 = closed)
     "climate_on":      lambda sig: int(sig.get("1938") or 0) == 1,
     "climate_cooling": lambda sig: int(sig.get("2669") or 0) == 2,
     "climate_heating": lambda sig: int(sig.get("2681") or 0) == 2,
@@ -962,10 +957,6 @@ async def run_command(name: str, background_tasks: BackgroundTasks):
     if ok:
         if overrides:
             db_reader.write_optimistic_status(overrides)
-        if name == "open_sunshade":
-            db_reader.set_sunshade_state(1)
-        elif name == "close_sunshade":
-            db_reader.set_sunshade_state(0)
         # Climate commands take several seconds to reflect in signals → show the
         # spinner and refresh from real signals after a delay (like slow commands).
         slow = name in _SLOW_COMMANDS or field is not None

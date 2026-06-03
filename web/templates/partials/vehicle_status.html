@@ -5,7 +5,7 @@
 {# ── Slate tile (matches the rest of the app): icon + label + value ── #}
 {% macro tile(icon, label, value, value_class='text-white') %}
 <div class="bg-slate-800 rounded-xl p-4 border border-slate-700 flex items-center gap-3">
-  <span class="text-xl flex-shrink-0">{{ icon }}</span>
+  <span class="flex-shrink-0 text-slate-300">{{ icon|safe }}</span>
   <div class="min-w-0">
     <div class="text-[11px] uppercase tracking-wide text-slate-400 leading-tight">{{ label }}</div>
     <div class="text-base font-bold {{ value_class }} leading-tight truncate">{{ value }}</div>
@@ -13,11 +13,31 @@
 </div>
 {% endmacro %}
 
+{# ── Inline MDI icons (Material Design Icons) — offline-safe, no webfont ── #}
+{% macro mdi(path) %}<svg class="w-6 h-6 inline-block align-middle" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="{{ path }}"/></svg>{% endmacro %}
+{% set IC_DOOR  = "M19 14h-3v2h3zm3 7H3V11l8-8h10a1 1 0 0 1 1 1zM11.83 5l-6 6H20V5z" %}
+{% set IC_TRUNK = "m6 11l1-4h10l1 4m.92-5c-.21-.6-.78-1-1.42-1h-11c-.64 0-1.21.4-1.42 1L3 12v8a1 1 0 0 0 1 1h1a1 1 0 0 0 1-1v-2h12v2a1 1 0 0 0 1 1h1a1 1 0 0 0 1-1v-8zM7 16H5v-2h2zm12 0h-2v-2h2zm-5 0h-4v-2h4z" %}
+{% set IC_WIN_OPEN   = "M21 20V2H3v18H1v3h22v-3M19 4v7h-2V4M5 4h2v7H5m0 9v-7h2v7m2 0V4h6v16m2 0v-7h2v7Z" %}
+{% set IC_WIN_CLOSED = "M21 20V2H3v18H1v3h22v-3M19 4v7h-6V4M5 4h6v7H5m0 9v-7h6v7m2 0v-7h6v7Z" %}
+{% set IC_ROOF  = "m16 6l-1 .75L17.5 10h-4V8.5H12V10H3c-1.11 0-2 .89-2 2v3h2a3 3 0 0 0 3 3a3 3 0 0 0 3-3h6a3 3 0 0 0 3 3a3 3 0 0 0 3-3h2v-3c0-1.11-.89-2-2-2h-2zM6 13.5A1.5 1.5 0 0 1 7.5 15A1.5 1.5 0 0 1 6 16.5A1.5 1.5 0 0 1 4.5 15A1.5 1.5 0 0 1 6 13.5m12 0a1.5 1.5 0 0 1 1.5 1.5a1.5 1.5 0 0 1-1.5 1.5a1.5 1.5 0 0 1-1.5-1.5a1.5 1.5 0 0 1 1.5-1.5" %}
+{% set IC_TIRE  = "m19.66 9.64l-.36-.94l1.86-.7c-.92-2.12-2.56-3.82-4.62-4.86l-.8 1.78l-.92-.42l.8-1.8C14.5 2.26 13.28 2 12 2c-1.06 0-2.08.22-3.04.5l.68 1.84l-.94.36L8 2.84c-2.12.92-3.82 2.56-4.86 4.62l1.78.8l-.42.92l-1.8-.8C2.26 9.5 2 10.72 2 12c0 1.06.22 2.08.5 3.04l1.84-.68l.36.94l-1.86.7c.92 2.12 2.56 3.82 4.62 4.86l.8-1.78l.92.42l-.8 1.8c1.12.44 2.34.7 3.62.7c1.06 0 2.08-.22 3.04-.5l-.68-1.84l.94-.36l.7 1.86c2.12-.92 3.82-2.56 4.86-4.62l-1.78-.8l.42-.92l1.8.8c.44-1.12.7-2.34.7-3.62c0-1.06-.22-2.08-.5-3.04zm-5.36 7.9c-3.06 1.26-6.58-.18-7.84-3.24s.18-6.58 3.24-7.84s6.58.18 7.84 3.24a5.986 5.986 0 0 1-3.24 7.84" %}
+{% set IC_TIRE_LOW = "M11 13h2v2h-2zm0-8h2v6h-2zm6-.24c1.86 1.43 3 3.85 3 6.24a8 8 0 0 1-4.14 7H8.14A8 8 0 0 1 4 11c0-2.39 1.09-4.83 3-6.24V2H5v1.86C3.15 5.68 2 8.2 2 11s1.15 5.32 3 7.14V22h2v-2h2v2h2v-2h2v2h2v-2h2v2h2v-3.86c1.85-1.82 3-4.34 3-7.14s-1.15-5.32-3-7.14V2h-2z" %}
+{% set IC_THERMO  = "M15 13V5a3 3 0 0 0-6 0v8a5 5 0 1 0 6 0m-3-9a1 1 0 0 1 1 1v3h-2V5a1 1 0 0 1 1-1" %}
+{% set IC_BATTERY = "M4 3v3H1v14h22V6h-3V3h-6v3h-4V3zM3 8h18v10H3zm12 2v2h-2v2h2v2h2v-2h2v-2h-2v-2zM5 12v2h6v-2z" %}
+
 {# ── Open/closed state tile: value colour carries the meaning ── #}
-{% macro state_tile(icon, label, st, open_class='text-red-400', none_label=None) %}
-  {% if st is none %}{{ tile(icon, label, none_label or t('no_data'), 'text-slate-500') }}
+{% macro state_tile(icon, label, st, open_class='text-red-400') %}
+  {% if st is none %}{{ tile(icon, label, t('no_data'), 'text-slate-500') }}
   {% elif st %}{{ tile(icon, label, t('open_state'), open_class) }}
   {% else %}{{ tile(icon, label, t('closed_state'), 'text-green-400') }}
+  {% endif %}
+{% endmacro %}
+
+{# ── Window tile with open/closed icon variants ── #}
+{% macro win_tile(label, st) %}
+  {% if st is none %}{{ tile(mdi(IC_WIN_CLOSED), label, t('no_data'), 'text-slate-500') }}
+  {% elif st %}{{ tile(mdi(IC_WIN_OPEN), label, t('open_state'), 'text-red-400') }}
+  {% else %}{{ tile(mdi(IC_WIN_CLOSED), label, t('closed_state'), 'text-green-400') }}
   {% endif %}
 {% endmacro %}
 
@@ -25,46 +45,46 @@
 
   <!-- Tyre pressure -->
   <div class="card">
-    <h2 class="font-semibold text-white mb-4">🛞 {{ t('tyre_pressure') }}</h2>
+    <h2 class="font-semibold text-white mb-4 flex items-center gap-2">{{ mdi(IC_TIRE) }} {{ t('tyre_pressure') }}</h2>
     <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
       {% for tp, label in [(vs.tyres.fl, t('tyre_fl')), (vs.tyres.fr, t('tyre_fr')), (vs.tyres.rl, t('tyre_rl')), (vs.tyres.rr, t('tyre_rr'))] %}
         {% set val = ('%.2f'|format(tp.bar) ~ ' bar') if tp.bar is not none else '—' %}
-        {% if tp.low %}{{ tile('⚠️', label, val ~ ' · ' ~ t('tyre_low'), 'text-red-400') }}
-        {% else %}{{ tile('🛞', label, val) }}{% endif %}
+        {% if tp.low %}{{ tile(mdi(IC_TIRE_LOW), label, val ~ ' · ' ~ t('tyre_low'), 'text-red-400') }}
+        {% else %}{{ tile(mdi(IC_TIRE), label, val) }}{% endif %}
       {% endfor %}
     </div>
   </div>
 
   <!-- Doors -->
   <div class="card">
-    <h2 class="font-semibold text-white mb-4">🚪 {{ t('doors') }}</h2>
+    <h2 class="font-semibold text-white mb-4 flex items-center gap-2">{{ mdi(IC_DOOR) }} {{ t('doors') }}</h2>
     <div class="grid grid-cols-2 lg:grid-cols-3 gap-3">
-      {{ state_tile('🚪', t('door_driver'),     vs.doors.driver) }}
-      {{ state_tile('🚪', t('door_passenger'),  vs.doors.passenger) }}
-      {{ state_tile('🚪', t('door_rear_left'),  vs.doors.rear_left) }}
-      {{ state_tile('🚪', t('door_rear_right'), vs.doors.rear_right) }}
-      {{ state_tile('🧳', t('door_trunk'),      vs.doors.trunk) }}
+      {{ state_tile(mdi(IC_DOOR),  t('door_driver'),     vs.doors.driver) }}
+      {{ state_tile(mdi(IC_DOOR),  t('door_passenger'),  vs.doors.passenger) }}
+      {{ state_tile(mdi(IC_DOOR),  t('door_rear_left'),  vs.doors.rear_left) }}
+      {{ state_tile(mdi(IC_DOOR),  t('door_rear_right'), vs.doors.rear_right) }}
+      {{ state_tile(mdi(IC_TRUNK), t('door_trunk'),      vs.doors.trunk) }}
     </div>
   </div>
 
   <!-- Windows + roof -->
   <div class="card">
-    <h2 class="font-semibold text-white mb-4">🪟 {{ t('windows') }}</h2>
+    <h2 class="font-semibold text-white mb-4 flex items-center gap-2">{{ mdi(IC_WIN_CLOSED) }} {{ t('windows') }}</h2>
     <div class="grid grid-cols-2 lg:grid-cols-3 gap-3">
-      {{ state_tile('🪟', t('win_fl'), vs.windows.fl) }}
-      {{ state_tile('🪟', t('win_fr'), vs.windows.fr) }}
-      {{ state_tile('🪟', t('win_rl'), vs.windows.rl) }}
-      {{ state_tile('🪟', t('win_rr'), vs.windows.rr) }}
-      {{ state_tile('🌅', t('win_sunshade'), vs.windows.sunshade, open_class='text-amber-400', none_label=t('sunshade_unknown')) }}
+      {{ win_tile(t('win_fl'), vs.windows.fl) }}
+      {{ win_tile(t('win_fr'), vs.windows.fr) }}
+      {{ win_tile(t('win_rl'), vs.windows.rl) }}
+      {{ win_tile(t('win_rr'), vs.windows.rr) }}
+      {{ state_tile(mdi(IC_ROOF), t('win_sunshade'), vs.windows.sunshade, open_class='text-amber-400') }}
     </div>
   </div>
 
   <!-- Temperatures -->
   <div class="card">
-    <h2 class="font-semibold text-white mb-4">🌡️ {{ t('temperatures') }}</h2>
+    <h2 class="font-semibold text-white mb-4 flex items-center gap-2">{{ mdi(IC_THERMO) }} {{ t('temperatures') }}</h2>
     <div class="grid grid-cols-2 lg:grid-cols-3 gap-3">
-      {{ tile('🔋', t('temp_battery'), ('%.0f'|format(vs.temps.battery) ~ '°C') if vs.temps.battery is not none else '—') }}
-      {{ tile('🌡️', t('temp_cabin'),  ('%.0f'|format(vs.temps.cabin)   ~ '°C') if vs.temps.cabin   is not none else '—') }}
+      {{ tile(mdi(IC_BATTERY), t('temp_battery'), ('%.0f'|format(vs.temps.battery) ~ '°C') if vs.temps.battery is not none else '—') }}
+      {{ tile(mdi(IC_THERMO),  t('temp_cabin'),   ('%.0f'|format(vs.temps.cabin)   ~ '°C') if vs.temps.cabin   is not none else '—') }}
     </div>
   </div>
 
