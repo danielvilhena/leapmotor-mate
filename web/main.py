@@ -1,4 +1,5 @@
 """LeapMotor Mate — web server."""
+import json
 import os
 import sys
 import time
@@ -13,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 import db_reader
 import command_client
 import i18n
+import ha_client
 
 MATE_VERSION = "1.0.9"  # bump together with the git tag + add-on config.yaml at release
 
@@ -68,6 +70,7 @@ def _ctx(**kwargs):
         if pos.get("speed_kmh", 0) > 1: return t("state_driving")
         return t("state_parked")
     return {**kwargs, "lang": lang, "t": t, "version": MATE_VERSION,
+            "wallbox_enabled": db_reader.get_setting("wallbox_enabled", "0") == "1",
             "soc_color": _soc_color, "state_label": state_label, "state_color": _state_color}
 
 
@@ -257,6 +260,200 @@ async def settings_page(request: Request):
     return templates.TemplateResponse(request, "settings.html", _ctx(
         page="settings", vehicle=vehicle, settings=settings,
         charge_types=db_reader.CHARGE_TYPES,
+        ha_url=db_reader.get_setting("ha_url", ""),
+        ha_has_token=bool(db_reader.get_setting("ha_token", "")),
+        ha_supervisor=bool(os.environ.get("SUPERVISOR_TOKEN")),
+    ))
+
+
+@app.get("/wallbox", response_class=HTMLResponse)
+async def wallbox_page(request: Request):
+    """Wallbox page — only reachable when enabled in Settings. Data wiring to
+    Home Assistant comes next; for now this previews the intended layout."""
+    if db_reader.get_setting("wallbox_enabled", "0") != "1":
+        return RedirectResponse(request.headers.get("x-ingress-path", "") + "/settings")
+    vehicle, _ = db_reader.get_vehicle()
+    return templates.TemplateResponse(request, "wallbox.html", _ctx(
+        page="wallbox", vehicle=vehicle,
+        configured=ha_client.is_configured() and bool(ha_client.get_mapping()),
+    ))
+
+
+@app.post("/api/settings/wallbox")
+async def save_wallbox(request: Request):
+    """Toggle the Wallbox feature. Saved to the DB, then the page is reloaded
+    (HX-Refresh) so the sidebar shows/hides the Wallbox entry immediately."""
+    form = await request.form()
+    enabled = "1" if form.get("wallbox_enabled") in ("1", "on", "true") else "0"
+    db_reader.set_setting("wallbox_enabled", enabled)
+    return Response(status_code=204, headers={"HX-Refresh": "true"})
+
+
+def _ha_test_html() -> str:
+    """Small inline status snippet for the HA connection test."""
+    if os.environ.get("SUPERVISOR_TOKEN"):
+        src = "Supervisor (add-on)"
+    else:
+        src = "URL + token"
+    res = ha_client.test_connection()
+    if res.get("ok"):
+        return (f'<span style="color:#22c55e;font-size:13px">✓ Connected via {src}'
+                f' — {res.get("message", "API running")}</span>')
+    err = res.get("error", "unknown")
+    if err == "not_configured":
+        return '<span style="color:#64748b;font-size:13px">Enter the HA URL and token, then test</span>'
+    return f'<span style="color:#f87171;font-size:13px">✗ {err}</span>'
+
+
+@app.post("/api/settings/ha", response_class=HTMLResponse)
+async def save_ha(request: Request):
+    """Save the standalone HA URL + Long-Lived token, then test the connection."""
+    form = await request.form()
+    if "ha_url" in form:
+        db_reader.set_setting("ha_url", (form.get("ha_url") or "").strip())
+    if form.get("ha_token"):  # don't wipe a saved token on an empty submit
+        db_reader.set_setting("ha_token", form.get("ha_token").strip())
+    return HTMLResponse(_ha_test_html())
+
+
+@app.get("/api/wallbox/test", response_class=HTMLResponse)
+async def wallbox_test(request: Request):
+    return HTMLResponse(_ha_test_html())
+
+
+@app.get("/api/wallbox/entities", response_class=HTMLResponse)
+async def wallbox_entities(request: Request):
+    """Lazy-loaded entity picker: discovered HA entities + role selects,
+    pre-filled with the saved mapping or an auto-detected best guess."""
+    entities = ha_client.list_entities(only_wallbox=True)
+    mapping = ha_client.get_mapping() or ha_client.auto_map(entities)
+    return templates.TemplateResponse(request, "partials/wallbox_entities.html", _ctx(
+        entities=entities, mapping=mapping, roles=ha_client.WB_ROLES,
+    ))
+
+
+@app.post("/api/settings/wallbox-entities", response_class=HTMLResponse)
+async def save_wallbox_entities(request: Request):
+    form = await request.form()
+    mapping = {role: form.get(role, "").strip()
+               for role in ha_client.WB_ROLES if form.get(role, "").strip()}
+    db_reader.set_setting("wallbox_entities", json.dumps(mapping))
+    t = i18n.get_t(db_reader.get_language())
+    return HTMLResponse(f'<span style="color:#22c55e;font-size:13px">{t("wallbox_saved")}</span>')
+
+
+@app.get("/api/wallbox/live", response_class=HTMLResponse)
+async def wallbox_live(request: Request):
+    return templates.TemplateResponse(request, "partials/wallbox_live.html", _ctx(
+        wb=ha_client.get_live(),
+    ))
+
+
+def _integrate_kwh(points: list) -> float:
+    """Trapezoidal integral of (epoch_seconds, kW) points → kWh."""
+    e = 0.0
+    for i in range(1, len(points)):
+        dt = (points[i][0] - points[i - 1][0]) / 3600.0
+        e += (points[i][1] + points[i - 1][1]) / 2 * dt
+    return e
+
+
+def _session_energy(curve: dict) -> dict:
+    """Energy comparison for one charge: DC into battery vs AC from the wallbox,
+    both integrated from real power (so AC ≥ DC and efficiency < 100%)."""
+    times = curve.get("times") or []
+    dc = ac = eff = None
+    if times:
+        dc_pts = [(ha_client.epoch(t), p) for t, p in zip(times, curve["power"])
+                  if ha_client.epoch(t) is not None]
+        if len(dc_pts) > 1:
+            dc = round(_integrate_kwh(dc_pts), 2)
+    mapping = ha_client.get_mapping()
+    # Same gating as the overlay: feature flag + configured + a mapped power entity.
+    if (db_reader.get_setting("wallbox_enabled", "0") == "1" and times
+            and ha_client.is_configured() and mapping.get("power")):
+        hist = ha_client.get_history(mapping["power"], times[0], times[-1])
+        if len(hist) > 1:
+            ac = round(_integrate_kwh(hist), 2)
+    if dc and ac and ac > 0:
+        eff = round(100 * dc / ac, 1)
+    return {"dc_kwh": dc, "ac_kwh": ac, "eff": eff}
+
+
+def _wallbox_sessions_grouped() -> list:
+    """Charges-with-power nested year → month → day, each session carrying the
+    AC-vs-DC kWh comparison; node totals + efficiency rolled up."""
+    from collections import OrderedDict
+    years: "OrderedDict" = OrderedDict()
+    for r in db_reader.charges_with_power():
+        dt = db_reader._local_dt(r["started_at"])
+        if dt is None:
+            continue
+        e = _session_energy(db_reader.get_charge_power_curve(r["id"]))
+        sess = {"id": r["id"], "time": dt.strftime("%H:%M"), **e}
+        yr, mo, day = dt.strftime("%Y"), dt.strftime("%B %Y"), dt.strftime("%d %b %Y")
+        Y = years.setdefault(yr, {"label": yr, "ac": 0.0, "dc": 0.0, "months": OrderedDict()})
+        M = Y["months"].setdefault(mo, {"label": mo, "ac": 0.0, "dc": 0.0, "days": OrderedDict()})
+        D = M["days"].setdefault(day, {"label": day, "ac": 0.0, "dc": 0.0, "sessions": []})
+        D["sessions"].append(sess)
+        for node in (Y, M, D):
+            if e["ac_kwh"]:
+                node["ac"] = round(node["ac"] + e["ac_kwh"], 2)
+            if e["dc_kwh"]:
+                node["dc"] = round(node["dc"] + e["dc_kwh"], 2)
+
+    def _eff(n):
+        return round(100 * n["dc"] / n["ac"], 1) if n["ac"] else None
+    trees = list(years.values())
+    for Y in trees:
+        Y["eff"] = _eff(Y)
+        for M in Y["months"].values():
+            M["eff"] = _eff(M)
+            for D in M["days"].values():
+                D["eff"] = _eff(D)
+    return trees
+
+
+@app.get("/api/wallbox/sessions", response_class=HTMLResponse)
+async def wallbox_sessions(request: Request):
+    """Year/month/day history tree with the AC-vs-DC kWh comparison per session."""
+    return templates.TemplateResponse(request, "partials/wallbox_sessions.html", _ctx(
+        tree=_wallbox_sessions_grouped(),
+    ))
+
+
+@app.get("/api/wallbox/compare-chart", response_class=HTMLResponse)
+async def wallbox_compare_chart(request: Request):
+    """Comparison chart for a picked charge session (Wallbox-page session selector)."""
+    try:
+        cid = int(request.query_params.get("charge_id"))
+    except (TypeError, ValueError):
+        return HTMLResponse('<div class="text-sm text-slate-500 py-2">—</div>')
+    curve = db_reader.get_charge_power_curve(cid)
+    return templates.TemplateResponse(request, "partials/charge_power_chart.html", _ctx(
+        cid=cid, labels=curve["labels"], power=curve["power"], soc=curve["soc"],
+        wb_power=_wallbox_overlay(curve),
+    ))
+
+
+@app.get("/api/wallbox/control", response_class=HTMLResponse)
+async def wallbox_control(request: Request):
+    """Max-current control (loaded once; does NOT auto-refresh, so a drag isn't wiped)."""
+    return templates.TemplateResponse(request, "partials/wallbox_control.html", _ctx(
+        cfg=ha_client.get_max_current_config(), applied=None,
+    ))
+
+
+@app.post("/api/wallbox/max-current", response_class=HTMLResponse)
+async def wallbox_set_max_current(request: Request):
+    form = await request.form()
+    try:
+        val = float(form.get("max_current"))
+    except (TypeError, ValueError):
+        val = None
+    ok = ha_client.set_max_current(val) if val is not None else False
+    return templates.TemplateResponse(request, "partials/wallbox_control.html", _ctx(
+        cfg=ha_client.get_max_current_config(), applied=ok,
     ))
 
 
@@ -273,13 +470,39 @@ async def set_charge_type(request: Request, charge_id: int):
     })
 
 
+def _wallbox_overlay(curve: dict) -> list | None:
+    """Wallbox power (from HA history) resampled onto the car curve's timestamps,
+    so it overlays the car's DC power on the same axis. None when unavailable."""
+    times = curve.get("times") or []
+    mapping = ha_client.get_mapping()
+    wallbox_on = db_reader.get_setting("wallbox_enabled", "0") == "1"
+    if not wallbox_on or not times or not ha_client.is_configured() or not mapping.get("power"):
+        return None
+    hist = ha_client.get_history(mapping["power"], times[0], times[-1])
+    if not hist:
+        return None
+    out, j, last = [], 0, None
+    for t in times:
+        e = ha_client.epoch(t)
+        if e is None:
+            out.append(None)
+            continue
+        while j < len(hist) and hist[j][0] <= e:   # step-hold: last known wallbox value ≤ sample time
+            last = hist[j][1]
+            j += 1
+        out.append(round(last, 3) if last is not None else None)
+    return out if any(v is not None for v in out) else None
+
+
 @app.get("/api/charge/{charge_id}/power-chart", response_class=HTMLResponse)
 async def charge_power_chart(request: Request, charge_id: int):
-    """Lazy-loaded power-over-time chart for one charge session (expandable in the list)."""
+    """Lazy-loaded power-over-time chart for one charge session (expandable in the list).
+    When a wallbox is configured, overlays its delivered AC power vs the car's DC power."""
     curve = db_reader.get_charge_power_curve(charge_id)
     return templates.TemplateResponse(request, "partials/charge_power_chart.html", _ctx(
         cid=charge_id,
         labels=curve["labels"], power=curve["power"], soc=curve["soc"],
+        wb_power=_wallbox_overlay(curve),
     ))
 
 

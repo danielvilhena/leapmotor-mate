@@ -516,14 +516,42 @@ def get_charge_power_curve(charge_id: int) -> dict:
             "WHERE charging = 1 AND recorded_at >= ? ORDER BY recorded_at",
             (start,),
         ).fetchall()
-    labels, power, soc = [], [], []
+    labels, power, soc, times = [], [], [], []
     for r in rows:
         v = r["charge_voltage_v"] or 0
         a = r["charge_current_a"] or 0
         labels.append((_local_iso(r["recorded_at"]) or "")[11:16])  # HH:MM local
         power.append(round(abs(v * a) / 1000.0, 3))
         soc.append(r["soc"])
-    return {"labels": labels, "power": power, "soc": soc}
+        times.append(r["recorded_at"])  # raw UTC ISO — used to align external (wallbox) history
+    return {"labels": labels, "power": power, "soc": soc, "times": times}
+
+
+def latest_charge_id_with_power() -> int | None:
+    """Most recent charge that still has per-sample data (for the Wallbox page chart)."""
+    db = _get()
+    row = db.execute(
+        "SELECT c.id FROM charges c WHERE EXISTS ("
+        "  SELECT 1 FROM positions p WHERE p.charging = 1"
+        "  AND p.recorded_at >= c.started_at"
+        "  AND (c.ended_at IS NULL OR p.recorded_at <= c.ended_at)"
+        ") ORDER BY c.started_at DESC LIMIT 1"
+    ).fetchone()
+    return row["id"] if row else None
+
+
+def charges_with_power(limit: int = 30) -> list[dict]:
+    """Recent charges that still have a power curve — raw {id, started_at, energy_added_kwh}."""
+    db = _get()
+    rows = db.execute(
+        "SELECT c.id, c.started_at, c.energy_added_kwh FROM charges c WHERE EXISTS ("
+        "  SELECT 1 FROM positions p WHERE p.charging = 1"
+        "  AND p.recorded_at >= c.started_at"
+        "  AND (c.ended_at IS NULL OR p.recorded_at <= c.ended_at)"
+        ") ORDER BY c.started_at DESC LIMIT ?",
+        (limit,),
+    ).fetchall()
+    return [dict(r) for r in rows]
 
 
 def get_stats_grouped() -> list[dict]:
