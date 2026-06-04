@@ -37,7 +37,7 @@ def _creds() -> tuple[str | None, str | None]:
     if sup:
         return "http://supervisor/core", sup
     base = db_reader.get_setting("ha_url", "").strip().rstrip("/")
-    token = db_reader.get_setting("ha_token", "").strip()
+    token = db_reader.get_secret("ha_token", "").strip()
     if base and token:
         return base, token
     return None, None

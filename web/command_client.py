@@ -56,8 +56,8 @@ def _get_credentials() -> tuple[str, str, str]:
         sys.path.insert(0, str(pathlib.Path(__file__).parent))
         import db_reader as _dr
         user = _dr.get_setting("leapmotor_user") or os.environ.get("LEAPMOTOR_USER", "")
-        pwd  = _dr.get_setting("leapmotor_pass") or os.environ.get("LEAPMOTOR_PASS", "")
-        pin  = _dr.get_setting("leapmotor_pin")  or os.environ.get("LEAPMOTOR_PIN", "")
+        pwd  = _dr.get_secret("leapmotor_pass") or os.environ.get("LEAPMOTOR_PASS", "")
+        pin  = _dr.get_secret("leapmotor_pin")  or os.environ.get("LEAPMOTOR_PIN", "")
     except Exception:
         user = os.environ.get("LEAPMOTOR_USER", "")
         pwd  = os.environ.get("LEAPMOTOR_PASS", "")

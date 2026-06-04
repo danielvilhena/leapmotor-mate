@@ -284,7 +284,7 @@ async def navigation_page(request: Request):
 async def nav_geocode(address: str = "", city: str = ""):
     import asyncio
     provider = db_reader.get_setting("geocoder_provider", "")
-    key = db_reader.get_setting("geocoder_key", "") or None
+    key = db_reader.get_secret("geocoder_key", "") or None
     try:
         res = await asyncio.get_event_loop().run_in_executor(
             None, geocode.geocode, address, city, provider, key)
@@ -303,7 +303,7 @@ async def nav_current_address():
     if not lat or not lon:
         return HTMLResponse("—")
     provider = db_reader.get_setting("geocoder_provider", "")
-    key = db_reader.get_setting("geocoder_key", "") or None
+    key = db_reader.get_secret("geocoder_key", "") or None
     try:
         addr = await asyncio.get_event_loop().run_in_executor(
             None, geocode.reverse_geocode, lat, lon, provider, key)
@@ -345,18 +345,18 @@ async def settings_page(request: Request):
     prices = db_reader.get_charge_prices()
     settings = {**settings, **prices,
                 "abrp_enabled": db_reader.get_setting("abrp_enabled", "0"),
-                "abrp_token": db_reader.get_setting("abrp_token", ""),
+                "abrp_token": db_reader.get_secret("abrp_token", ""),
                 "mqtt_enabled": db_reader.get_setting("mqtt_enabled", "0"),
                 "mqtt_broker": db_reader.get_setting("mqtt_broker", ""),
                 "mqtt_port": db_reader.get_setting("mqtt_port", "1883"),
                 "mqtt_user": db_reader.get_setting("mqtt_user", ""),
-                "mqtt_pass": db_reader.get_setting("mqtt_pass", ""),
+                "mqtt_pass": db_reader.get_secret("mqtt_pass", ""),
                 "mqtt_prefix": db_reader.get_setting("mqtt_prefix", "leapmotor"),
                 "mqtt_tls": db_reader.get_setting("mqtt_tls", "0"),
                 "mqtt_tls_insecure": db_reader.get_setting("mqtt_tls_insecure", "0"),
                 "mqtt_discovery": db_reader.get_setting("mqtt_discovery", "1"),
                 "geocoder_provider": db_reader.get_setting("geocoder_provider", ""),
-                "geocoder_key": db_reader.get_setting("geocoder_key", "")}
+                "geocoder_key": db_reader.get_secret("geocoder_key", "")}
     return templates.TemplateResponse(request, "settings.html", _ctx(
         page="settings", vehicle=vehicle, settings=settings,
         charge_types=db_reader.CHARGE_TYPES,
@@ -429,7 +429,7 @@ async def save_ha(request: Request):
     if "ha_url" in form:
         db_reader.set_setting("ha_url", (form.get("ha_url") or "").strip())
     if form.get("ha_token"):  # don't wipe a saved token on an empty submit
-        db_reader.set_setting("ha_token", form.get("ha_token").strip())
+        db_reader.set_secret("ha_token", form.get("ha_token").strip())
     return HTMLResponse(_ha_test_html())
 
 
@@ -717,7 +717,7 @@ async def save_abrp(request: Request):
     form = await request.form()
     db_reader.set_setting("abrp_enabled", "1" if form.get("abrp_enabled") in ("1", "on", "true") else "0")
     if "abrp_token" in form:
-        db_reader.set_setting("abrp_token", (form.get("abrp_token") or "").strip())
+        db_reader.set_secret("abrp_token", (form.get("abrp_token") or "").strip())
     t = i18n.get_t(db_reader.get_language())
     return HTMLResponse(f'<span style="color:#22c55e;font-size:13px">{t("abrp_saved")}</span>')
 
@@ -730,7 +730,7 @@ async def save_geocoder(request: Request):
     if "geocoder_provider" in form:
         db_reader.set_setting("geocoder_provider", (form.get("geocoder_provider") or "").strip())
     if "geocoder_key" in form:
-        db_reader.set_setting("geocoder_key", (form.get("geocoder_key") or "").strip())
+        db_reader.set_secret("geocoder_key", (form.get("geocoder_key") or "").strip())
     t = i18n.get_t(db_reader.get_language())
     return HTMLResponse(f'<span style="color:#22c55e;font-size:13px">{t("geocoder_saved")}</span>')
 
@@ -746,7 +746,8 @@ async def save_mqtt(request: Request):
     db_reader.set_setting("mqtt_tls_insecure", flag("mqtt_tls_insecure"))
     for key in ("mqtt_broker", "mqtt_port", "mqtt_user", "mqtt_pass", "mqtt_prefix"):
         if key in form:
-            db_reader.set_setting(key, (form.get(key) or "").strip())
+            val = (form.get(key) or "").strip()
+            (db_reader.set_secret if key == "mqtt_pass" else db_reader.set_setting)(key, val)
     t = i18n.get_t(db_reader.get_language())
     return HTMLResponse(f'<span style="color:#22c55e;font-size:13px">{t("mqtt_saved")}</span>')
 
@@ -1190,8 +1191,8 @@ async def setup_submit(request: Request):
         battery_kwh = 67.1
 
     db_reader.set_setting("leapmotor_user", user)
-    db_reader.set_setting("leapmotor_pass", pwd)
-    db_reader.set_setting("leapmotor_pin", pin)
+    db_reader.set_secret("leapmotor_pass", pwd)
+    db_reader.set_secret("leapmotor_pin", pin)
     db_reader.set_setting("battery_capacity_kwh", str(battery_kwh))
     db_reader.set_setting("language", lang if lang in ("en", "it", "fr", "de") else "en")
 

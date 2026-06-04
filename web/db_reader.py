@@ -8,6 +8,8 @@ from typing import Optional
 import os
 
 import i18n
+import crypto  # hard import at module top: a missing crypto dep must fail web boot loudly,
+              # never silently degrade a per-request secret read
 
 # Timestamps are stored in UTC (poller uses datetime.now(timezone.utc)); the UI
 # must show local time. Standalone Docker sets TZ in compose → use it. As an HA
@@ -104,6 +106,16 @@ def set_setting(key: str, value: str) -> None:
     db = _conn_rw()
     db.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?,?)", (key, str(value)))
     db.commit()
+
+
+def get_secret(key: str, default: str = "") -> str:
+    """Read a secret setting, decrypting transparently (plaintext passes through)."""
+    return crypto.decrypt(get_setting(key, default))
+
+
+def set_secret(key: str, value: str) -> None:
+    """Write a secret setting encrypted at rest (matches the poller's crypto/key)."""
+    set_setting(key, crypto.encrypt(value or ""))
 
 
 def get_or_create_device_id() -> str:

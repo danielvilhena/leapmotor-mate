@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+import crypto
+
 log = logging.getLogger(__name__)
 
 BATTERY_CAPACITY_DEFAULTS: dict[str, float] = {
@@ -132,6 +134,12 @@ def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return R * 2 * math.asin(math.sqrt(max(0, a)))
 
 
+# Settings keys holding real secrets — encrypted at rest (see crypto.py). Everything
+# else (flags, prefixes, prices, ids, identifiers) stays plaintext.
+SECRET_KEYS = {"leapmotor_pass", "leapmotor_pin", "abrp_token",
+               "mqtt_pass", "geocoder_key", "ha_token"}
+
+
 class Database:
     def __init__(self, path: str = "leapmotor_mate.db"):
         self._path = path
@@ -170,6 +178,7 @@ class Database:
         if "charge_current_a" not in cols:
             self._conn.execute("ALTER TABLE positions ADD COLUMN charge_current_a REAL DEFAULT NULL")
         self._conn.commit()
+        self.migrate_secrets()
         log.info("Database ready: %s", path)
 
     # ── Settings ─────────────────────────────────────────────────────────────
@@ -183,6 +192,25 @@ class Database:
             "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, str(value))
         )
         self._conn.commit()
+
+    def get_secret(self, key: str, default: str = "") -> str:
+        """Read a secret setting, decrypting transparently (plaintext passes through)."""
+        return crypto.decrypt(self.get_setting(key, default))
+
+    def set_secret(self, key: str, value: str) -> None:
+        """Write a secret setting encrypted at rest."""
+        self.set_setting(key, crypto.encrypt(value or ""))
+
+    def migrate_secrets(self) -> None:
+        """One-time, idempotent: encrypt any plaintext secret in place. Runs every
+        start; empty and already-encrypted values are skipped so re-runs are no-ops.
+        The first real secret lazily triggers key generation (crypto.encrypt)."""
+        for key in SECRET_KEYS:
+            val = self.get_setting(key)          # raw value, no decrypt
+            if not val or crypto.is_encrypted(val):
+                continue
+            self.set_setting(key, crypto.encrypt(val))
+            log.info("Encrypted secret at rest: %s", key)
 
     def get_or_create_device_id(self) -> str:
         """One stable device_id for this Mate install, shared by poller and web.

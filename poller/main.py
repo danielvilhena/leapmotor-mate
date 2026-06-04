@@ -91,7 +91,7 @@ def _mqtt_tick(db, client, data, service):
             broker=db.get_setting("mqtt_broker"),
             port=db.get_setting("mqtt_port", "1883"),
             username=db.get_setting("mqtt_user") or None,
-            password=db.get_setting("mqtt_pass") or None,
+            password=db.get_secret("mqtt_pass") or None,
             topic_prefix=db.get_setting("mqtt_prefix", "leapmotor"),
             use_tls=db.get_setting("mqtt_tls") == "1",
             tls_insecure=db.get_setting("mqtt_tls_insecure") == "1",
@@ -110,13 +110,15 @@ def load_config(db: "Database") -> dict:
     DB takes precedence over env — same order as the web layer — so a stray
     LEAPMOTOR_USER in the environment (or a mounted .env) can never silently
     switch the poller to a different account than the one set up in the wizard."""
-    def _get(key_env: str, key_db: str, default: str = "") -> str:
-        return db.get_setting(key_db) or os.environ.get(key_env) or default
+    def _get(key_env: str, key_db: str, default: str = "", secret: bool = False) -> str:
+        # decrypt only the DB-sourced value, then fall back to the (plaintext) env var
+        val = db.get_secret(key_db) if secret else db.get_setting(key_db)
+        return val or os.environ.get(key_env) or default
 
     return {
         "username":  _get("LEAPMOTOR_USER", "leapmotor_user"),
-        "password":  _get("LEAPMOTOR_PASS", "leapmotor_pass"),
-        "pin":       _get("LEAPMOTOR_PIN",  "leapmotor_pin", ""),
+        "password":  _get("LEAPMOTOR_PASS", "leapmotor_pass", secret=True),
+        "pin":       _get("LEAPMOTOR_PIN",  "leapmotor_pin", "", secret=True),
         "cert_path": _cert_path("app.crt", "CERT_PATH"),
         "key_path":  _cert_path("app.key", "KEY_PATH"),
     }
@@ -207,7 +209,7 @@ def main():
 
             # ABRP live telemetry (opt-in, off by default)
             if db.get_setting("abrp_enabled") == "1":
-                abrp.send(db.get_setting("abrp_token"), data)
+                abrp.send(db.get_secret("abrp_token"), data)
 
             # MQTT → Home Assistant bridge (opt-in, off by default)
             mqtt_service = _mqtt_tick(db, client, data, mqtt_service)
