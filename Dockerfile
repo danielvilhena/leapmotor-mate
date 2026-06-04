@@ -27,4 +27,9 @@ ENV PYTHONUNBUFFERED=1
 ENV CERT_DIR=/app/certs
 ENV DB_PATH=/data/leapmotor_mate.db
 
+# Liveness: hit /healthz (200 while awaiting setup or polling recently, 503 if wedged).
+# Uses python (no curl in the slim image). start-period covers first boot.
+HEALTHCHECK --interval=60s --timeout=10s --start-period=45s --retries=3 \
+    CMD python3 -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/healthz', timeout=8)" || exit 1
+
 CMD ["/run.sh"]

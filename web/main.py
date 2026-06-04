@@ -58,7 +58,7 @@ app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")
 @app.middleware("http")
 async def setup_check(request: Request, call_next):
     path = request.url.path
-    if path.startswith("/setup") or path.startswith("/api/") or path.startswith("/static/"):
+    if path.startswith("/setup") or path.startswith("/api/") or path.startswith("/static/") or path == "/healthz":
         return await call_next(request)
     # If env vars are set, skip wizard (dev mode)
     if os.environ.get("LEAPMOTOR_USER"):
@@ -101,6 +101,27 @@ def _ctx(**kwargs):
 
 
 # ── Routes ───────────────────────────────────────────────────────────────────
+
+@app.get("/healthz")
+async def healthz():
+    """Liveness probe. 200 while awaiting setup or when the poll loop ran recently;
+    503 if the poller looks wedged/dead. The threshold is well past the 900s offline
+    backoff so a deep-sleeping car never reads as unhealthy."""
+    import time as _t
+    if not db_reader.is_setup_complete():
+        return JSONResponse({"status": "awaiting_setup"}, status_code=200)
+    try:
+        ts = float(db_reader.get_setting("last_loop_ts", "0") or 0)
+    except (TypeError, ValueError):
+        ts = 0.0
+    age = _t.time() - ts
+    healthy = ts > 0 and age < 1800   # 2x the offline poll interval
+    return JSONResponse(
+        {"status": "ok" if healthy else "stale",
+         "last_poll_age_s": round(age) if ts else None},
+        status_code=200 if healthy else 503,
+    )
+
 
 @app.get("/", response_class=HTMLResponse)
 async def overview(request: Request):

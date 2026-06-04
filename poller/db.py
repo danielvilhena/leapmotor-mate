@@ -346,7 +346,9 @@ class Database:
 
         start_soc = trip["start_soc"]
         energy_used_kwh = (start_soc - data.soc) / 100.0 * self.get_battery_capacity()
-        efficiency = (energy_used_kwh / distance_km * 100) if distance_km > 0.5 else None
+        # Withhold efficiency when net energy is <= 0 (SOC rose over the trip — regen
+        # or a cloud SOC blip): a negative kWh/100km is meaningless, don't store it.
+        efficiency = (energy_used_kwh / distance_km * 100) if (distance_km > 0.5 and energy_used_kwh > 0) else None
 
         started_at = datetime.fromisoformat(trip["started_at"])
         duration_min = (datetime.now(timezone.utc) - started_at).total_seconds() / 60

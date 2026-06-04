@@ -296,6 +296,13 @@ def main():
                 except Exception as e2:  # noqa: BLE001
                     log.warning("Re-login failed, will retry next cycle: %s", e2)
 
+        # Heartbeat for /healthz: proves the poll loop is alive (written every cycle,
+        # even during offline/asleep backoff) regardless of whether the car reported.
+        try:
+            db.set_setting("last_loop_ts", str(time.time()))
+        except Exception:  # noqa: BLE001
+            pass
+
         # Interruptible sleep: while parked we may be sleeping for minutes, so check the
         # boost flag every few seconds and wake immediately if one is requested.
         deadline = time.time() + interval
