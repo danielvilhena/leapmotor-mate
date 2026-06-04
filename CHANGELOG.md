@@ -3,6 +3,21 @@
 All notable changes to LeapMotor Mate are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.8.2] — 2026-06-05
+
+### Added
+- **Encrypted credentials at rest.** Your Leapmotor password/PIN and the other stored
+  secrets (Home Assistant, ABRP, MQTT and geocoder tokens) are now encrypted in the
+  local database with a per‑install key (`/data/secret.key`, auto‑generated; or set
+  your own via the `MATE_SECRET_KEY` env var). Existing installs migrate transparently
+  on the next start — no re‑login needed. Keep `secret.key` with your backups: a
+  database restored without it will ask you to re‑enter the credentials.
+
+### Changed
+- **Faster charge/Wallbox history at scale.** Added a partial index on the telemetry
+  table so the charge‑power, time‑of‑use cost and Wallbox queries stay fast as the
+  database grows over the years.
+
 ## [1.8.1] — 2026-06-04
 
 ### Added

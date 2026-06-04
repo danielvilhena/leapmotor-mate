@@ -18,7 +18,7 @@ import ha_client
 import geocode
 import mqtt_test
 
-MATE_VERSION = "1.8.1"  # bump together with the git tag + add-on config.yaml at release
+MATE_VERSION = "1.8.2"  # bump together with the git tag + add-on config.yaml at release
 
 app = FastAPI(title="LeapMotor Mate")
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
