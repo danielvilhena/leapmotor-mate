@@ -168,6 +168,7 @@ CURRENCIES = {
     "SGD": {"name": "Singapore Dollar","symbol": "$",   "pos": "before", "dec": 2},
     "HKD": {"name": "Hong Kong Dollar","symbol": "$",   "pos": "before", "dec": 2},
     "THB": {"name": "Thai Baht",       "symbol": "฿",   "pos": "before", "dec": 2},
+    "MYR": {"name": "Malaysian Ringgit","symbol": "RM", "pos": "before", "dec": 2},
 }
 _DEFAULT_CURRENCY = "EUR"
 
