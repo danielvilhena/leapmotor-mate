@@ -345,18 +345,18 @@ async def settings_page(request: Request):
     prices = db_reader.get_charge_prices()
     settings = {**settings, **prices,
                 "abrp_enabled": db_reader.get_setting("abrp_enabled", "0"),
-                "abrp_token": db_reader.get_secret("abrp_token", ""),
+                "abrp_token_set": bool(db_reader.get_setting("abrp_token", "")),
                 "mqtt_enabled": db_reader.get_setting("mqtt_enabled", "0"),
                 "mqtt_broker": db_reader.get_setting("mqtt_broker", ""),
                 "mqtt_port": db_reader.get_setting("mqtt_port", "1883"),
                 "mqtt_user": db_reader.get_setting("mqtt_user", ""),
-                "mqtt_pass": db_reader.get_secret("mqtt_pass", ""),
+                "mqtt_pass_set": bool(db_reader.get_setting("mqtt_pass", "")),
                 "mqtt_prefix": db_reader.get_setting("mqtt_prefix", "leapmotor"),
                 "mqtt_tls": db_reader.get_setting("mqtt_tls", "0"),
                 "mqtt_tls_insecure": db_reader.get_setting("mqtt_tls_insecure", "0"),
                 "mqtt_discovery": db_reader.get_setting("mqtt_discovery", "1"),
                 "geocoder_provider": db_reader.get_setting("geocoder_provider", ""),
-                "geocoder_key": db_reader.get_secret("geocoder_key", "")}
+                "geocoder_key_set": bool(db_reader.get_setting("geocoder_key", ""))}
     return templates.TemplateResponse(request, "settings.html", _ctx(
         page="settings", vehicle=vehicle, settings=settings,
         charge_types=db_reader.CHARGE_TYPES,
@@ -716,8 +716,9 @@ async def save_abrp(request: Request):
     """Enable/disable ABRP live telemetry and store the user's personal token."""
     form = await request.form()
     db_reader.set_setting("abrp_enabled", "1" if form.get("abrp_enabled") in ("1", "on", "true") else "0")
-    if "abrp_token" in form:
-        db_reader.set_secret("abrp_token", (form.get("abrp_token") or "").strip())
+    tok = (form.get("abrp_token") or "").strip()
+    if tok:  # masked field: only overwrite on a non-empty submit (keep existing otherwise)
+        db_reader.set_secret("abrp_token", tok)
     t = i18n.get_t(db_reader.get_language())
     return HTMLResponse(f'<span style="color:#22c55e;font-size:13px">{t("abrp_saved")}</span>')
 
@@ -729,8 +730,9 @@ async def save_geocoder(request: Request):
     form = await request.form()
     if "geocoder_provider" in form:
         db_reader.set_setting("geocoder_provider", (form.get("geocoder_provider") or "").strip())
-    if "geocoder_key" in form:
-        db_reader.set_secret("geocoder_key", (form.get("geocoder_key") or "").strip())
+    gkey = (form.get("geocoder_key") or "").strip()
+    if gkey:  # masked field: only overwrite on a non-empty submit
+        db_reader.set_secret("geocoder_key", gkey)
     t = i18n.get_t(db_reader.get_language())
     return HTMLResponse(f'<span style="color:#22c55e;font-size:13px">{t("geocoder_saved")}</span>')
 
@@ -747,7 +749,11 @@ async def save_mqtt(request: Request):
     for key in ("mqtt_broker", "mqtt_port", "mqtt_user", "mqtt_pass", "mqtt_prefix"):
         if key in form:
             val = (form.get(key) or "").strip()
-            (db_reader.set_secret if key == "mqtt_pass" else db_reader.set_setting)(key, val)
+            if key == "mqtt_pass":
+                if val:  # masked field: keep the existing password on an empty submit
+                    db_reader.set_secret(key, val)
+            else:
+                db_reader.set_setting(key, val)
     t = i18n.get_t(db_reader.get_language())
     return HTMLResponse(f'<span style="color:#22c55e;font-size:13px">{t("mqtt_saved")}</span>')
 

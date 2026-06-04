@@ -1,0 +1,16 @@
+# Keep secrets, local data, tests and cruft out of the Docker image.
+.git
+.github
+**/__pycache__
+**/*.pyc
+**/*.bak
+**/_backup_*
+data/
+**/*.db
+**/*.db-wal
+**/*.db-shm
+secret.key
+**/secret.key
+tests/
+docker-compose*.yml
+.dockerignore

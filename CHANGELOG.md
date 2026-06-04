@@ -18,6 +18,18 @@ This project adheres to [Semantic Versioning](https://semver.org/).
   table so the charge‑power, time‑of‑use cost and Wallbox queries stay fast as the
   database grows over the years.
 
+### Security & hardening
+- **Secrets are no longer rendered back into the Settings page.** The ABRP / MQTT /
+  geocoder fields now show a masked placeholder when set (like the HA token already
+  did) and are only overwritten on a non‑empty submit.
+- **MQTT commands are thread‑safe.** Remote MQTT commands run on a background thread;
+  API access is now serialized with the poll loop and the post‑command "boost" write
+  uses its own DB connection, avoiding a rare race.
+- **Clear warning on a wrong/missing encryption key** at startup (e.g. a database
+  restored without its `secret.key`), instead of an obscure later login failure.
+- Added a `.dockerignore` so the local database, `secret.key`, backups and caches can
+  never be baked into a built image.
+
 ## [1.8.1] — 2026-06-04
 
 ### Added

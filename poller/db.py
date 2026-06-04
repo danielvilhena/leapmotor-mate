@@ -179,6 +179,7 @@ class Database:
             self._conn.execute("ALTER TABLE positions ADD COLUMN charge_current_a REAL DEFAULT NULL")
         self._conn.commit()
         self.migrate_secrets()
+        self._check_decryption()
         log.info("Database ready: %s", path)
 
     # ── Settings ─────────────────────────────────────────────────────────────
@@ -211,6 +212,18 @@ class Database:
                 continue
             self.set_setting(key, crypto.encrypt(val))
             log.info("Encrypted secret at rest: %s", key)
+
+    def _check_decryption(self) -> None:
+        """Warn loudly if a secret is stored encrypted but can't be decrypted with the
+        current key (e.g. a DB restored WITHOUT its /data/secret.key, or a changed
+        MATE_SECRET_KEY) — otherwise it only surfaces later as an obscure login failure."""
+        for key in SECRET_KEYS:
+            raw = self.get_setting(key)
+            if crypto.is_encrypted(raw) and crypto.is_encrypted(crypto.decrypt(raw)):
+                log.error("Cannot decrypt stored secret '%s': wrong or missing "
+                          "/data/secret.key. Restore the key together with the database, "
+                          "or re-run setup to re-enter credentials.", key)
+                return
 
     def get_or_create_device_id(self) -> str:
         """One stable device_id for this Mate install, shared by poller and web.

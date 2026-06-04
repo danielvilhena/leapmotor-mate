@@ -2,6 +2,7 @@
 import logging
 import os
 import pathlib
+import threading
 import time
 
 _PROJECT_ROOT = pathlib.Path(__file__).parent.parent
@@ -31,6 +32,11 @@ _MQTT_OPTIMISTIC = {
 }
 _MQTT_BOOST_S = 60   # after a command, poll fast for a minute so the state syncs quickly
 
+# The MQTT command handler runs on paho's network thread while the poll loop runs on the
+# main thread; both use the same Leapmotor API client (one HTTP session). Serialize API
+# access between them so requests can't interleave/corrupt each other.
+_API_LOCK = threading.Lock()
+
 
 def _handle_mqtt_command(client, service, db, vin: str, cmd: str, value):
     """Execute a remote MQTT command, then keep HA in sync the same way the web UI
@@ -42,26 +48,27 @@ def _handle_mqtt_command(client, service, db, vin: str, cmd: str, value):
     api = client._api
     optimistic = _MQTT_OPTIMISTIC.get(cmd)
     try:
-        if cmd == "lock":          api.lock_vehicle(vin)
-        elif cmd == "unlock":      api.unlock_vehicle(vin)
-        elif cmd == "open_trunk":  api.open_trunk(vin)
-        elif cmd == "close_trunk": api.close_trunk(vin)
-        elif cmd == "find_car":    api._remote_control(vin=vin, action="find_car")
-        elif cmd == "climate_cool":
-            api.quick_cool(vin);         optimistic = ("climate_on", True)
-        elif cmd == "climate_heat":
-            api.quick_heat(vin);         optimistic = ("climate_on", True)
-        elif cmd == "climate_defrost":
-            api.windshield_defrost(vin); optimistic = ("climate_on", True)
-        elif cmd == "climate_off":
-            # ac_switch is a toggle (the only A/C deactivation command this API has);
-            # only send it when the A/C is known to be on, so an "A/C Off" press can't
-            # accidentally switch it on. The web UI guards direction the same way.
-            if getattr(service, "last_climate_on", None) is False:
+        with _API_LOCK:  # serialize against the poll loop's get_status (shared HTTP session)
+            if cmd == "lock":          api.lock_vehicle(vin)
+            elif cmd == "unlock":      api.unlock_vehicle(vin)
+            elif cmd == "open_trunk":  api.open_trunk(vin)
+            elif cmd == "close_trunk": api.close_trunk(vin)
+            elif cmd == "find_car":    api._remote_control(vin=vin, action="find_car")
+            elif cmd == "climate_cool":
+                api.quick_cool(vin);         optimistic = ("climate_on", True)
+            elif cmd == "climate_heat":
+                api.quick_heat(vin);         optimistic = ("climate_on", True)
+            elif cmd == "climate_defrost":
+                api.windshield_defrost(vin); optimistic = ("climate_on", True)
+            elif cmd == "climate_off":
+                # ac_switch is a toggle (the only A/C deactivation command this API has);
+                # only send it when the A/C is known to be on, so an "A/C Off" press can't
+                # accidentally switch it on. The web UI guards direction the same way.
+                if getattr(service, "last_climate_on", None) is False:
+                    return
+                api.ac_switch(vin);          optimistic = ("climate_on", False)
+            else:
                 return
-            api.ac_switch(vin);          optimistic = ("climate_on", False)
-        else:
-            return
         log.info("MQTT: executed command %s %s", cmd, value or "")
     except Exception as exc:  # noqa: BLE001
         log.error("MQTT: command %s failed: %s", cmd, exc)
@@ -74,7 +81,16 @@ def _handle_mqtt_command(client, service, db, vin: str, cmd: str, value):
         except Exception as exc:  # noqa: BLE001
             log.warning("MQTT: optimistic publish failed: %s", exc)
     try:
-        db.set_setting("boost_until", str(time.time() + _MQTT_BOOST_S))
+        # Write from a short-lived dedicated connection: this runs on paho's network
+        # thread and the poller's shared db connection isn't safe to use cross-thread.
+        import sqlite3
+        c = sqlite3.connect(db._path, timeout=5.0)
+        try:
+            c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
+                      ("boost_until", str(time.time() + _MQTT_BOOST_S)))
+            c.commit()
+        finally:
+            c.close()
     except Exception as exc:  # noqa: BLE001
         log.warning("MQTT: boost trigger failed: %s", exc)
 
@@ -204,7 +220,8 @@ def main():
                 set_charge_current_min(float(db.get_setting("charge_detect_min_a", "2.0") or 2.0))
             except (TypeError, ValueError):
                 pass
-            data = client.get_status()
+            with _API_LOCK:
+                data = client.get_status()
             recorder.process(data)
 
             # ABRP live telemetry (opt-in, off by default)
