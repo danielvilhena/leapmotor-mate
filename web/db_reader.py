@@ -132,6 +132,61 @@ def get_language() -> str:
     return get_setting("language", "en")
 
 
+# ── Currency ──────────────────────────────────────────────────────────────────
+# Monetary amounts are formatted via the Jinja `money` filter using this table.
+# Stored setting `currency` holds the ISO 4217 code; default EUR keeps the old
+# behaviour. `pos` = symbol placement, `dec` = decimal digits. Names stay in
+# English (international convention) so they need no translation.
+CURRENCIES = {
+    "EUR": {"name": "Euro",            "symbol": "€",   "pos": "after",  "dec": 2},
+    "USD": {"name": "US Dollar",       "symbol": "$",   "pos": "before", "dec": 2},
+    "GBP": {"name": "British Pound",   "symbol": "£",   "pos": "before", "dec": 2},
+    "CHF": {"name": "Swiss Franc",     "symbol": "CHF", "pos": "before", "dec": 2},
+    "SEK": {"name": "Swedish Krona",   "symbol": "kr",  "pos": "after",  "dec": 2},
+    "NOK": {"name": "Norwegian Krone", "symbol": "kr",  "pos": "after",  "dec": 2},
+    "DKK": {"name": "Danish Krone",    "symbol": "kr",  "pos": "after",  "dec": 2},
+    "PLN": {"name": "Polish Złoty",    "symbol": "zł",  "pos": "after",  "dec": 2},
+    "CZK": {"name": "Czech Koruna",    "symbol": "Kč",  "pos": "after",  "dec": 2},
+    "HUF": {"name": "Hungarian Forint","symbol": "Ft",  "pos": "after",  "dec": 0},
+    "RON": {"name": "Romanian Leu",    "symbol": "lei", "pos": "after",  "dec": 2},
+    "BGN": {"name": "Bulgarian Lev",   "symbol": "лв",  "pos": "after",  "dec": 2},
+    "HRK": {"name": "Croatian Kuna",   "symbol": "kn",  "pos": "after",  "dec": 2},
+    "TRY": {"name": "Turkish Lira",    "symbol": "₺",   "pos": "before", "dec": 2},
+    "CAD": {"name": "Canadian Dollar", "symbol": "$",   "pos": "before", "dec": 2},
+    "AUD": {"name": "Australian Dollar","symbol": "$",  "pos": "before", "dec": 2},
+    "NZD": {"name": "New Zealand Dollar","symbol": "$", "pos": "before", "dec": 2},
+    "JPY": {"name": "Japanese Yen",    "symbol": "¥",   "pos": "before", "dec": 0},
+    "CNY": {"name": "Chinese Yuan",    "symbol": "¥",   "pos": "before", "dec": 2},
+    "INR": {"name": "Indian Rupee",    "symbol": "₹",   "pos": "before", "dec": 2},
+    "BRL": {"name": "Brazilian Real",  "symbol": "R$",  "pos": "before", "dec": 2},
+    "MXN": {"name": "Mexican Peso",    "symbol": "$",   "pos": "before", "dec": 2},
+    "ZAR": {"name": "South African Rand","symbol": "R", "pos": "before", "dec": 2},
+    "RUB": {"name": "Russian Ruble",   "symbol": "₽",   "pos": "after",  "dec": 2},
+    "UAH": {"name": "Ukrainian Hryvnia","symbol": "₴",  "pos": "after",  "dec": 2},
+    "ILS": {"name": "Israeli Shekel",  "symbol": "₪",   "pos": "before", "dec": 2},
+    "KRW": {"name": "South Korean Won","symbol": "₩",   "pos": "before", "dec": 0},
+    "SGD": {"name": "Singapore Dollar","symbol": "$",   "pos": "before", "dec": 2},
+    "HKD": {"name": "Hong Kong Dollar","symbol": "$",   "pos": "before", "dec": 2},
+    "THB": {"name": "Thai Baht",       "symbol": "฿",   "pos": "before", "dec": 2},
+}
+_DEFAULT_CURRENCY = "EUR"
+
+
+def get_currency_code() -> str:
+    code = get_setting("currency", _DEFAULT_CURRENCY)
+    return code if code in CURRENCIES else _DEFAULT_CURRENCY
+
+
+def get_currency() -> dict:
+    """Full metadata dict for the configured currency (always valid)."""
+    return CURRENCIES[get_currency_code()]
+
+
+def set_currency(code: str) -> None:
+    if code in CURRENCIES:
+        set_setting("currency", code)
+
+
 def get_charge_prices() -> dict:
     db = _get()
     rows = db.execute(

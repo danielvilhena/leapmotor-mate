@@ -3,6 +3,18 @@
 All notable changes to LeapMotor Mate are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.8.0] — 2026-06-04
+
+### Added
+- **Customizable display currency.** The euro is no longer hardcoded — pick your
+  currency from **30 world currencies** (€, $, £, CHF, kr, zł, Ft, ¥, …) in
+  **Settings → Language & Currency**. Every cost across the app (Overview, Charges,
+  Wallbox, totals) reformats to it, with the correct **symbol placement**
+  (e.g. `$12.50` vs `12,50 €`) and **decimal digits** per currency (2 for most,
+  0 for yen/forint/won). The number format (decimal/thousands separator) follows
+  the selected UI language. The Settings *Language* card is now *Language &
+  Currency*, listing currencies by name (e.g. "Euro (€) — EUR"). (Requested in #10.)
+
 ## [1.7.1] — 2026-06-04
 
 ### Fixed

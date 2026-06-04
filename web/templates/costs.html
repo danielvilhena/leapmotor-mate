@@ -74,7 +74,7 @@
             </div>
           </div>
           <div class="flex items-center gap-2 self-end sm:self-auto">
-            <span class="text-slate-500 text-sm">€</span>
+            <span class="text-slate-500 text-sm">{{ currency.symbol }}</span>
             <input type="number" name="{{ setting_key }}"
                    value="{{ settings.get(setting_key, '0.00') }}"
                    step="0.01" min="0" max="9.99"
@@ -177,6 +177,7 @@
     ["{{ t('tou_preset_weekend') }}", [5, 6]]
   ];
   const BANDS = {{ tou_bands_json|safe }};
+  const CURRENCY_SYMBOL = "{{ currency.symbol }}";
   // Base (off-band) price per type — shown as a cell's placeholder, so it's clear
   // that leaving a band price blank falls back to this price.
   const BASE_PRICES = {
@@ -274,7 +275,7 @@
       name.className = "font-semibold w-16"; name.style.color = meta.color;
       name.textContent = meta.icon + " " + meta.label;
       const eur = document.createElement('span');
-      eur.className = "text-slate-500 text-xs"; eur.textContent = "€";
+      eur.className = "text-slate-500 text-xs"; eur.textContent = CURRENCY_SYMBOL;
       const v = (prices[t] !== undefined && prices[t] !== null) ? prices[t] : "";
       const inp = mkInput('number', v, "band-price w-20 text-right",
                           { step: "0.01", min: "0", max: "9.99" });

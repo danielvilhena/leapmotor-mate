@@ -11,19 +11,36 @@
   <!-- ── Column 1: Language, Vehicle, Battery, Polling ───────────────── -->
   <div class="flex-1 w-full space-y-5">
 
-    <!-- Language -->
+    <!-- Language & Currency -->
     <div class="card">
-      <h2 class="font-semibold text-white mb-4">{{ t('setup_language') }}</h2>
-      <form hx-post="api/settings/language" hx-trigger="change">
-        <select name="language"
-                class="w-full px-4 py-3 rounded-xl bg-slate-800 border border-slate-600 text-white
-                       text-sm focus:outline-none focus:border-brand cursor-pointer">
-          <option value="en" {% if lang == 'en' %}selected{% endif %}>🇬🇧 {{ t('lang_en') }}</option>
-          <option value="it" {% if lang == 'it' %}selected{% endif %}>🇮🇹 {{ t('lang_it') }}</option>
-          <option value="fr" {% if lang == 'fr' %}selected{% endif %}>🇫🇷 {{ t('lang_fr') }}</option>
-          <option value="de" {% if lang == 'de' %}selected{% endif %}>🇩🇪 {{ t('lang_de') }}</option>
-        </select>
-      </form>
+      <h2 class="font-semibold text-white mb-4">🌍 {{ t('setup_locale') }}</h2>
+      <div class="space-y-4">
+        <div>
+          <label class="block text-xs text-slate-400 mb-1.5">{{ t('setup_language') }}</label>
+          <form hx-post="api/settings/language" hx-trigger="change">
+            <select name="language"
+                    class="w-full px-4 py-3 rounded-xl bg-slate-800 border border-slate-600 text-white
+                           text-sm focus:outline-none focus:border-brand cursor-pointer">
+              <option value="en" {% if lang == 'en' %}selected{% endif %}>🇬🇧 {{ t('lang_en') }}</option>
+              <option value="it" {% if lang == 'it' %}selected{% endif %}>🇮🇹 {{ t('lang_it') }}</option>
+              <option value="fr" {% if lang == 'fr' %}selected{% endif %}>🇫🇷 {{ t('lang_fr') }}</option>
+              <option value="de" {% if lang == 'de' %}selected{% endif %}>🇩🇪 {{ t('lang_de') }}</option>
+            </select>
+          </form>
+        </div>
+        <div>
+          <label class="block text-xs text-slate-400 mb-1.5">{{ t('currency_label') }}</label>
+          <form hx-post="api/settings/currency" hx-trigger="change">
+            <select name="currency"
+                    class="w-full px-4 py-3 rounded-xl bg-slate-800 border border-slate-600 text-white
+                           text-sm focus:outline-none focus:border-brand cursor-pointer">
+              {% for code, c in currencies.items() %}
+              <option value="{{ code }}" {% if code == currency_code %}selected{% endif %}>{{ c.name }} ({{ c.symbol }}) — {{ code }}</option>
+              {% endfor %}
+            </select>
+          </form>
+        </div>
+      </div>
     </div>
 
     <!-- Vehicle info -->

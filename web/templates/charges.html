@@ -142,7 +142,7 @@ fetch('api/charge-plan').then(r => r.json()).then(d => {
   {{ scard(t('avg_duration'), "%.1f"|format(stats.avg_duration_h or 0),   'h',   'text-white')      }}
   {{ scard(t('peak_power'),   stats.peak_power_kw or '—',                 'kW',  'text-blue-400')   }}
   {{ scard(t('total_cost'),
-      '€' + "%.2f"|format(stats.total_cost) if stats.total_cost else '—',
+      stats.total_cost | money if stats.total_cost else '—',
       '', 'text-green-400') }}
 
 </div>
@@ -165,7 +165,7 @@ fetch('api/charge-plan').then(r => r.json()).then(d => {
         <span class="text-slate-500 whitespace-nowrap">{{ year.count }} sessions</span>
         <span class="text-yellow-400 font-semibold whitespace-nowrap">{{ year.kwh }} kWh</span>
         {% if year.has_cost %}
-        <span class="text-green-400 font-semibold whitespace-nowrap">€{{ "%.2f"|format(year.cost) }}</span>
+        <span class="text-green-400 font-semibold whitespace-nowrap">{{ year.cost | money }}</span>
         {% endif %}
       </div>
     </summary>
@@ -185,7 +185,7 @@ fetch('api/charge-plan').then(r => r.json()).then(d => {
             <span class="text-slate-500 whitespace-nowrap">{{ month.count }} sessions</span>
             <span class="text-yellow-400 font-medium whitespace-nowrap">{{ month.kwh }} kWh</span>
             {% if month.has_cost %}
-            <span class="text-green-400 font-medium whitespace-nowrap">€{{ "%.2f"|format(month.cost) }}</span>
+            <span class="text-green-400 font-medium whitespace-nowrap">{{ month.cost | money }}</span>
             {% endif %}
           </div>
         </summary>
@@ -205,7 +205,7 @@ fetch('api/charge-plan').then(r => r.json()).then(d => {
               <div class="flex items-center flex-wrap justify-end gap-x-3 gap-y-1 text-xs">
                 <span class="text-yellow-400 font-medium whitespace-nowrap">{{ day.kwh }} kWh</span>
                 {% if day.has_cost %}
-                <span class="text-green-400 font-medium whitespace-nowrap">€{{ "%.2f"|format(day.cost) }}</span>
+                <span class="text-green-400 font-medium whitespace-nowrap">{{ day.cost | money }}</span>
                 {% endif %}
               </div>
             </summary>
@@ -324,7 +324,7 @@ fetch('api/charge-plan').then(r => r.json()).then(d => {
                 <div style="background:#0f172a;border-radius:8px;padding:8px 12px">
                   <div class="stat-label" style="font-size:10px">{{ t('cost') }}</div>
                   <div id="cost-{{ c.id }}" style="font-size:16px;font-weight:700" class="{% if c.cost %}text-green-400{% else %}text-slate-600{% endif %}">
-                    {% if c.cost %}€{{ "%.2f"|format(c.cost) }}{% else %}—{% endif %}
+                    {% if c.cost %}{{ c.cost | money }}{% else %}—{% endif %}
                   </div>
                 </div>
               </div>

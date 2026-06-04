@@ -18,7 +18,7 @@ import ha_client
 import geocode
 import mqtt_test
 
-MATE_VERSION = "1.7.1"  # bump together with the git tag + add-on config.yaml at release
+MATE_VERSION = "1.8.0"  # bump together with the git tag + add-on config.yaml at release
 
 app = FastAPI(title="LeapMotor Mate")
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
@@ -32,6 +32,24 @@ def _nice(x) -> str:
     return f"{float(x):.2f}".rstrip("0").rstrip(".")
 
 templates.env.filters["nice"] = _nice
+
+
+def _money(x) -> str:
+    """Format a monetary amount with the configured currency symbol, placement
+    and decimal digits. Decimal/thousands separators follow the UI language
+    (comma for it/fr/de, dot for en) — no `locale`/`babel` dependency."""
+    if x is None:
+        return "—"
+    cur = db_reader.get_currency()
+    s = f"{float(x):,.{cur['dec']}f}"
+    if db_reader.get_language() != "en":
+        # swap separators: 1,234.50 -> 1.234,50
+        s = s.translate(str.maketrans({",": ".", ".": ","}))
+    sym = cur["symbol"]
+    # Use an explicit non-breaking space so "20,14 €" never wraps mid-amount.
+    return f"{sym}{s}" if cur["pos"] == "before" else f"{s}\u00a0{sym}"
+
+templates.env.filters["money"] = _money
 app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")
 
 
@@ -78,6 +96,7 @@ def _ctx(**kwargs):
         return t("state_parked")
     return {**kwargs, "lang": lang, "t": t, "version": MATE_VERSION,
             "wallbox_enabled": db_reader.get_setting("wallbox_enabled", "0") == "1",
+            "currency": db_reader.get_currency(),
             "soc_color": _soc_color, "state_label": state_label, "state_color": _state_color}
 
 
@@ -339,6 +358,8 @@ async def settings_page(request: Request):
         ha_url=db_reader.get_setting("ha_url", ""),
         ha_has_token=bool(db_reader.get_setting("ha_token", "")),
         ha_supervisor=bool(os.environ.get("SUPERVISOR_TOKEN")),
+        currencies=db_reader.CURRENCIES,
+        currency_code=db_reader.get_currency_code(),
     ))
 
 
@@ -753,6 +774,15 @@ async def set_language(request: Request):
     form = await request.form()
     lang = form.get("language", "en")
     db_reader.set_setting("language", lang if lang in ("en", "it", "fr", "de") else "en")
+    return Response(status_code=204, headers={"HX-Refresh": "true"})
+
+
+@app.post("/api/settings/currency")
+async def set_currency(request: Request):
+    """Change the currency used to format every monetary amount. Reloads the page
+    (HX-Refresh) so all server-rendered costs re-render with the new symbol."""
+    form = await request.form()
+    db_reader.set_currency(form.get("currency", "EUR"))
     return Response(status_code=204, headers={"HX-Refresh": "true"})
 
 

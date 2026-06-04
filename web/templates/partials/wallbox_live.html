@@ -36,7 +36,7 @@
   <div class="bg-slate-800 rounded-xl p-4 border border-slate-700">
     <div class="text-[11px] uppercase tracking-wide text-slate-400 mb-1">{{ t('wb_stat_cost') }}</div>
     <div class="text-2xl font-bold text-white">
-      {% if wb.cost is not none %}<span class="text-sm text-slate-400 mr-1">€</span>{{ wb.cost | nice }}{% else %}<span class="text-slate-600">—</span>{% endif %}
+      {% if wb.cost is not none %}{{ wb.cost | money }}{% else %}<span class="text-slate-600">—</span>{% endif %}
     </div>
   </div>
   <!-- Max available power (wallbox config — always shown) -->

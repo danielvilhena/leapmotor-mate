@@ -32,6 +32,7 @@ Supported models: **B10 · C10 · T03** (European spec).
 - **🆕 Navigation** — search an address and **send the destination straight to the car's built‑in navigation**. Shows the car's current address too. Address lookup is keyless by default (OpenStreetMap) with an optional API key (Geoapify/LocationIQ/TomTom) for better house‑number coverage.
 - **Independent** — polls the Leapmotor cloud directly (configurable 10–30 s). No dependency on the phone app or Home Assistant; polling the cloud does **not** wake or drain the car.
 - **Multilingual UI** — English · Italiano · Français · Deutsch.
+- **🆕 Currency** — pick your display currency from 30 world currencies (€, $, £, CHF, kr, zł…); every cost reformats to it, with the right symbol placement and decimals.
 
 ## How it works
 
@@ -99,7 +100,7 @@ Everything is configured from the web UI (**Settings**), no YAML needed:
 
 - **Polling interval** — parked (default 30 s) and driving (default 10 s). Faster catches trips/charges sooner; slower means fewer API calls. Polling the cloud does not wake or drain the car.
 - **Charge prices** — flat or time-of-use, on the dedicated *Charge Prices* page (see below).
-- **Language** — English / Italiano / Français / Deutsch.
+- **Language & currency** — English / Italiano / Français / Deutsch, and your display currency (€, $, £, CHF… 30 currencies). The number format (decimal/thousands separator) follows the selected language.
 
 ### Charge prices
 
@@ -190,6 +191,7 @@ Modelli supportati: **B10 · C10 · T03** (spec. europea).
 - **🆕 Navigazione** — cerca un indirizzo e **invia la destinazione direttamente al navigatore di bordo dell'auto**. Mostra anche l'indirizzo attuale dell'auto. La ricerca indirizzi funziona senza chiave (OpenStreetMap) con una chiave API opzionale (Geoapify/LocationIQ/TomTom) per una copertura migliore dei civici.
 - **Indipendente** — interroga direttamente il cloud Leapmotor (configurabile 10–30 s). Nessuna dipendenza dall'app o da Home Assistant; interrogare il cloud **non** sveglia né scarica l'auto.
 - **UI multilingua** — Italiano · English · Français · Deutsch.
+- **🆕 Valuta** — scegli la valuta di visualizzazione tra 30 valute mondiali (€, $, £, CHF, kr, zł…); ogni costo si riformatta con simbolo e decimali corretti.
 
 ## Come funziona
 
@@ -251,7 +253,7 @@ Tutto si configura dalla UI web (**Impostazioni**), senza YAML:
 
 - **Intervallo di polling** — parcheggiata (default 30 s) e in marcia (default 10 s). Più veloce rileva prima viaggi/ricariche; più lento riduce le chiamate. Interrogare il cloud non sveglia né scarica l'auto.
 - **Prezzi di ricarica** — fisso o a fasce orarie, dalla pagina dedicata *Prezzi di ricarica* (vedi sotto).
-- **Lingua** — Italiano / English / Français / Deutsch.
+- **Lingua e valuta** — Italiano / English / Français / Deutsch, e la valuta di visualizzazione (€, $, £, CHF… 30 valute). Il formato numero (separatore decimale/migliaia) segue la lingua selezionata.
 
 ### Prezzi di ricarica
 
