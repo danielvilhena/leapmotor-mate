@@ -304,10 +304,19 @@
         </div>
         <div class="flex items-center justify-between gap-3">
           <div id="mqtt-feedback" class="text-xs"></div>
-          <button type="submit"
-                  class="bg-brand text-white text-sm font-semibold rounded-lg px-4 py-2 flex-shrink-0">
-            {{ t('mqtt_save') }}
-          </button>
+          <div class="flex items-center gap-2 flex-shrink-0">
+            <button type="button"
+                    hx-post="api/settings/mqtt/test" hx-include="closest form"
+                    hx-target="#mqtt-feedback" hx-swap="innerHTML"
+                    hx-indicator="#mqtt-feedback"
+                    class="border border-slate-600 text-slate-200 text-sm font-medium rounded-lg px-4 py-2 hover:border-brand">
+              {{ t('mqtt_test') }}
+            </button>
+            <button type="submit"
+                    class="bg-brand text-white text-sm font-semibold rounded-lg px-4 py-2">
+              {{ t('mqtt_save') }}
+            </button>
+          </div>
         </div>
       </form>
     </div>

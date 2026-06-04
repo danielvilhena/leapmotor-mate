@@ -16,6 +16,7 @@ import command_client
 import i18n
 import ha_client
 import geocode
+import mqtt_test
 
 MATE_VERSION = "1.6.3"  # bump together with the git tag + add-on config.yaml at release
 
@@ -722,6 +723,27 @@ async def save_mqtt(request: Request):
             db_reader.set_setting(key, (form.get(key) or "").strip())
     t = i18n.get_t(db_reader.get_language())
     return HTMLResponse(f'<span style="color:#22c55e;font-size:13px">{t("mqtt_saved")}</span>')
+
+
+@app.post("/api/settings/mqtt/test", response_class=HTMLResponse)
+async def test_mqtt(request: Request):
+    """Try to connect to the broker with the values currently in the form (before
+    saving), so the user can verify host/port/credentials/TLS first."""
+    form = await request.form()
+    import asyncio
+    ok, reason = await asyncio.get_event_loop().run_in_executor(
+        None, lambda: mqtt_test.test_connection(
+            form.get("mqtt_broker", ""),
+            form.get("mqtt_port", "1883"),
+            form.get("mqtt_user") or None,
+            form.get("mqtt_pass") or None,
+            form.get("mqtt_tls") in ("1", "on", "true"),
+            form.get("mqtt_tls_insecure") in ("1", "on", "true"),
+        ))
+    t = i18n.get_t(db_reader.get_language())
+    if ok:
+        return HTMLResponse(f'<span style="color:#22c55e;font-size:13px">🟢 {t("mqtt_connected")}</span>')
+    return HTMLResponse(f'<span style="color:#ef4444;font-size:13px">🔴 {t("mqtt_failed")}: {reason}</span>')
 
 
 @app.post("/api/settings/language")

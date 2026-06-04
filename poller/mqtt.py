@@ -136,11 +136,31 @@ class MqttService:
                             json.dumps({"latitude": data.latitude, "longitude": data.longitude}),
                             retain=True)
 
+    def publish_state(self, vin, key, value):
+        """Publish a single retained state topic — used for an optimistic update the
+        moment a command succeeds, so the HA entity flips without waiting for the
+        next full status publish. Same value encoding as _publish_sensors."""
+        if not self.client or not self.client.is_connected():
+            return
+        if isinstance(value, bool):
+            v = "ON" if value else "OFF"
+        else:
+            v = "" if value is None else str(value)
+        self.client.publish(f"{self.topic_prefix}/{vin}/{key}", v, retain=True)
+
     def publish_discovery(self, data):
         vin = data.vin
         prefix = self.topic_prefix
-        device_id = f"leapmotor_mate_{vin.lower()}"
-        device = {"identifiers": [device_id], "name": f"Leapmotor Mate {vin[-6:]}",
+        # Scope the HA device to the topic prefix, so a second instance on a different
+        # prefix (e.g. a test poller alongside the production add-on, same car/VIN)
+        # creates a SEPARATE device instead of fighting over the same discovery configs
+        # and entities. The default prefix "leapmotor" yields the exact same id as
+        # before → existing installs are completely unaffected.
+        device_id = f"{prefix}_mate_{vin.lower()}"
+        name = f"Leapmotor Mate {vin[-6:]}"
+        if prefix != "leapmotor":
+            name += f" ({prefix})"
+        device = {"identifiers": [device_id], "name": name,
                   "manufacturer": "Leapmotor", "model": "Vehicle", "sw_version": "Mate"}
 
         def cfg(component, key, conf):
@@ -187,8 +207,14 @@ class MqttService:
             ("any_door_open", "Any Door", "door"), ("windows_open", "Any Window", "window"),
         ]
         for key, name, dc in binaries:
-            cfg("binary_sensor", key, {"name": name, "state_topic": f"{prefix}/{vin}/{key}",
-                                       "payload_on": "ON", "payload_off": "OFF", "device_class": dc})
+            conf = {"name": name, "state_topic": f"{prefix}/{vin}/{key}",
+                    "payload_on": "ON", "payload_off": "OFF", "device_class": dc}
+            if key == "locked":
+                # HA's `lock` device_class is inverted (on = unlocked, off = locked).
+                # We publish ON = locked, so swap the payloads → a locked car shows
+                # "Locked" (not "Unlocked"). The published topic value is unchanged.
+                conf["payload_on"], conf["payload_off"] = "OFF", "ON"
+            cfg("binary_sensor", key, conf)
 
         for key, name, icon in [
             ("lock", "Lock", "mdi:lock"), ("unlock", "Unlock", "mdi:lock-open"),

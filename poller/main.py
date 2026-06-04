@@ -20,10 +20,27 @@ logging.basicConfig(
 log = logging.getLogger("leapmotor_mate")
 
 
-def _handle_mqtt_command(client, vin: str, cmd: str, value):
-    """Execute a remote command received over MQTT. B10 commands that the cloud
-    accepts-but-ignores (e.g. full A/C off) are simply best-effort."""
+# Expected state to publish the instant a command succeeds (mirrors the web UI's
+# optimistic overlay), so the HA entity flips immediately instead of waiting for the
+# next poll. The boost re-poll below then confirms it from the real signals.
+_MQTT_OPTIMISTIC = {
+    "lock":        ("locked", True),
+    "unlock":      ("locked", False),
+    "open_trunk":  ("trunk_open", True),
+    "close_trunk": ("trunk_open", False),
+}
+_MQTT_BOOST_S = 60   # after a command, poll fast for a minute so the state syncs quickly
+
+
+def _handle_mqtt_command(client, service, db, vin: str, cmd: str, value):
+    """Execute a remote MQTT command, then keep HA in sync the same way the web UI
+    does: publish the expected state immediately (optimistic) and trigger a fast
+    re-poll so the real signals confirm it within seconds. Without this the MQTT
+    state only refreshed on the next scheduled poll (up to 30s when parked), which
+    is why it looked stale/out of sync. B10 commands the cloud accepts-but-ignores
+    (e.g. full A/C off) stay best-effort."""
     api = client._api
+    optimistic = _MQTT_OPTIMISTIC.get(cmd)
     try:
         if cmd == "lock":          api.lock_vehicle(vin)
         elif cmd == "unlock":      api.unlock_vehicle(vin)
@@ -31,13 +48,27 @@ def _handle_mqtt_command(client, vin: str, cmd: str, value):
         elif cmd == "close_trunk": api.close_trunk(vin)
         elif cmd == "find_car":    api._remote_control(vin=vin, action="find_car")
         elif cmd == "climate":
-            if value == "ON":
-                api.ac_switch(vin)   # A/C off isn't reliable on the B10 → on only
+            if value != "ON":
+                return               # A/C off isn't reliable on the B10 → on only
+            api.ac_switch(vin)
+            optimistic = ("climate_on", True)
         else:
             return
         log.info("MQTT: executed command %s %s", cmd, value or "")
     except Exception as exc:  # noqa: BLE001
         log.error("MQTT: command %s failed: %s", cmd, exc)
+        return
+
+    # Command succeeded → reflect it in HA now, then re-poll fast to confirm the real state.
+    if optimistic and service:
+        try:
+            service.publish_state(vin, optimistic[0], optimistic[1])
+        except Exception as exc:  # noqa: BLE001
+            log.warning("MQTT: optimistic publish failed: %s", exc)
+    try:
+        db.set_setting("boost_until", str(time.time() + _MQTT_BOOST_S))
+    except Exception as exc:  # noqa: BLE001
+        log.warning("MQTT: boost trigger failed: %s", exc)
 
 
 def _mqtt_tick(db, client, data, service):
@@ -58,7 +89,7 @@ def _mqtt_tick(db, client, data, service):
             tls_insecure=db.get_setting("mqtt_tls_insecure") == "1",
             discovery_enabled=db.get_setting("mqtt_discovery", "1") == "1",
         )
-        service.on_command = lambda vin, cmd, val: _handle_mqtt_command(client, vin, cmd, val)
+        service.on_command = lambda vin, cmd, val: _handle_mqtt_command(client, service, db, vin, cmd, val)
     try:
         service.publish_status(data)
     except Exception as exc:  # noqa: BLE001
