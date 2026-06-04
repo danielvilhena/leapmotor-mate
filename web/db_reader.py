@@ -195,24 +195,144 @@ def save_cost_config(mode: str, method: str, bands: list) -> None:
     set_setting("tou_bands", json.dumps(clean))
 
 
-def update_charge_type(charge_id: int, location_type: str) -> dict:
-    """Set location_type and recalculate cost. Returns updated charge dict."""
-    db = _conn_rw()
-    prices = get_charge_prices()
-    price_key = PRICE_KEYS.get(location_type)
-    price = prices.get(price_key, 0.0) if price_key else 0.0
+def _parse_hhmm(s) -> Optional[int]:
+    """'HH:MM' → minute-of-day (0–1440), or None if unparseable."""
+    try:
+        h, m = str(s).split(":")
+        v = int(h) * 60 + int(m)
+        return v if 0 <= v <= 24 * 60 else None
+    except (ValueError, AttributeError):
+        return None
 
-    charge = db.execute("SELECT * FROM charges WHERE id=?", (charge_id,)).fetchone()
-    if not charge:
+
+def _time_in_window(minute: int, start_min: int, end_min: int) -> bool:
+    """Is minute-of-day inside [start, end)? Handles windows crossing midnight
+    (start > end, e.g. 23:30→06:30). start == end means the whole day."""
+    if start_min == end_min:
+        return True
+    if start_min < end_min:
+        return start_min <= minute < end_min
+    return minute >= start_min or minute < end_min
+
+
+def _match_band(bands: list, weekday: int, minute: int):
+    """First band whose days include `weekday` and whose window covers `minute`.
+    Day/time are those of the moment being priced, so a 23:30→06:30 Saturday band
+    covers the Saturday-night part; the Sunday-morning part needs Sunday in days."""
+    for b in bands:
+        days = b.get("days")
+        if not isinstance(days, list):
+            days = list(range(7))
+        if weekday not in days:
+            continue
+        s, e = _parse_hhmm(b.get("start")), _parse_hhmm(b.get("end"))
+        if s is None or e is None:
+            continue
+        if _time_in_window(minute, s, e):
+            return b
+    return None
+
+
+def _resolve_price(band, ctype: str, base: float, base_set: bool):
+    """Price for a charge type at a moment: the band's per-type price if set, else
+    the base price. is_set=False means neither provides a real price (→ not costed)."""
+    if band is not None:
+        bp = (band.get("prices") or {}).get(ctype)
+        if bp is not None:
+            return float(bp), True
+    return base, base_set
+
+
+def compute_cost(charge, config: Optional[dict] = None):
+    """Cost for ONE charge using the pricing config in effect *now*. This is the
+    single place a charge's cost is set, and it is frozen afterwards (no retroactive
+    recompute when prices/bands change later). Returns a float (0.0 = free) or None
+    when the type/price isn't known yet.
+        flat        → energy × base price for the charge's type
+        TOU 'start' → price of the band matching the start day+time (else base)
+        TOU 'split' → energy split across bands by the real power curve, each
+                      sample priced by the band matching its own day+time
+    """
+    location_type = charge["location_type"]
+    energy = charge["energy_added_kwh"] or 0
+    if not location_type or energy <= 0:
+        return None
+    if location_type == "FREE":
+        return 0.0
+
+    if config is None:
+        config = get_cost_config()
+    prices = get_charge_prices()
+    key = PRICE_KEYS.get(location_type, "")
+    base_set = key in prices
+    base = float(prices.get(key, 0.0) or 0.0)
+
+    bands = config.get("bands") or []
+    if config.get("mode") != "tou" or not bands:
+        return round(energy * base, 2) if base else None
+
+    def _start_band_cost():
+        dt = _local_dt(charge["started_at"])
+        if dt is None:
+            return round(energy * base, 2) if base else None
+        band = _match_band(bands, dt.weekday(), dt.hour * 60 + dt.minute)
+        price, is_set = _resolve_price(band, location_type, base, base_set)
+        if not is_set and price == 0:
+            return None
+        return round(energy * price, 2)
+
+    if config.get("method") == "start":
+        return _start_band_cost()
+
+    # method 'split': integrate the power curve, price each interval by its band
+    db = _get()
+    rows = db.execute(
+        "SELECT recorded_at, charge_voltage_v, charge_current_a FROM positions "
+        "WHERE charging = 1 AND recorded_at >= ? AND recorded_at <= ? ORDER BY recorded_at",
+        (charge["started_at"], charge["ended_at"] or charge["started_at"]),
+    ).fetchall()
+    samples = []
+    for r in rows:
+        dt = _local_dt(r["recorded_at"])
+        if dt is not None:
+            power = abs((r["charge_voltage_v"] or 0) * (r["charge_current_a"] or 0)) / 1000.0
+            samples.append((dt, power))
+
+    total_e, weighted, any_set = 0.0, 0.0, False
+    for (dt0, p0), (dt1, p1) in zip(samples, samples[1:]):
+        hours = (dt1 - dt0).total_seconds() / 3600.0
+        if hours <= 0:
+            continue
+        e = (p0 + p1) / 2.0 * hours
+        if e <= 0:
+            continue
+        band = _match_band(bands, dt0.weekday(), dt0.hour * 60 + dt0.minute)
+        price, is_set = _resolve_price(band, location_type, base, base_set)
+        any_set = any_set or is_set
+        total_e += e
+        weighted += e * price
+
+    if total_e <= 0:               # no usable curve → fall back to the start band
+        return _start_band_cost()
+    if not any_set and weighted == 0:
+        return None
+    # scale the time-weighted average price onto the authoritative (SOC) energy,
+    # so the total stays consistent with the energy shown elsewhere.
+    return round(energy * (weighted / total_e), 2)
+
+
+def update_charge_type(charge_id: int, location_type: str) -> dict:
+    """Set location_type and compute the cost from the pricing config in effect now
+    (flat or time-of-use). This freezes the cost — later price/band edits do not
+    change it (the 'new charges only' rule)."""
+    db = _conn_rw()
+    row = db.execute("SELECT * FROM charges WHERE id=?", (charge_id,)).fetchone()
+    if not row:
         return {}
 
-    energy = charge["energy_added_kwh"] or 0
-    # FREE charging is genuinely €0 (not "unknown"); every other type with no
-    # price set stays None until a price is configured.
-    if location_type == "FREE":
-        cost = 0.0
-    else:
-        cost = round(energy * price, 2) if price else None
+    charge = dict(row)
+    charge["location_type"] = location_type
+    cost = compute_cost(charge)
 
     db.execute(
         "UPDATE charges SET location_type=?, cost=? WHERE id=?",
