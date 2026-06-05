@@ -1082,3 +1082,147 @@ def get_ac_dc_stats() -> dict:
     ac["kwh"] = round(ac["kwh"], 2)
     dc["kwh"] = round(dc["kwh"], 2)
     return {"ac": ac, "dc": dc, "total": ac["count"] + dc["count"]}
+
+
+# ── Battery health (SoH) ───────────────────────────────────────────────────────
+
+def get_battery_capacity_kwh() -> float:
+    """Configured (nominal) usable battery capacity, set per-model at first run and
+    overridable in Settings. Used as the 100%-SoC reference for the health estimate."""
+    try:
+        return float(get_setting("battery_capacity_kwh", "67.1"))
+    except (TypeError, ValueError):
+        return 67.1
+
+
+def _integrate_charge_energy_kwh(db, start: str, end: str | None) -> float:
+    """Real DC energy delivered into the pack during a charge = ∫|V·I|dt over the
+    logged samples (trapezoidal). V/I come from signals 1177/1178 in `positions`, the
+    same source as the power-curve chart and the Wallbox DC comparison. This is a
+    MEASURED energy, independent of SoC — so dividing it by the SoC delta gives an
+    estimate of usable pack capacity that actually tracks battery ageing (unlike the
+    stored energy_added_kwh, which is SoC × nominal capacity and would be circular)."""
+    if end:
+        rows = db.execute(
+            "SELECT recorded_at, charge_voltage_v, charge_current_a FROM positions "
+            "WHERE charging = 1 AND recorded_at >= ? AND recorded_at <= ? ORDER BY recorded_at",
+            (start, end),
+        ).fetchall()
+    else:
+        rows = db.execute(
+            "SELECT recorded_at, charge_voltage_v, charge_current_a FROM positions "
+            "WHERE charging = 1 AND recorded_at >= ? ORDER BY recorded_at",
+            (start,),
+        ).fetchall()
+    energy = 0.0
+    prev_t = None
+    prev_p = 0.0
+    for r in rows:
+        try:
+            t = datetime.fromisoformat(str(r["recorded_at"]).replace(" ", "T").rstrip("Z"))
+        except Exception:
+            continue
+        p = abs((r["charge_voltage_v"] or 0) * (r["charge_current_a"] or 0)) / 1000.0
+        if prev_t is not None:
+            dt_h = (t - prev_t).total_seconds() / 3600.0
+            # Guard against gaps (deep-sleep / pruning): ignore intervals over 15 min.
+            if 0 < dt_h <= 0.25:
+                energy += (p + prev_p) / 2.0 * dt_h
+        prev_t, prev_p = t, p
+    return energy
+
+
+def get_battery_health(min_soc_delta: float = 12.0) -> dict:
+    """Estimate usable battery capacity / state-of-health over time from charge
+    sessions. For each charge with a meaningful SoC rise we integrate the measured
+    DC energy and divide by the SoC delta → estimated full-pack capacity. Noisy
+    single sessions are expected, so the headline SoH is smoothed over the most
+    recent points. Charges whose telemetry was pruned (no samples) are skipped."""
+    db = _get()
+    nominal = get_battery_capacity_kwh()
+    rows = db.execute(
+        "SELECT id, started_at, ended_at, start_soc, end_soc, charge_type "
+        "FROM charges WHERE ended_at IS NOT NULL AND start_soc IS NOT NULL "
+        "AND end_soc IS NOT NULL ORDER BY started_at",
+    ).fetchall()
+    points = []
+    for r in rows:
+        delta = (r["end_soc"] or 0) - (r["start_soc"] or 0)
+        if delta < min_soc_delta:                      # tiny top-ups → huge relative error
+            continue
+        energy = _integrate_charge_energy_kwh(db, r["started_at"], r["ended_at"])
+        if energy <= 0.1:                              # no usable telemetry (pruned / AC-only meter)
+            continue
+        est = energy / (delta / 100.0)
+        # Drop physically implausible estimates (sampling gaps, bad V/I spikes).
+        if not (nominal * 0.5 <= est <= nominal * 1.15):
+            continue
+        dt = _local_dt(r["started_at"])
+        points.append({
+            "charge_id": r["id"],
+            "date": dt.strftime("%Y-%m-%d") if dt else (r["started_at"] or "")[:10],
+            "ts": dt.isoformat() if dt else r["started_at"],
+            "capacity_kwh": round(est, 1),
+            "soh_pct": round(est / nominal * 100, 1) if nominal else None,
+            "soc_delta": round(delta, 1),
+            "energy_kwh": round(energy, 2),
+            "charge_type": r["charge_type"],
+        })
+    # Smoothed headline = mean of the last up-to-5 estimates (reduces per-session noise).
+    tail = points[-5:]
+    latest_cap = round(sum(p["capacity_kwh"] for p in tail) / len(tail), 1) if tail else None
+    latest_soh = round(latest_cap / nominal * 100, 1) if (latest_cap and nominal) else None
+    return {
+        "nominal_kwh": round(nominal, 1),
+        "points": points,
+        "sample_count": len(points),
+        "latest_capacity_kwh": latest_cap,
+        "latest_soh_pct": latest_soh,
+    }
+
+
+# ── Global map (all tracks + frequent places) ──────────────────────────────────
+
+def get_all_track(max_points: int = 4000) -> list[list[float]]:
+    """All recorded GPS points across every trip, downsampled to ``max_points`` and
+    returned as [lat, lon] pairs. Drawn as a density layer (small dots) on the global
+    map, so it shows where the car actually goes without joining separate trips."""
+    db = _get()
+    rows = db.execute(
+        "SELECT latitude, longitude FROM trip_positions "
+        "WHERE latitude IS NOT NULL AND longitude IS NOT NULL ORDER BY id"
+    ).fetchall()
+    pts = [[round(r["latitude"], 5), round(r["longitude"], 5)] for r in rows]
+    if len(pts) <= max_points:
+        return pts
+    step = len(pts) / max_points
+    return [pts[int(i * step)] for i in range(max_points)]
+
+
+def get_frequent_places(min_visits: int = 2, top_n: int = 15) -> list[dict]:
+    """Cluster trip start/end points into recurring places (Home, Work, …) by snapping
+    coordinates to a ~110 m grid (3 decimals) and counting visits. Returns the busiest
+    clusters with an averaged centre and a visit count — no reverse geocoding, so it
+    stays offline and cheap."""
+    db = _get()
+    rows = db.execute(
+        "SELECT start_lat, start_lon, end_lat, end_lon FROM trips"
+    ).fetchall()
+    buckets: dict[tuple, dict] = {}
+    for r in rows:
+        for lat, lon in ((r["start_lat"], r["start_lon"]), (r["end_lat"], r["end_lon"])):
+            if lat is None or lon is None:
+                continue
+            key = (round(lat, 3), round(lon, 3))
+            b = buckets.setdefault(key, {"lat": 0.0, "lon": 0.0, "visits": 0})
+            b["lat"] += lat
+            b["lon"] += lon
+            b["visits"] += 1
+    places = [
+        {"latitude": round(b["lat"] / b["visits"], 6),
+         "longitude": round(b["lon"] / b["visits"], 6),
+         "visits": b["visits"]}
+        for b in buckets.values() if b["visits"] >= min_visits
+    ]
+    places.sort(key=lambda p: p["visits"], reverse=True)
+    return places[:top_n]

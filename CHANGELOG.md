@@ -3,6 +3,28 @@
 All notable changes to LeapMotor Mate are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.9.0] — 2026-06-05
+
+### Added
+- **Battery health page.** A new *Battery health* page estimates your pack's usable
+  capacity (and a state-of-health %) over time. For each charge it integrates the
+  **measured** energy delivered (∫ voltage × current, the same source as the charge
+  power curve) and divides it by the SoC gained — so the estimate tracks real battery
+  ageing rather than just echoing the configured nominal capacity. Only charges with a
+  meaningful SoC rise and stored telemetry are used; the headline figure is smoothed
+  over the most recent charges to cut single-session noise. It's an estimate, not a lab
+  measurement.
+- **Global map.** A new *Map* page plots every recorded GPS point as a density layer —
+  showing everywhere the car has driven — plus your **most-visited places** as bubbles
+  sized by visit count (start/end points clustered to ~110 m, no reverse geocoding).
+- **SoC & speed profile on each trip.** The trip detail page now charts state-of-charge
+  and speed over the course of the drive (replacing the plain speed bar).
+
+### Notes
+- Both new pages read **existing data** (the charge telemetry and trip GPS already
+  logged) — nothing new is collected. Very old sessions whose GPS samples were pruned
+  simply won't appear.
+
 ## [1.8.2] — 2026-06-05
 
 ### Added

@@ -4,6 +4,28 @@ _T: dict[str, dict[str, str]] = {
     "en": {
         # Nav
         "nav_overview":    "Overview",
+        "nav_map":         "Map",
+        "nav_battery":     "Battery health",
+        # Map page
+        "map_title":            "Map",
+        "map_subtitle":         "Everywhere you've driven, and your most-visited places",
+        "map_frequent_places":  "Frequent places",
+        "map_visits":           "Visits",
+        "map_track_dots":       "Driven points",
+        "map_points":           "GPS points",
+        "map_no_data":          "No GPS data yet — drive a bit and your map will fill in.",
+        # Trip profile chart
+        "trip_profile":         "SoC & speed",
+        # Battery health page
+        "battery_title":        "Battery health",
+        "battery_subtitle":     "Estimated usable capacity over time, from real charge energy vs the SoC gained",
+        "battery_soh":          "State of health",
+        "battery_est_capacity": "Est. capacity",
+        "battery_nominal":      "Nominal",
+        "battery_samples":      "Charges used",
+        "battery_trend_title":  "Estimated capacity per charge",
+        "battery_no_data":      "Not enough data yet.",
+        "battery_method":       "Each point is the measured energy delivered during a charge (∫ voltage × current) divided by the SoC it added — an estimate of full-pack capacity. Only charges with a meaningful SoC rise and stored telemetry are used; single points are noisy, so the headline figure is averaged over the most recent charges. This is an estimate, not a lab measurement.",
         "nav_trips":       "Trips",
         "nav_charges":     "Charges",
         "nav_statistics":  "Statistics",
@@ -409,6 +431,28 @@ _T: dict[str, dict[str, str]] = {
     "it": {
         # Nav
         "nav_overview":    "Panoramica",
+        "nav_map":         "Mappa",
+        "nav_battery":     "Salute batteria",
+        # Map page
+        "map_title":            "Mappa",
+        "map_subtitle":         "Tutti i posti dove hai guidato e i luoghi più frequentati",
+        "map_frequent_places":  "Luoghi frequenti",
+        "map_visits":           "Visite",
+        "map_track_dots":       "Punti percorsi",
+        "map_points":           "punti GPS",
+        "map_no_data":          "Ancora nessun dato GPS — guida un po' e la mappa si popolerà.",
+        # Trip profile chart
+        "trip_profile":         "SoC e velocità",
+        # Battery health page
+        "battery_title":        "Salute batteria",
+        "battery_subtitle":     "Capacità utile stimata nel tempo, dall'energia reale di ricarica rispetto al SoC guadagnato",
+        "battery_soh":          "Stato di salute",
+        "battery_est_capacity": "Capacità stim.",
+        "battery_nominal":      "Nominale",
+        "battery_samples":      "Ricariche usate",
+        "battery_trend_title":  "Capacità stimata per ricarica",
+        "battery_no_data":      "Dati ancora insufficienti.",
+        "battery_method":       "Ogni punto è l'energia misurata erogata durante una ricarica (∫ tensione × corrente) divisa per il SoC aggiunto — una stima della capacità totale del pacco. Si usano solo le ricariche con un aumento di SoC significativo e telemetria salvata; i singoli punti sono rumorosi, quindi il valore in evidenza è la media delle ricariche più recenti. È una stima, non una misura di laboratorio.",
         "nav_trips":       "Viaggi",
         "nav_charges":     "Ricariche",
         "nav_statistics":  "Statistiche",
@@ -814,6 +858,28 @@ _T: dict[str, dict[str, str]] = {
     "fr": {
         # Nav
         "nav_overview":    "Aperçu",
+        "nav_map":         "Carte",
+        "nav_battery":     "Santé batterie",
+        # Map page
+        "map_title":            "Carte",
+        "map_subtitle":         "Partout où vous avez roulé et vos lieux les plus visités",
+        "map_frequent_places":  "Lieux fréquents",
+        "map_visits":           "Visites",
+        "map_track_dots":       "Points parcourus",
+        "map_points":           "points GPS",
+        "map_no_data":          "Pas encore de données GPS — roulez un peu et la carte se remplira.",
+        # Trip profile chart
+        "trip_profile":         "SoC et vitesse",
+        # Battery health page
+        "battery_title":        "Santé de la batterie",
+        "battery_subtitle":     "Capacité utile estimée dans le temps, à partir de l'énergie de charge réelle par rapport au SoC gagné",
+        "battery_soh":          "État de santé",
+        "battery_est_capacity": "Capacité est.",
+        "battery_nominal":      "Nominale",
+        "battery_samples":      "Charges utilisées",
+        "battery_trend_title":  "Capacité estimée par charge",
+        "battery_no_data":      "Pas encore assez de données.",
+        "battery_method":       "Chaque point est l'énergie mesurée fournie pendant une charge (∫ tension × courant) divisée par le SoC ajouté — une estimation de la capacité totale du pack. Seules les charges avec une hausse de SoC significative et une télémétrie enregistrée sont utilisées ; les points isolés sont bruités, la valeur affichée est donc moyennée sur les charges les plus récentes. C'est une estimation, pas une mesure de laboratoire.",
         "nav_trips":       "Trajets",
         "nav_charges":     "Recharges",
         "nav_statistics":  "Statistiques",
@@ -1219,6 +1285,28 @@ _T: dict[str, dict[str, str]] = {
     "de": {
         # Nav
         "nav_overview":    "Übersicht",
+        "nav_map":         "Karte",
+        "nav_battery":     "Batteriezustand",
+        # Map page
+        "map_title":            "Karte",
+        "map_subtitle":         "Überall, wo du gefahren bist, und deine meistbesuchten Orte",
+        "map_frequent_places":  "Häufige Orte",
+        "map_visits":           "Besuche",
+        "map_track_dots":       "Gefahrene Punkte",
+        "map_points":           "GPS-Punkte",
+        "map_no_data":          "Noch keine GPS-Daten — fahr ein wenig und die Karte füllt sich.",
+        # Trip profile chart
+        "trip_profile":         "SoC & Tempo",
+        # Battery health page
+        "battery_title":        "Batteriezustand",
+        "battery_subtitle":     "Geschätzte nutzbare Kapazität über die Zeit, aus realer Ladeenergie gegenüber gewonnenem SoC",
+        "battery_soh":          "Gesundheitszustand",
+        "battery_est_capacity": "Gesch. Kapazität",
+        "battery_nominal":      "Nominal",
+        "battery_samples":      "Genutzte Ladungen",
+        "battery_trend_title":  "Geschätzte Kapazität pro Ladung",
+        "battery_no_data":      "Noch nicht genügend Daten.",
+        "battery_method":       "Jeder Punkt ist die gemessene Energie einer Ladung (∫ Spannung × Strom) geteilt durch den hinzugefügten SoC — eine Schätzung der Gesamtkapazität. Nur Ladungen mit deutlichem SoC-Anstieg und gespeicherter Telemetrie werden verwendet; einzelne Punkte schwanken, daher wird der angezeigte Wert über die letzten Ladungen gemittelt. Dies ist eine Schätzung, keine Labormessung.",
         "nav_trips":       "Fahrten",
         "nav_charges":     "Ladungen",
         "nav_statistics":  "Statistik",

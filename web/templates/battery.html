@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}{{ t('nav_battery') }} — LeapMotor Mate{% endblock %}
+
+{% block content %}
+<div class="mb-5">
+  <h1 class="text-xl font-bold text-white">{{ t('battery_title') }}</h1>
+  <p class="text-sm text-slate-400 mt-1">{{ t('battery_subtitle') }}</p>
+</div>
+
+{% if health.sample_count and health.latest_soh_pct %}
+<!-- Headline tiles -->
+<div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+  {% macro tile(label, value, unit, color='text-white') %}
+  <div style="background:#1e293b;border:1px solid #334155;border-radius:12px;padding:14px 16px">
+    <div style="font-size:10px;color:#64748b;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">{{ label }}</div>
+    <div style="font-size:1.6rem;font-weight:700" class="{{ color }}">
+      {{ value }}<span style="font-size:0.85rem;font-weight:400;color:#94a3b8"> {{ unit }}</span>
+    </div>
+  </div>
+  {% endmacro %}
+
+  {% set soh = health.latest_soh_pct %}
+  {{ tile(t('battery_soh'), soh, '%',
+       'text-green-400' if soh >= 92 else 'text-yellow-400' if soh >= 85 else 'text-red-400') }}
+  {{ tile(t('battery_est_capacity'), health.latest_capacity_kwh, 'kWh', 'text-blue-400') }}
+  {{ tile(t('battery_nominal'), health.nominal_kwh, 'kWh', 'text-slate-300') }}
+  {{ tile(t('battery_samples'), health.sample_count, '', 'text-slate-300') }}
+</div>
+
+<!-- Trend chart -->
+<div class="card mb-5">
+  <div class="text-sm font-semibold text-white mb-1">{{ t('battery_trend_title') }}</div>
+  <div id="soh-chart" style="height:340px"></div>
+</div>
+
+<p class="text-xs text-slate-500 leading-relaxed">{{ t('battery_method') }}</p>
+
+<script>
+(function () {
+  var el = document.getElementById('soh-chart');
+  if (!el || typeof ApexCharts === 'undefined') return;
+  var pts = {{ health.points | tojson }};
+  var nominal = {{ health.nominal_kwh }};
+  var typeColor = { HOME: '#22c55e', AC: '#60a5fa', FAST: '#fb923c', DC: '#fb923c', HPC: '#e879f9', FREE: '#a3e635' };
+  var data = pts.map(function (p) {
+    return { x: new Date(p.ts).getTime(), y: p.capacity_kwh,
+             soh: p.soh_pct, delta: p.soc_delta, energy: p.energy_kwh, type: p.charge_type || 'AC' };
+  });
+  el._c = new ApexCharts(el, {
+    chart: { type: 'scatter', height: 340, fontFamily: 'inherit', background: 'transparent',
+             zoom: { enabled: true }, toolbar: { show: false } },
+    series: [{ name: '{{ t('battery_est_capacity') }}', data: data }],
+    colors: ['#38bdf8'],
+    markers: { size: 6, strokeWidth: 0,
+               discrete: data.map(function (d, i) {
+                 return { seriesIndex: 0, dataPointIndex: i, fillColor: typeColor[d.type] || '#38bdf8', size: 6 };
+               }) },
+    xaxis: { type: 'datetime', labels: { style: { colors: '#94a3b8' } },
+             axisBorder: { color: '#334155' }, axisTicks: { color: '#334155' } },
+    yaxis: { min: Math.round(nominal * 0.6), max: Math.round(nominal * 1.1),
+             labels: { style: { colors: '#94a3b8' }, formatter: function (v) { return v.toFixed(0); } },
+             title: { text: 'kWh', style: { color: '#64748b' } } },
+    grid: { borderColor: '#1e293b' },
+    annotations: { yaxis: [{ y: nominal, borderColor: '#475569', strokeDashArray: 5,
+                   label: { text: '{{ t('battery_nominal') }} ' + nominal + ' kWh',
+                            style: { background: '#334155', color: '#e2e8f0', fontSize: '10px' } } }] },
+    tooltip: { theme: 'dark', x: { format: 'dd MMM yyyy' },
+               y: { formatter: function (v, o) {
+                 var d = data[o.dataPointIndex];
+                 return v + ' kWh  ·  ' + (d.soh != null ? d.soh + '% SoH' : '') +
+                        '  ·  +' + d.delta + '% / ' + d.energy + ' kWh (' + d.type + ')';
+               }, title: { formatter: function () { return ''; } } } }
+  });
+  el._c.render();
+})();
+</script>
+
+{% else %}
+<div class="card flex items-center justify-center h-64 text-slate-500">
+  <div class="text-center max-w-md px-4">
+    <div class="text-4xl mb-3">🩺</div>
+    <div class="font-medium text-slate-400 mb-1">{{ t('battery_no_data') }}</div>
+    <div class="text-xs text-slate-500">{{ t('battery_method') }}</div>
+  </div>
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}{{ t('nav_map') }} — LeapMotor Mate{% endblock %}
+
+{% block content %}
+<div class="mb-5">
+  <h1 class="text-xl font-bold text-white">{{ t('map_title') }}</h1>
+  <p class="text-sm text-slate-400 mt-1">{{ t('map_subtitle') }}</p>
+</div>
+
+{% if track and track|length > 1 %}
+<div class="card p-0 overflow-hidden">
+  <div id="map" style="height:560px"></div>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    const track  = {{ track | tojson }};
+    const places = {{ places | tojson }};
+    const map = L.map('map', { preferCanvas: true }).fitBounds(L.latLngBounds(track).pad(0.1));
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap'
+    }).addTo(map);
+
+    // Density layer: every recorded GPS sample as a small translucent dot.
+    track.forEach(function (p) {
+      L.circleMarker(p, { radius: 2.5, stroke: false, fillColor: '#e63946', fillOpacity: 0.35 }).addTo(map);
+    });
+
+    // Frequent places: bubble sized by visit count, on top of the density layer.
+    const maxV = places.reduce(function (m, p) { return Math.max(m, p.visits); }, 1);
+    places.forEach(function (p) {
+      const r = 8 + 18 * (p.visits / maxV);
+      L.circleMarker([p.latitude, p.longitude], {
+        radius: r, color: '#14b8a6', weight: 2, fillColor: '#14b8a6', fillOpacity: 0.45
+      }).addTo(map).bindPopup('{{ t('map_visits') }}: <b>' + p.visits + '</b>');
+    });
+  </script>
+</div>
+
+{% if places %}
+<div class="mt-4 flex items-center gap-x-5 gap-y-1 flex-wrap text-xs text-slate-500">
+  <span><span style="color:#e63946">●</span> {{ t('map_track_dots') }}</span>
+  <span><span style="color:#14b8a6">●</span> {{ t('map_frequent_places') }} ({{ places|length }})</span>
+  <span>{{ track|length }} {{ t('map_points') }}</span>
+</div>
+{% endif %}
+
+{% else %}
+<div class="card flex items-center justify-center h-64 text-slate-500">
+  <div class="text-center">
+    <div class="text-4xl mb-2">🌍</div>
+    <div>{{ t('map_no_data') }}</div>
+  </div>
+</div>
+{% endif %}
+{% endblock %}

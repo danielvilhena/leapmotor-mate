@@ -114,37 +114,54 @@
       L.marker(latlngs[latlngs.length-1], {icon: flagIcon('#444',   true) }).addTo(map)
         .bindPopup('End — {{ "%.1f"|format(trip.end_soc or 0) }}% SOC');
     </script>
-    <!-- Speed bar -->
-    <div style="padding:12px 16px 14px; background:#1e293b; border-top:1px solid #334155">
-      <div class="flex flex-col sm:flex-row justify-between sm:items-center gap-2 mb-2">
-        <span style="font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:.06em">{{ t('speed_profile') }}</span>
+    <!-- SoC & speed profile -->
+    <div style="padding:12px 16px 16px; background:#1e293b; border-top:1px solid #334155">
+      <div class="flex flex-col sm:flex-row justify-between sm:items-center gap-2 mb-1">
+        <span style="font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:.06em">{{ t('trip_profile') }}</span>
         <span class="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500">
-          <span class="whitespace-nowrap"><span class="text-green-500">■</span> 0-40 km/h</span>
-          <span class="whitespace-nowrap"><span class="text-yellow-400">■</span> 40-80 km/h</span>
-          <span class="whitespace-nowrap"><span class="text-red-500">■</span> 80+ km/h</span>
+          <span class="whitespace-nowrap"><span style="color:#22c55e">■</span> {{ t('soc') }}</span>
+          <span class="whitespace-nowrap"><span style="color:#38bdf8">■</span> {{ t('speed') }}</span>
         </span>
       </div>
-      <canvas id="speed-bar" style="width:100%;height:40px;display:block"></canvas>
+      <div id="trip-profile" style="height:200px"></div>
     </div>
     <script>
-    (function() {
-      const canvas = document.getElementById('speed-bar');
-      canvas.width  = canvas.offsetWidth || 800;
-      canvas.height = 40;
-      const ctx  = canvas.getContext('2d');
-      const pts  = coords.filter(p => p.speed_kmh != null);
+    (function () {
+      var el = document.getElementById('trip-profile');
+      if (!el || typeof ApexCharts === 'undefined') return;
+      var pts = coords.filter(function (p) { return p.recorded_at && (p.soc != null || p.speed_kmh != null); });
       if (!pts.length) return;
-
-      const maxSpd = Math.max(...pts.map(p => p.speed_kmh), 1);
-      const w = canvas.width / pts.length;
-
-      pts.forEach((p, i) => {
-        const spd   = p.speed_kmh || 0;
-        const color = spd > 80 ? '#e63946' : spd > 40 ? '#fbbf24' : '#22c55e';
-        const h     = Math.max(4, (spd / maxSpd) * canvas.height);
-        ctx.fillStyle = color;
-        ctx.fillRect(i * w, canvas.height - h, Math.ceil(w), h);
+      var t0 = new Date(pts[0].recorded_at).getTime();
+      var socData = [], spdData = [];
+      pts.forEach(function (p) {
+        var x = Math.max(0, Math.round((new Date(p.recorded_at).getTime() - t0) / 60000));
+        if (p.soc != null) socData.push({ x: x, y: p.soc });
+        spdData.push({ x: x, y: p.speed_kmh || 0 });
       });
+      el._c = new ApexCharts(el, {
+        chart: { type: 'line', height: 200, fontFamily: 'inherit', background: 'transparent',
+                 toolbar: { show: false }, animations: { enabled: false } },
+        series: [{ name: '{{ t('soc') }}', data: socData },
+                 { name: '{{ t('speed') }}', data: spdData }],
+        colors: ['#22c55e', '#38bdf8'],
+        stroke: { width: [3, 2], curve: 'smooth' },
+        fill: { type: 'solid', opacity: [0.08, 0] },
+        xaxis: { type: 'numeric', tickAmount: 6,
+                 labels: { style: { colors: '#64748b' }, formatter: function (v) { return Math.round(v) + '′'; } },
+                 axisBorder: { show: false }, axisTicks: { color: '#334155' } },
+        yaxis: [
+          { min: 0, max: 100, forceNiceScale: true,
+            labels: { style: { colors: '#22c55e' }, formatter: function (v) { return v.toFixed(0); } } },
+          { opposite: true, min: 0,
+            labels: { style: { colors: '#38bdf8' }, formatter: function (v) { return v.toFixed(0); } } }
+        ],
+        grid: { borderColor: '#0f1a2e' },
+        legend: { show: false },
+        dataLabels: { enabled: false },
+        tooltip: { theme: 'dark', shared: true, intersect: false,
+                   x: { formatter: function (v) { return Math.round(v) + ' min'; } } }
+      });
+      el._c.render();
     })();
     </script>
 

@@ -19,7 +19,7 @@ import geocode
 import mqtt_test
 import auth
 
-MATE_VERSION = "1.8.2"  # bump together with the git tag + add-on config.yaml at release
+MATE_VERSION = "1.9.0"  # bump together with the git tag + add-on config.yaml at release
 
 app = FastAPI(title="LeapMotor Mate")
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
@@ -278,6 +278,25 @@ async def statistics(request: Request):
     return templates.TemplateResponse(request, "statistics.html", _ctx(
         page="statistics", vehicle=vehicle,
         grouped=grouped, totals=totals,
+    ))
+
+
+@app.get("/battery", response_class=HTMLResponse)
+async def battery_page(request: Request):
+    vehicle, _ = db_reader.get_vehicle()
+    health = db_reader.get_battery_health()
+    return templates.TemplateResponse(request, "battery.html", _ctx(
+        page="battery", vehicle=vehicle, health=health,
+    ))
+
+
+@app.get("/map", response_class=HTMLResponse)
+async def map_page(request: Request):
+    vehicle, _ = db_reader.get_vehicle()
+    track  = db_reader.get_all_track()
+    places = db_reader.get_frequent_places()
+    return templates.TemplateResponse(request, "map.html", _ctx(
+        page="map", vehicle=vehicle, track=track, places=places,
     ))
 
 
