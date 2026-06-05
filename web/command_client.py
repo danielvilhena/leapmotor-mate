@@ -37,6 +37,52 @@ def _status_has_signals(raw) -> bool:
     return isinstance(sig, dict) and bool(sig)
 
 
+# T03/EU status carries live data as named fields at the top level of `data` instead
+# of a numeric-id `signal` sub-dict (C10/B10). Map per leapmotor-api 0.3.1; kept in
+# sync with poller/client.py's copy.
+_SIGNAL_TO_NAMED = {
+    "47": "acInputSlowCharge", "1204": "soc", "100003": "preciseSoc",
+    "1200": "chargeRemainTime", "1178": "batteryCurrent", "1177": "batteryVoltage",
+    "1197": "dcInputFastCharge", "1149": "chargeState", "1182": "minBatteryTemp",
+    "1186": "batteryThermalRequest", "3736": "chargeCompleted", "48": "healthyChargeEnabled",
+    "3737": "chargeScheduleCancelledOnce",
+    "3260": "expectedMileage", "2188": "liveRemainingRange", "3257": "maxRange", "3262": "rangeMode",
+    "1319": "speed", "1318": "totalMileage", "1010": "gearStatus", "1944": "vehicleState",
+    "1480": "parkingBrakeState", "6048": "speedLimit", "6047": "speedLimitUnit",
+    "12054": "speedLimitActive",
+    "3725": "latitude", "3724": "longitude",
+    "1938": "acSwitch", "2183": "acSetting", "2184": "acSettingRight", "1349": "interiorTemp",
+    "1943": "recirculationMode", "1945": "windshieldDefrost", "1946": "rearWindowHeating",
+    "3713": "climateMode", "2669": "rapidCooling", "2681": "rapidHeating",
+    "1939": "acOperateMode", "1941": "acAirVolume",
+    "3727": "leftFrontWindowPercent", "3728": "rightFrontWindowPercent",
+    "1879": "leftRearWindowPercent", "1880": "rightRearWindowPercent",
+    "1693": "driverWindowStatus", "1694": "rightFrontWindowStatus",
+    "1695": "leftRearWindowStatus", "1696": "rightRearWindowStatus",
+    "1298": "driverDoorLockStatus", "1277": "lbcmDriverDoorStatus", "1278": "rbcmDriverDoorStatus",
+    "1279": "lbcmLeftRearDoorStatus", "1280": "rbcmRightRearDoorStatus", "1281": "bbcmBackDoorStatus",
+    "2667": "leftFrontTirePressure", "2653": "rightFrontTirePressure",
+    "2646": "leftRearTirePressure", "2660": "rightRearTirePressure",
+    "2641": "leftFrontTirePressureState", "2648": "rightFrontTirePressureState",
+    "2655": "leftRearTirePressureState", "2662": "rightRearTirePressureState",
+    "1256": "bcmKeyPositionOn1", "1257": "bcmKeyPositionOn2", "1258": "bcmKeyPositionOn3",
+    "2100": "driverSeatHeating", "2101": "driverSeatVentilation",
+    "2118": "passengerSeatHeating", "2119": "passengerSeatVentilation",
+    "1816": "steeringWheelHeating", "1624": "steeringWheelHeaterMinutes",
+    "1255": "vehicleSecurityActive", "3636": "sentryMode",
+    "49": "leftMirrorHeating", "50": "rightMirrorHeating", "1724": "roofOpening",
+}
+
+
+def _named_fields_to_signal(data: dict) -> dict | None:
+    """Rebuild a numeric-id `signal` dict from a T03/EU named-field response."""
+    if not isinstance(data, dict):
+        return None
+    sig = {sid: data[name] for sid, name in _SIGNAL_TO_NAMED.items()
+           if data.get(name) is not None}
+    return sig or None
+
+
 def _b10_patched_get_vehicle_raw_status(self, vehicle):
     """B10 status lives under the /c10 path; SHARED cars need `carId` in the body or
     the cloud returns an empty signal block. See poller/client.py for the full
@@ -181,7 +227,9 @@ class LeapmotorSession:
                 try:
                     self._connect()
                     raw = self._api.get_vehicle_raw_status(self._vehicle)
-                    return raw["data"]["signal"]
+                    data = (raw or {}).get("data") or {}
+                    # C10/B10: numeric `signal` dict. T03/EU: named fields at top level.
+                    return data.get("signal") or _named_fields_to_signal(data)
                 except Exception as e:
                     log.warning("Status fetch (attempt %d): %s", attempt + 1, e)
                     self._reset()

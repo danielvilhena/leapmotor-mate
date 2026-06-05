@@ -149,6 +149,7 @@ class LeapmotorMateClient:
         import session_share
         session_share.install(self._api)   # share ONE token with the web (avoid mutual eviction)
         self._vehicle = None
+        self._named_mode_logged = False    # log the T03/EU named-field path once
 
     def login(self):
         self._api.login()
@@ -177,16 +178,76 @@ class LeapmotorMateClient:
 
     def get_status(self) -> VehicleData:
         raw = self._api.get_vehicle_raw_status(self._vehicle)
-        sig = ((raw or {}).get("data") or {}).get("signal")
+        data = (raw or {}).get("data") or {}
+        sig = data.get("signal")
         if not sig:
-            # Car asleep / not reporting (or a brief cloud hiccup): the status has no
-            # live signals. Surface a clear, transient error instead of a bare
-            # KeyError so the poller can back off cleanly and retry.
+            # T03 / EU responses carry live data as NAMED fields at the top level of
+            # `data` (e.g. "soc", "speed", "gearStatus") instead of a numeric-ID
+            # `signal` sub-dict like C10/B10. Rebuild the signal dict our parser
+            # expects from those named fields (id↔name map per leapmotor-api 0.3.1).
+            sig = _named_fields_to_signal(data)
+            if sig and not self._named_mode_logged:
+                log.info("T03/EU named-field status detected — mapped %d live fields", len(sig))
+                self._named_mode_logged = True
+        if not sig:
+            # Genuinely empty: car asleep / not reporting (or a brief cloud hiccup).
+            # Surface a clear, transient error instead of a bare KeyError so the poller
+            # can back off cleanly and retry.
             raise EmptyStatusError("vehicle status has no live signals (car asleep or not reporting)")
         return _parse_signal(self._vehicle.vin, sig)
 
     def close(self):
         self._api.close()
+
+
+# Numeric signal-id → T03 named-field map (verbatim from leapmotor-api 0.3.1's
+# _SIGNAL_TO_NAMED). C10/B10 report these as numeric IDs inside `data["signal"]`;
+# the T03 / EU API reports the SAME data as these named fields at the top level of
+# `data`. We invert this to rebuild a numeric `signal` dict for the T03 so the shared
+# _parse_signal() below works unchanged for every model.
+_SIGNAL_TO_NAMED = {
+    "47": "acInputSlowCharge", "1204": "soc", "100003": "preciseSoc",
+    "1200": "chargeRemainTime", "1178": "batteryCurrent", "1177": "batteryVoltage",
+    "1197": "dcInputFastCharge", "1149": "chargeState", "1182": "minBatteryTemp",
+    "1186": "batteryThermalRequest", "3736": "chargeCompleted", "48": "healthyChargeEnabled",
+    "3737": "chargeScheduleCancelledOnce",
+    "3260": "expectedMileage", "2188": "liveRemainingRange", "3257": "maxRange", "3262": "rangeMode",
+    "1319": "speed", "1318": "totalMileage", "1010": "gearStatus", "1944": "vehicleState",
+    "1480": "parkingBrakeState", "6048": "speedLimit", "6047": "speedLimitUnit",
+    "12054": "speedLimitActive",
+    "3725": "latitude", "3724": "longitude",
+    "1938": "acSwitch", "2183": "acSetting", "2184": "acSettingRight", "1349": "interiorTemp",
+    "1943": "recirculationMode", "1945": "windshieldDefrost", "1946": "rearWindowHeating",
+    "3713": "climateMode", "2669": "rapidCooling", "2681": "rapidHeating",
+    "1939": "acOperateMode", "1941": "acAirVolume",
+    "3727": "leftFrontWindowPercent", "3728": "rightFrontWindowPercent",
+    "1879": "leftRearWindowPercent", "1880": "rightRearWindowPercent",
+    "1693": "driverWindowStatus", "1694": "rightFrontWindowStatus",
+    "1695": "leftRearWindowStatus", "1696": "rightRearWindowStatus",
+    "1298": "driverDoorLockStatus", "1277": "lbcmDriverDoorStatus", "1278": "rbcmDriverDoorStatus",
+    "1279": "lbcmLeftRearDoorStatus", "1280": "rbcmRightRearDoorStatus", "1281": "bbcmBackDoorStatus",
+    "2667": "leftFrontTirePressure", "2653": "rightFrontTirePressure",
+    "2646": "leftRearTirePressure", "2660": "rightRearTirePressure",
+    "2641": "leftFrontTirePressureState", "2648": "rightFrontTirePressureState",
+    "2655": "leftRearTirePressureState", "2662": "rightRearTirePressureState",
+    "1256": "bcmKeyPositionOn1", "1257": "bcmKeyPositionOn2", "1258": "bcmKeyPositionOn3",
+    "2100": "driverSeatHeating", "2101": "driverSeatVentilation",
+    "2118": "passengerSeatHeating", "2119": "passengerSeatVentilation",
+    "1816": "steeringWheelHeating", "1624": "steeringWheelHeaterMinutes",
+    "1255": "vehicleSecurityActive", "3636": "sentryMode",
+    "49": "leftMirrorHeating", "50": "rightMirrorHeating", "1724": "roofOpening",
+}
+
+
+def _named_fields_to_signal(data: dict) -> dict | None:
+    """Rebuild a numeric-id `signal` dict from a T03/EU response, whose live data is
+    carried as named fields at the top level of `data`. Returns None when no known
+    named field is present (genuinely empty / car asleep)."""
+    if not isinstance(data, dict):
+        return None
+    sig = {sid: data[name] for sid, name in _SIGNAL_TO_NAMED.items()
+           if data.get(name) is not None}
+    return sig or None
 
 
 _GEAR_MAP = {0: "P", 1: "R", 2: "N", 3: "D"}
