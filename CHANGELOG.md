@@ -14,11 +14,19 @@ This project adheres to [Semantic Versioning](https://semver.org/).
   meaningful SoC rise and stored telemetry are used; the headline figure is smoothed
   over the most recent charges to cut single-session noise. It's an estimate, not a lab
   measurement.
-- **Global map.** A new *Map* page plots every recorded GPS point as a density layer —
-  showing everywhere the car has driven — plus your **most-visited places** as bubbles
-  sized by visit count (start/end points clustered to ~110 m, no reverse geocoding).
+- **Global map.** A new *Map* page draws every trip as a connected route line (white
+  casing + blue line so it stays readable over any road colour) — showing everywhere the
+  car has driven — plus your **most-visited places** as bubbles sized by visit count
+  (start/end points clustered to ~110 m, no reverse geocoding).
 - **SoC & speed profile on each trip.** The trip detail page now charts state-of-charge
   and speed over the course of the drive (replacing the plain speed bar).
+
+### Fixed
+- **T03 (EU) vehicles now report live data.** The European API returns the live status
+  as named fields at the top level instead of the numeric `signal` block used by
+  C10/B10, so the poller saw *"no live data"* forever. Mate now parses both shapes. This
+  was the real root cause on the T03 in #9 (the shared-car `carId` retry added in 1.8.2
+  was unrelated).
 
 ### Notes
 - Both new pages read **existing data** (the charge telemetry and trip GPS already
