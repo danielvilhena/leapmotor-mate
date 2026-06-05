@@ -136,6 +136,8 @@ class MqttService:
         pub("door_rear_left", data.door_rear_left_open); pub("door_rear_right", data.door_rear_right_open)
         pub("window_fl", data.window_fl_open);  pub("window_fr", data.window_fr_open)
         pub("window_rl", data.window_rl_open);  pub("window_rr", data.window_rr_open)
+        pub("seat_heat", data.seat_heat);         pub("seat_vent", data.seat_vent)
+        pub("steering_heat", data.steering_heat); pub("mirror_heat", data.mirror_heat)
         pub("last_seen", datetime.now(timezone.utc).isoformat())
         self.client.publish(f"{base}/location",
                             json.dumps({"latitude": data.latitude, "longitude": data.longitude}),
@@ -199,6 +201,20 @@ class MqttService:
             if "dc" in extra: c["device_class"] = extra["dc"]
             if "icon" in extra: c["icon"] = extra["icon"]
             cfg("sensor", key, c)
+
+        # Comfort STATE sensors — read-only, shown only where they work on THIS car (the B10
+        # reports these even though the matching remote commands are broken). A confirmed-broken
+        # one gets its retained config cleared so HA drops it.
+        for key, name, icon in [
+            ("seat_heat", "Seat Heating", "mdi:car-seat-heater"),
+            ("seat_vent", "Seat Ventilation", "mdi:car-seat-cooler"),
+            ("steering_heat", "Steering Wheel Heat", "mdi:steering"),
+            ("mirror_heat", "Mirror Heating", "mdi:car-side"),
+        ]:
+            if capability_profile.is_shown(vin, key, self.get_setting):
+                cfg("sensor", key, {"name": name, "state_topic": f"{prefix}/{vin}/{key}", "icon": icon})
+            else:
+                self.client.publish(f"{_DISC}/sensor/{device_id}/{key}/config", "", retain=True)
 
         binaries = [
             ("charging", "Charging", "battery_charging"), ("locked", "Locked", "lock"),

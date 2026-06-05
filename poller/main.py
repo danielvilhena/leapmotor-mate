@@ -1,4 +1,5 @@
 """LeapMotor Mate — vehicle data poller."""
+import json
 import logging
 import os
 import pathlib
@@ -93,6 +94,23 @@ def _handle_mqtt_command(client, service, db, vin: str, cmd: str, value):
             c.close()
     except Exception as exc:  # noqa: BLE001
         log.warning("MQTT: boost trigger failed: %s", exc)
+
+
+_last_comfort = {}  # vin -> last comfort_state JSON written (skip redundant settings writes)
+
+
+def _write_comfort_state(db, data):
+    """Persist the working comfort STATE sensors (seat/steering/mirror heat) as a small JSON
+    in settings, so the web UI — which reads the positions row, not raw signals — can show
+    them read-only. The matching remote commands are broken on the B10, but these states are
+    real and reflect manual activation. Written only when the value changes."""
+    state = {"seat_heat": data.seat_heat, "seat_vent": data.seat_vent,
+             "steering_heat": data.steering_heat, "mirror_heat": data.mirror_heat}
+    blob = json.dumps(state, separators=(",", ":"))
+    if _last_comfort.get(data.vin) == blob:
+        return
+    db.set_setting(f"comfort_state_{data.vin.lower()}", blob)
+    _last_comfort[data.vin] = blob
 
 
 def _mqtt_tick(db, client, data, service):
@@ -224,6 +242,7 @@ def main():
             with _API_LOCK:
                 data = client.get_status()
             recorder.process(data)
+            _write_comfort_state(db, data)
 
             # ABRP live telemetry (opt-in, off by default)
             if db.get_setting("abrp_enabled") == "1":

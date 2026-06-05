@@ -229,4 +229,28 @@
     </div>
   </div>
 
+  <!-- Comfort — read-only state sensors (shown only where they work on this car; no buttons,
+       because the matching remote commands don't actuate on the B10) -->
+  {% if comfort %}
+  <div class="card lg:col-span-2">
+    <div class="flex items-center gap-2 mb-3">
+      <span class="text-2xl">🪑</span>
+      <span class="font-semibold text-white">{{ t('comfort_section') }}</span>
+    </div>
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+      {% for c in comfort %}
+      <div class="rounded-lg border p-3 flex flex-col items-center gap-2 text-center
+        {% if c.on %}border-amber-400/40 bg-amber-400/5{% else %}border-slate-700 bg-slate-800/40{% endif %}">
+        <span class="text-xs font-medium text-slate-200">{{ t(c.label_key) }}</span>
+        <span class="text-[11px] font-bold px-2 py-0.5 rounded-full
+          {% if c.on %}text-amber-400 bg-amber-400/10 border border-amber-400/30
+          {% else %}text-slate-400 bg-slate-700 border border-slate-600{% endif %}">
+          {% if c.on %}{{ t('climate_on_state') }}{% if c.value > 1 %} · {{ c.value }}{% endif %}{% else %}{{ t('climate_off_state') }}{% endif %}
+        </span>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
 </div>

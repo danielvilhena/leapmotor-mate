@@ -12,6 +12,7 @@ from fastapi.templating import Jinja2Templates
 
 sys.path.insert(0, str(Path(__file__).parent))
 import db_reader
+import capability_profile
 import command_client
 import i18n
 import ha_client
@@ -300,12 +301,36 @@ async def map_page(request: Request):
     ))
 
 
+_COMFORT_KEYS = ("seat_heat", "seat_vent", "steering_heat", "mirror_heat")
+
+
+def _comfort_rows(vin):
+    """Read-only comfort STATE sensors for the Commands page. The poller writes the live
+    values to settings as `comfort_state_<vin>`; we show only the ones not confirmed broken
+    on this car (the remote command may be broken even when the state sensor works)."""
+    if not vin:
+        return []
+    raw = db_reader.get_setting(f"comfort_state_{vin.lower()}", "")
+    try:
+        state = json.loads(raw) if raw else {}
+    except ValueError:
+        state = {}
+    rows = []
+    for k in _COMFORT_KEYS:
+        if not capability_profile.is_shown(vin, k):
+            continue
+        v = int(state.get(k) or 0)
+        rows.append({"key": k, "label_key": f"comfort_{k}", "value": v, "on": v > 0})
+    return rows
+
+
 @app.get("/commands", response_class=HTMLResponse)
 async def commands(request: Request):
     vehicle, _ = db_reader.get_vehicle()
     status = db_reader.get_latest_status()
+    comfort = _comfort_rows(vehicle.get("vin") if vehicle else None)
     return templates.TemplateResponse(request, "commands.html", _ctx(
-        page="commands", vehicle=vehicle, status=status,
+        page="commands", vehicle=vehicle, status=status, comfort=comfort,
     ))
 
 
@@ -1073,7 +1098,9 @@ _COMMANDS = {
 @app.get("/api/cmd-grid", response_class=HTMLResponse)
 async def cmd_grid(request: Request):
     status = db_reader.get_latest_status()
-    return templates.TemplateResponse(request, "partials/cmd_grid.html", _ctx(status=status))
+    vehicle, _ = db_reader.get_vehicle()
+    comfort = _comfort_rows(vehicle.get("vin") if vehicle else None)
+    return templates.TemplateResponse(request, "partials/cmd_grid.html", _ctx(status=status, comfort=comfort))
 
 
 @app.post("/api/poll-settings", response_class=HTMLResponse)

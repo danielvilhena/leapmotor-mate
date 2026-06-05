@@ -2,6 +2,12 @@
 
 _T: dict[str, dict[str, str]] = {
     "en": {
+        # Comfort — read-only state sensors (work on B10 even where the command doesn't)
+        "comfort_section":       "Comfort",
+        "comfort_seat_heat":     "Seat heating",
+        "comfort_seat_vent":     "Seat ventilation",
+        "comfort_steering_heat": "Steering wheel heating",
+        "comfort_mirror_heat":   "Mirror heating",
         # Nav
         "nav_overview":    "Overview",
         "nav_map":         "Map",
@@ -433,6 +439,12 @@ _T: dict[str, dict[str, str]] = {
         "lang_de":              "Deutsch",
     },
     "it": {
+        # Comfort — sensori di stato in sola lettura
+        "comfort_section":       "Comfort",
+        "comfort_seat_heat":     "Riscaldamento sedile",
+        "comfort_seat_vent":     "Ventilazione sedile",
+        "comfort_steering_heat": "Riscaldamento volante",
+        "comfort_mirror_heat":   "Riscaldamento specchietti",
         # Nav
         "nav_overview":    "Panoramica",
         "nav_map":         "Mappa",
@@ -864,6 +876,12 @@ _T: dict[str, dict[str, str]] = {
         "lang_de":              "Deutsch",
     },
     "fr": {
+        # Comfort — capteurs d'état en lecture seule
+        "comfort_section":       "Confort",
+        "comfort_seat_heat":     "Chauffage siège",
+        "comfort_seat_vent":     "Ventilation siège",
+        "comfort_steering_heat": "Chauffage volant",
+        "comfort_mirror_heat":   "Chauffage rétroviseurs",
         # Nav
         "nav_overview":    "Aperçu",
         "nav_map":         "Carte",
@@ -1295,6 +1313,12 @@ _T: dict[str, dict[str, str]] = {
         "lang_de":              "Deutsch",
     },
     "de": {
+        # Comfort — schreibgeschützte Zustandssensoren
+        "comfort_section":       "Komfort",
+        "comfort_seat_heat":     "Sitzheizung",
+        "comfort_seat_vent":     "Sitzbelüftung",
+        "comfort_steering_heat": "Lenkradheizung",
+        "comfort_mirror_heat":   "Spiegelheizung",
         # Nav
         "nav_overview":    "Übersicht",
         "nav_map":         "Karte",
