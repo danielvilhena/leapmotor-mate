@@ -27,6 +27,14 @@ This project adheres to [Semantic Versioning](https://semver.org/).
   database grows over the years.
 
 ### Fixed
+- **Shared cars never reported live data** (the poller was stuck on *"Vehicle returned
+  no live data"* forever, even while driving). When a car is *shared* to the account —
+  exactly what happens if you follow the "use a different account than your phone"
+  advice and share the car to that second account — the Leapmotor cloud returns an
+  empty status unless the request also carries `carId`. The poller (and the web command
+  client) now retry the status request with `carId` when a shared car comes back empty,
+  recovering live data automatically. The login line also logs `shared: true/false` to
+  make this diagnosable. Reported on the T03 in #9.
 - **Regen energy** now scales with the configured driving poll interval instead of a
   hardcoded 10 s.
 - **Trip efficiency** is no longer stored as a negative kWh/100km when the battery SOC

@@ -31,22 +31,46 @@ def certs_present() -> bool:
             and os.path.exists(os.path.join(d, "app.key")))
 
 
+def _status_has_signals(raw) -> bool:
+    """True when a status response carries a live `signal` block."""
+    sig = ((raw or {}).get("data") or {}).get("signal")
+    return isinstance(sig, dict) and bool(sig)
+
+
 def _b10_patched_get_vehicle_raw_status(self, vehicle):
+    """B10 status lives under the /c10 path; SHARED cars need `carId` in the body or
+    the cloud returns an empty signal block. See poller/client.py for the full
+    rationale — both layers patch the same pip-lib method the same way."""
     car_type_path = "c10" if vehicle.car_type.upper() == "B10" else vehicle.car_type.lower()
-    headers = build_signed_headers(
-        sign_key=self.sign_key,
-        device_id=self.device_id,
-        vin=vehicle.vin,
-        language=self.language,
-    )
-    headers.update(self._auth_headers(content_type="application/x-www-form-urlencoded"))
-    response = self._post(
-        path=f"/carownerservice/oversea/vehicle/v1/status/get/{car_type_path}",
-        headers=headers,
-        data=f"vin={quote(vehicle.vin, safe='')}",
-        cert=self.account_cert,
-    )
-    return self._parse_api_body(response["status_code"], response["body"], "vehicle status")
+
+    def _fetch(body: str):
+        headers = build_signed_headers(
+            sign_key=self.sign_key,
+            device_id=self.device_id,
+            vin=vehicle.vin,
+            language=self.language,
+        )
+        headers.update(self._auth_headers(content_type="application/x-www-form-urlencoded"))
+        response = self._post(
+            path=f"/carownerservice/oversea/vehicle/v1/status/get/{car_type_path}",
+            headers=headers,
+            data=body,
+            cert=self.account_cert,
+        )
+        return self._parse_api_body(response["status_code"], response["body"], "vehicle status")
+
+    vin_q = quote(vehicle.vin, safe="")
+    raw = _fetch(f"vin={vin_q}")
+
+    car_id = getattr(vehicle, "car_id", None)
+    if car_id and getattr(vehicle, "is_shared", False) and not _status_has_signals(raw):
+        try:
+            shared = _fetch(f"vin={vin_q}&carId={quote(str(car_id), safe='')}")
+        except Exception:  # noqa: BLE001 — keep the original response on any error
+            shared = None
+        if _status_has_signals(shared):
+            return shared
+    return raw
 
 
 def _get_credentials() -> tuple[str, str, str]:

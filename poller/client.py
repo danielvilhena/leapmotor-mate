@@ -73,23 +73,56 @@ class VehicleData:
         )
 
 
+def _status_has_signals(raw) -> bool:
+    """True when a status response carries a live `signal` block."""
+    sig = ((raw or {}).get("data") or {}).get("signal")
+    return isinstance(sig, dict) and bool(sig)
+
+
 def _b10_patched_get_vehicle_raw_status(self, vehicle):
-    """Replacement for LeapmotorApiClient._get_vehicle_raw_status with B10 fix."""
+    """Replacement for LeapmotorApiClient._get_vehicle_raw_status with two fixes:
+
+    1. B10: the international backend serves B10 status under the /c10 path.
+    2. SHARED cars: a vehicle that's been *shared* to this account (it lands in the
+       cloud's `sharedcars` bucket — exactly what happens when you follow the
+       recommended "use a different account than your phone" advice and share the car
+       to that second account) returns an EMPTY signal block unless the status request
+       also carries `carId`. The pip lib (v0.1.4) only sends `vin=`, so a shared car
+       NEVER reports live data — the poller just sees "no live data" forever, awake or
+       not. Mirror the leapmotor-ha reference: if the first response has no signals and
+       the car is shared, retry the same endpoint with `&carId=` appended.
+    """
     car_type_path = "c10" if vehicle.car_type.upper() == "B10" else vehicle.car_type.lower()
-    headers = build_signed_headers(
-        sign_key=self.sign_key,
-        device_id=self.device_id,
-        vin=vehicle.vin,
-        language=self.language,
-    )
-    headers.update(self._auth_headers(content_type="application/x-www-form-urlencoded"))
-    response = self._post(
-        path=f"/carownerservice/oversea/vehicle/v1/status/get/{car_type_path}",
-        headers=headers,
-        data=f"vin={quote(vehicle.vin, safe='')}",
-        cert=self.account_cert,
-    )
-    return self._parse_api_body(response["status_code"], response["body"], "vehicle status")
+
+    def _fetch(body: str):
+        headers = build_signed_headers(
+            sign_key=self.sign_key,
+            device_id=self.device_id,
+            vin=vehicle.vin,
+            language=self.language,
+        )
+        headers.update(self._auth_headers(content_type="application/x-www-form-urlencoded"))
+        response = self._post(
+            path=f"/carownerservice/oversea/vehicle/v1/status/get/{car_type_path}",
+            headers=headers,
+            data=body,
+            cert=self.account_cert,
+        )
+        return self._parse_api_body(response["status_code"], response["body"], "vehicle status")
+
+    vin_q = quote(vehicle.vin, safe="")
+    raw = _fetch(f"vin={vin_q}")
+
+    car_id = getattr(vehicle, "car_id", None)
+    if car_id and getattr(vehicle, "is_shared", False) and not _status_has_signals(raw):
+        try:
+            shared = _fetch(f"vin={vin_q}&carId={quote(str(car_id), safe='')}")
+        except Exception:  # noqa: BLE001 — keep the original response on any error
+            shared = None
+        if _status_has_signals(shared):
+            log.info("Shared car: status was empty with vin only — recovered via carId")
+            return shared
+    return raw
 
 
 class EmptyStatusError(Exception):
@@ -123,7 +156,9 @@ class LeapmotorMateClient:
         if not vehicles:
             raise RuntimeError("No vehicles found on this account")
         self._vehicle = vehicles[0]
-        log.info("Authenticated — VIN: %s  model: %s", self._vehicle.vin, self._vehicle.car_type)
+        log.info("Authenticated — VIN: %s  model: %s  shared: %s",
+                 self._vehicle.vin, self._vehicle.car_type,
+                 getattr(self._vehicle, "is_shared", False))
 
     def relogin(self):
         """Force a fresh login to self-heal a broken session. The account TLS cert
