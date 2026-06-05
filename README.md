@@ -60,7 +60,7 @@ The data lives in a local SQLite database. Nothing is sent anywhere except to th
 
 ### Option A — Home Assistant add‑on
 
-1. In Home Assistant: **Settings → Add‑ons → Add‑on Store → ⋮ → Repositories**, and add the **add‑on** repository URL (note the `-addon` suffix — this is a separate repo from the code):
+1. In Home Assistant: **Settings → Apps → Install app → ⋮ → Repositories** (on Home Assistant before 2026.2: **Settings → Add‑ons → Add‑on Store → ⋮ → Repositories**), and add the repository URL (note the `-addon` suffix — this is a separate repo from the code):
 
    ```
    https://github.com/ProtossBlaster/leapmotor-mate-addon
@@ -224,7 +224,7 @@ I dati restano in un database SQLite locale. Nulla viene inviato altrove se non 
 
 ### Opzione A — Add‑on Home Assistant
 
-1. In Home Assistant: **Impostazioni → Add‑on → Store → ⋮ → Repository**, e aggiungi l'URL del repository **add‑on** (nota il suffisso `-addon` — è un repo separato dal codice):
+1. In Home Assistant: **Impostazioni → Applicazioni → Installa app → ⋮ → Archivi digitali** (su Home Assistant prima della 2026.2: **Impostazioni → Add‑on → Store → ⋮ → Repository**), e aggiungi l'URL del repository (nota il suffisso `-addon` — è un repo separato dal codice):
 
    ```
    https://github.com/ProtossBlaster/leapmotor-mate-addon
