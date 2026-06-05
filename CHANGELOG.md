@@ -3,6 +3,19 @@
 All notable changes to LeapMotor Mate are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.10.0] — 2026-06-05
+
+### Changed
+- **Upgraded the Leapmotor API library to 0.3.1** (from 0.1.4). This brings native
+  handling of the T03 status format and the B10→C10 status-path mapping, so Mate no
+  longer needs its own patches for those. The vehicle-data parsing is unchanged
+  (raw-signal based), so trips, charges and the dashboard are unaffected.
+
+### Internal
+- Dropped the bundled `_get_vehicle_raw_status` monkey-patch (the library now maps the
+  B10/B11 status path natively) and replaced the hand-rolled last-week energy and
+  consumption-rank endpoints with the library's native methods.
+
 ## [1.9.0] — 2026-06-05
 
 ### Added

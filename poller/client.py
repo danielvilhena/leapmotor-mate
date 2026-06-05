@@ -1,17 +1,15 @@
 """
-Leapmotor API client wrapper with B10 endpoint fix.
-leapmotor-api v0.1.4 bug: B10 uses /status/get/b10 but the international
-backend only exposes /status/get/c10 for this model.
+Leapmotor API client wrapper.
+Uses leapmotor-api 0.3.1, which natively maps the B10/B11 status path to /c10 and
+serves the T03 named-field status, so no endpoint patching is needed here. We still
+parse the raw signal dict ourselves (_parse_signal) to stay independent of the
+library's typed model and insulated from its enum changes.
 """
-import json
 import logging
 import os
-import types
 from dataclasses import dataclass
-from urllib.parse import quote
 
 from leapmotor_api import LeapmotorApiClient
-from leapmotor_api.client import build_signed_headers
 
 log = logging.getLogger(__name__)
 
@@ -73,58 +71,6 @@ class VehicleData:
         )
 
 
-def _status_has_signals(raw) -> bool:
-    """True when a status response carries a live `signal` block."""
-    sig = ((raw or {}).get("data") or {}).get("signal")
-    return isinstance(sig, dict) and bool(sig)
-
-
-def _b10_patched_get_vehicle_raw_status(self, vehicle):
-    """Replacement for LeapmotorApiClient._get_vehicle_raw_status with two fixes:
-
-    1. B10: the international backend serves B10 status under the /c10 path.
-    2. SHARED cars: a vehicle that's been *shared* to this account (it lands in the
-       cloud's `sharedcars` bucket — exactly what happens when you follow the
-       recommended "use a different account than your phone" advice and share the car
-       to that second account) returns an EMPTY signal block unless the status request
-       also carries `carId`. The pip lib (v0.1.4) only sends `vin=`, so a shared car
-       NEVER reports live data — the poller just sees "no live data" forever, awake or
-       not. Mirror the leapmotor-ha reference: if the first response has no signals and
-       the car is shared, retry the same endpoint with `&carId=` appended.
-    """
-    car_type_path = "c10" if vehicle.car_type.upper() == "B10" else vehicle.car_type.lower()
-
-    def _fetch(body: str):
-        headers = build_signed_headers(
-            sign_key=self.sign_key,
-            device_id=self.device_id,
-            vin=vehicle.vin,
-            language=self.language,
-        )
-        headers.update(self._auth_headers(content_type="application/x-www-form-urlencoded"))
-        response = self._post(
-            path=f"/carownerservice/oversea/vehicle/v1/status/get/{car_type_path}",
-            headers=headers,
-            data=body,
-            cert=self.account_cert,
-        )
-        return self._parse_api_body(response["status_code"], response["body"], "vehicle status")
-
-    vin_q = quote(vehicle.vin, safe="")
-    raw = _fetch(f"vin={vin_q}")
-
-    car_id = getattr(vehicle, "car_id", None)
-    if car_id and getattr(vehicle, "is_shared", False) and not _status_has_signals(raw):
-        try:
-            shared = _fetch(f"vin={vin_q}&carId={quote(str(car_id), safe='')}")
-        except Exception:  # noqa: BLE001 — keep the original response on any error
-            shared = None
-        if _status_has_signals(shared):
-            log.info("Shared car: status was empty with vin only — recovered via carId")
-            return shared
-    return raw
-
-
 class EmptyStatusError(Exception):
     """The cloud returned a vehicle status with no live `signal` block — the car is
     asleep / not reporting, or the response was incomplete. Transient: back off and
@@ -142,9 +88,6 @@ class LeapmotorMateClient:
             app_key_path=key_path,
             language="en-US",
             device_id=device_id,
-        )
-        self._api._get_vehicle_raw_status = types.MethodType(
-            _b10_patched_get_vehicle_raw_status, self._api
         )
         import session_share
         session_share.install(self._api)   # share ONE token with the web (avoid mutual eviction)

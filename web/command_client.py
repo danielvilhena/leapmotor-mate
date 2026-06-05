@@ -1,13 +1,10 @@
 """Persistent Leapmotor session — login once, reuse for all commands and status fetches."""
 import os
 import time
-import types
 import logging
 import threading
-from urllib.parse import quote
 
 from leapmotor_api import LeapmotorApiClient
-from leapmotor_api.client import build_signed_headers
 
 log = logging.getLogger(__name__)
 
@@ -29,12 +26,6 @@ def certs_present() -> bool:
     d = cert_dir()
     return (os.path.exists(os.path.join(d, "app.crt"))
             and os.path.exists(os.path.join(d, "app.key")))
-
-
-def _status_has_signals(raw) -> bool:
-    """True when a status response carries a live `signal` block."""
-    sig = ((raw or {}).get("data") or {}).get("signal")
-    return isinstance(sig, dict) and bool(sig)
 
 
 # T03/EU status carries live data as named fields at the top level of `data` instead
@@ -83,42 +74,6 @@ def _named_fields_to_signal(data: dict) -> dict | None:
     return sig or None
 
 
-def _b10_patched_get_vehicle_raw_status(self, vehicle):
-    """B10 status lives under the /c10 path; SHARED cars need `carId` in the body or
-    the cloud returns an empty signal block. See poller/client.py for the full
-    rationale — both layers patch the same pip-lib method the same way."""
-    car_type_path = "c10" if vehicle.car_type.upper() == "B10" else vehicle.car_type.lower()
-
-    def _fetch(body: str):
-        headers = build_signed_headers(
-            sign_key=self.sign_key,
-            device_id=self.device_id,
-            vin=vehicle.vin,
-            language=self.language,
-        )
-        headers.update(self._auth_headers(content_type="application/x-www-form-urlencoded"))
-        response = self._post(
-            path=f"/carownerservice/oversea/vehicle/v1/status/get/{car_type_path}",
-            headers=headers,
-            data=body,
-            cert=self.account_cert,
-        )
-        return self._parse_api_body(response["status_code"], response["body"], "vehicle status")
-
-    vin_q = quote(vehicle.vin, safe="")
-    raw = _fetch(f"vin={vin_q}")
-
-    car_id = getattr(vehicle, "car_id", None)
-    if car_id and getattr(vehicle, "is_shared", False) and not _status_has_signals(raw):
-        try:
-            shared = _fetch(f"vin={vin_q}&carId={quote(str(car_id), safe='')}")
-        except Exception:  # noqa: BLE001 — keep the original response on any error
-            shared = None
-        if _status_has_signals(shared):
-            return shared
-    return raw
-
-
 def _get_credentials() -> tuple[str, str, str]:
     """Read credentials from DB settings, falling back to env vars for dev."""
     try:
@@ -153,7 +108,6 @@ def _make_client() -> LeapmotorApiClient:
         language="en-US",
         device_id=device_id,
     )
-    api._get_vehicle_raw_status = types.MethodType(_b10_patched_get_vehicle_raw_status, api)
     import session_share
     session_share.install(api)   # share ONE token with the poller (avoid mutual eviction)
     return api
@@ -277,40 +231,15 @@ class LeapmotorSession:
 
 
     def get_energy_breakdown(self) -> dict | None:
-        """Last-week energy split (driving / A/C / other) from the cloud endpoint
-        getLastweekEC. Not in the pip package — replicated here using its signing
-        primitives (sign_key HMAC-SHA256), same as the kerniger/markoceri HA integration."""
-        import time, hmac, hashlib, random, requests
-        from leapmotor_api import const as C
+        """Last-week energy split (driving / A/C / other), via the library's native
+        get_consumption_last_week_breakdown() (0.3.x). Mapped to the dict shape the UI
+        already consumes."""
         with self._lock:
             for attempt in range(2):
                 try:
                     self._connect()
-                    api = self._api
-                    vin = self._vehicle.vin
-                    now = int(time.time())
-                    end, begin = now, now - 7 * 24 * 3600
-                    nonce = str(random.randint(100000, 9999999))
-                    ts = str(int(time.time() * 1000))
-                    sign_input = "".join([
-                        api.language, str(begin), vin, str(C.DEFAULT_CHANNEL), api.device_id,
-                        str(C.DEFAULT_DEVICE_TYPE), str(end), nonce, C.DEFAULT_SOURCE, ts, C.DEFAULT_APP_VERSION,
-                    ])
-                    sign = hmac.new(api.sign_key, sign_input.encode("utf-8"), hashlib.sha256).hexdigest()
-                    hdr = {
-                        "acceptLanguage": api.language, "channel": str(C.DEFAULT_CHANNEL),
-                        "deviceType": str(C.DEFAULT_DEVICE_TYPE), "X-P12_ENC_ALG": str(C.DEFAULT_P12_ENC_ALG),
-                        "source": C.DEFAULT_SOURCE, "version": C.DEFAULT_APP_VERSION, "nonce": nonce,
-                        "deviceId": api.device_id, "timestamp": ts, "sign": sign,
-                    }
-                    hdr.update(api._auth_headers(content_type="application/x-www-form-urlencoded"))
-                    body = f"endtime={end}&begintime={begin}&carvin={requests.utils.quote(vin, safe='')}"
-                    r = api._post(path="/carownerservice/oversea/drivingRecord/v1/getLastweekEC",
-                                  headers=hdr, data=body, cert=api.account_cert)
-                    d = (api._parse_api_body(r["status_code"], r["body"], "energy breakdown") or {}).get("data") or {}
-                    drv = float(d.get("driverEC") or 0)
-                    ac = float(d.get("acEC") or 0)
-                    oth = float(d.get("otherEC") or 0)
+                    b = self._api.get_consumption_last_week_breakdown(self._vehicle)
+                    drv, ac, oth = float(b.driver_ec or 0), float(b.ac_ec or 0), float(b.other_ec or 0)
                     total = drv + ac + oth
                     pct = (lambda v: round(v / total * 100, 1)) if total > 0 else (lambda v: 0)
                     return {
@@ -325,45 +254,22 @@ class LeapmotorSession:
 
 
     def get_consumption_rank(self) -> dict | None:
-        """6-week energy-consumption trend (kWh/100km per week) + driver ranking, from
-        the cloud endpoint getLastNweeks100kmECAndRank. Not in the pip package."""
-        import time, hmac, hashlib, random, requests
-        from leapmotor_api import const as C
+        """6-week kWh/100km trend + driver ranking, via the library's native
+        get_consumption_weekly_rank() (0.3.x). Mapped to the UI dict shape."""
         with self._lock:
             for attempt in range(2):
                 try:
                     self._connect()
-                    api = self._api
-                    vin = self._vehicle.vin
-                    nonce = str(random.randint(100000, 9999999))
-                    ts = str(int(time.time() * 1000))
-                    sign_input = "".join([
-                        api.language, vin, str(C.DEFAULT_CHANNEL), api.device_id,
-                        str(C.DEFAULT_DEVICE_TYPE), nonce, C.DEFAULT_SOURCE, ts, C.DEFAULT_APP_VERSION,
-                    ])
-                    sign = hmac.new(api.sign_key, sign_input.encode("utf-8"), hashlib.sha256).hexdigest()
-                    hdr = {
-                        "acceptLanguage": api.language, "channel": str(C.DEFAULT_CHANNEL),
-                        "deviceType": str(C.DEFAULT_DEVICE_TYPE), "X-P12_ENC_ALG": str(C.DEFAULT_P12_ENC_ALG),
-                        "source": C.DEFAULT_SOURCE, "version": C.DEFAULT_APP_VERSION, "nonce": nonce,
-                        "deviceId": api.device_id, "timestamp": ts, "sign": sign,
+                    r = self._api.get_consumption_weekly_rank(self._vehicle)
+                    weeks = [{"start": w.week_start, "end": w.week_end,
+                              "ec": round(float(w.hundred_km_ec or 0), 1)}
+                             for w in (r.weekly or [])]
+                    rank = getattr(r, "rank", None)
+                    return {
+                        "rank": rank.rank if rank else None,
+                        "current_ec": round(float(rank.hundred_km_ec or 0), 1) if rank else 0,
+                        "weeks": weeks,
                     }
-                    hdr.update(api._auth_headers(content_type="application/x-www-form-urlencoded"))
-                    body = f"carvin={requests.utils.quote(vin, safe='')}"
-                    r = api._post(path="/carownerservice/oversea/drivingRecord/v1/getLastNweeks100kmECAndRank",
-                                  headers=hdr, data=body, cert=api.account_cert)
-                    d = (api._parse_api_body(r["status_code"], r["body"], "consumption rank") or {}).get("data") or {}
-                    rank = d.get("rankResult") or {}
-                    weeks = []
-                    for w in (d.get("weeklyEC") or []):
-                        try:
-                            weeks.append({"start": w.get("weekStart"), "end": w.get("weekEnd"),
-                                          "ec": float(w.get("hundredKmEC") or 0)})
-                        except (TypeError, ValueError):
-                            pass
-                    return {"rank": rank.get("rank"),
-                            "current_ec": round(float(rank.get("hundredKmEC") or 0), 1),
-                            "weeks": weeks}
                 except Exception as e:
                     log.warning("Consumption rank fetch (attempt %d): %s", attempt + 1, e)
                     self._reset()
