@@ -10,6 +10,8 @@ from datetime import datetime, timezone
 
 import paho.mqtt.client as mqtt
 
+import capability_profile
+
 log = logging.getLogger(__name__)
 
 _DISC = "homeassistant"  # HA discovery prefix
@@ -17,7 +19,7 @@ _DISC = "homeassistant"  # HA discovery prefix
 
 class MqttService:
     def __init__(self, broker, port, username=None, password=None, topic_prefix="leapmotor",
-                 use_tls=False, tls_insecure=False, discovery_enabled=True):
+                 use_tls=False, tls_insecure=False, discovery_enabled=True, get_setting=None):
         self.broker = broker
         self.port = int(port) if port else (8883 if use_tls else 1883)
         self.username = username
@@ -26,6 +28,7 @@ class MqttService:
         self.use_tls = use_tls
         self.tls_insecure = tls_insecure
         self.discovery_enabled = discovery_enabled
+        self.get_setting = get_setting   # db.get_setting — for per-VIN capability gating
         self.client = None
         self.on_command = None          # callback(vin, command_or_entity, value)
         self._discovery_sent = False
@@ -229,8 +232,14 @@ class MqttService:
             ("climate_defrost", "Defrost", "mdi:car-defrost-front"),
             ("climate_off", "A/C Off", "mdi:snowflake-off"),
         ]:
-            cfg("button", key, {"name": name, "command_topic": f"{prefix}/{vin}/command",
-                                "payload_press": key, "icon": icon})
+            # Model-aware: hide command buttons confirmed broken on THIS car (e.g. A/C Off on
+            # the B10). Clearing the retained config makes HA drop a button that was published
+            # before it was classified as broken. Unknown/working commands are always shown.
+            if capability_profile.command_shown(vin, key, self.get_setting):
+                cfg("button", key, {"name": name, "command_topic": f"{prefix}/{vin}/command",
+                                    "payload_press": key, "icon": icon})
+            else:
+                self.client.publish(f"{_DISC}/button/{device_id}/{key}/config", "", retain=True)
 
         # The old single "Climate" switch is deprecated in favour of the buttons above
         # (a plain switch can't model cool/heat/defrost and its OFF was a no-op). Clear

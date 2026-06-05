@@ -1,0 +1,191 @@
+"""Per-vehicle capability profile — drives model-aware UI/MQTT (show only what the car
+actually supports). Verdict per feature: 'working' | 'broken' | 'untested'.
+
+Two AXES per physical feature (proven on the B10): a SENSOR (the car reports the state)
+and a COMMAND (we can actuate it remotely) are INDEPENDENT. The comfort family on the B10
+is the archetype: the state sensor works (reflects manual activation) but the remote command
+is accepted-but-not-executed. So they are SEPARATE features here — e.g. `seat_heat` (sensor,
+shown read-only) vs `seat_heat_cmd` (command/button, hidden when broken).
+
+Verdicts:
+- 'working'  : proven — a CORE sensor Mate depends on, or the car reports a live non-default
+               value, or an at-the-car probe moved the signal.
+- 'broken'   : confirmed empirically — command accepted but never actuates, or a sensor never
+               changes despite a real state change. These get HIDDEN.
+- 'untested' : unknown right now — shown by default (never hide on a guess).
+
+CORE features are NEVER hidden whatever the verdict — hiding them would break Mate's own
+trips/charges/reports/charts (gear, speed, odometer, state, charging, SoC, GPS, doors,
+tyres, temps…). A 0 right now means parked/closed/idle, not broken.
+
+`kind`:
+- 'sensor'  → a read-only state display / MQTT sensor. Hidden only if confirmed 'broken'.
+- 'command' → an actuation button. Hidden if confirmed 'broken'.
+
+Stored per VIN in the settings table as JSON under `capabilities_<vin>` — shared by the web
+UI and the poller's MQTT bridge (so this module avoids a hard db_reader import: callers in the
+poller pass their own get/set via `accessor=`). Accumulates across sessions.
+"""
+from __future__ import annotations
+import json
+from typing import Callable, Optional
+
+# feature_key -> {label, kind, signals(status-signal ids whose live value proves a sensor works),
+#                 right(VehicleRight code gating the command, or None), core(bool)}.
+# core=True → load-bearing for Mate → always 'working', never hidden.
+FEATURES: dict[str, dict] = {
+    # --- CORE telemetry: Mate's trips/charges/reports/charts depend on these (proven working) ---
+    "soc":           {"label": "Battery SoC",         "kind": "sensor", "signals": ["1204", "100003"], "right": None, "core": True},
+    "range":         {"label": "Range",               "kind": "sensor", "signals": ["2188", "3257", "3260"], "right": None, "core": True},
+    "odometer":      {"label": "Odometer",            "kind": "sensor", "signals": ["1318"], "right": None, "core": True},
+    "state":         {"label": "Vehicle state",       "kind": "sensor", "signals": ["1944"], "right": None, "core": True},
+    "gear":          {"label": "Gear",                "kind": "sensor", "signals": ["1010"], "right": None, "core": True},
+    "speed":         {"label": "Speed",               "kind": "sensor", "signals": ["1319"], "right": None, "core": True},
+    "location":      {"label": "GPS location",        "kind": "sensor", "signals": ["3724", "3725"], "right": None, "core": True},
+    "charge_state":  {"label": "Charging state",      "kind": "sensor", "signals": ["1149"], "right": None, "core": True},
+    "charge_power":  {"label": "Charge power",        "kind": "sensor", "signals": ["1177", "1178"], "right": None, "core": True},
+    "plug":          {"label": "Plug connected",      "kind": "sensor", "signals": ["1149", "1197", "47"], "right": None, "core": True},
+    "inside_temp":   {"label": "Inside temperature",  "kind": "sensor", "signals": ["1349"], "right": None, "core": True},
+    "battery_temp":  {"label": "Battery temperature", "kind": "sensor", "signals": ["1182"], "right": None, "core": True},
+    "tires":         {"label": "Tyre pressures",      "kind": "sensor", "signals": ["2667", "2653", "2646", "2660"], "right": None, "core": True},
+    "doors":         {"label": "Door open/closed",    "kind": "sensor", "signals": ["1277", "1278", "1279", "1280", "1281"], "right": None, "core": True},
+    "trunk":         {"label": "Trunk",               "kind": "sensor", "signals": ["1281"], "right": 130, "core": True},
+    "lock":          {"label": "Lock state",          "kind": "sensor", "signals": ["1298"], "right": 110, "core": True},
+    "sunshade":      {"label": "Sunshade / roof",     "kind": "sensor", "signals": ["1724"], "right": 161, "core": True},
+    "windows_state": {"label": "Window open/closed",  "kind": "sensor", "signals": ["1693", "1694", "1695", "1696"], "right": 230, "core": True},
+
+    # --- OPTIONAL SENSORS: read-only states, shown unless proven broken on this car ---
+    "ac_state":      {"label": "A/C on/off state",    "kind": "sensor", "signals": ["1938"], "right": None, "core": False},
+    "ac_target":     {"label": "A/C target temp",     "kind": "sensor", "signals": ["2183"], "right": None, "core": False},
+    "seat_heat":     {"label": "Seat heating",        "kind": "sensor", "signals": ["2100", "2118"], "right": None, "core": False},
+    "seat_vent":     {"label": "Seat ventilation",    "kind": "sensor", "signals": ["2101", "2119"], "right": None, "core": False},
+    "steering_heat": {"label": "Steering wheel heat", "kind": "sensor", "signals": ["1816"], "right": None, "core": False},
+    "mirror_heat":   {"label": "Mirror heating",      "kind": "sensor", "signals": ["49", "50"], "right": None, "core": False},
+    "windows_pct":   {"label": "Window opening %",    "kind": "sensor", "signals": ["3727", "3728", "1879", "1880"], "right": None, "core": False},
+
+    # --- OPTIONAL COMMANDS: actuation buttons, hidden when proven broken on this car ---
+    "climate_off":       {"label": "A/C Off (command)",          "kind": "command", "signals": ["1938"], "right": 170, "core": False},
+    "defrost":           {"label": "Windshield defrost",         "kind": "command", "signals": [], "right": 460, "core": False},
+    "sentry":            {"label": "Sentry mode (command)",      "kind": "command", "signals": ["3636"], "right": 220, "core": False},
+    "seat_heat_cmd":     {"label": "Seat heating (command)",     "kind": "command", "signals": [], "right": 301, "core": False},
+    "seat_vent_cmd":     {"label": "Seat ventilation (command)", "kind": "command", "signals": [], "right": 370, "core": False},
+    "steering_heat_cmd": {"label": "Steering heat (command)",    "kind": "command", "signals": [], "right": 320, "core": False},
+    "mirror_heat_cmd":   {"label": "Mirror heating (command)",   "kind": "command", "signals": [], "right": 440, "core": False},
+}
+
+# Map the live MQTT-button / UI-command keys to their gating capability feature, so callers
+# can ask "should I expose this button?" by the name they already use. Keys not listed here
+# are always shown (no capability gate).
+COMMAND_FEATURE = {
+    "climate_off":         "climate_off",
+    "windshield_defrost":  "defrost",
+    "climate_defrost":     "defrost",
+    "sentry_on":           "sentry",
+    "sentry_off":          "sentry",
+    "steering_heat_on":    "steering_heat_cmd",
+    "steering_heat_off":   "steering_heat_cmd",
+    "mirror_heat_on":      "mirror_heat_cmd",
+    "mirror_heat_off":     "mirror_heat_cmd",
+    "seat_heat_driver_on":  "seat_heat_cmd",
+    "seat_heat_driver_off": "seat_heat_cmd",
+    "seat_vent_driver_on":  "seat_vent_cmd",
+    "seat_vent_driver_off": "seat_vent_cmd",
+}
+
+
+def is_core(feature: str) -> bool:
+    return bool(FEATURES.get(feature, {}).get("core"))
+
+
+def kind(feature: str) -> str:
+    return FEATURES.get(feature, {}).get("kind", "sensor")
+
+
+def _is_meaningful(val) -> bool:
+    try:
+        return float(val) != 0.0
+    except (TypeError, ValueError):
+        return bool(val)
+
+
+def _key(vin: str) -> str:
+    return f"capabilities_{(vin or '').lower()}"
+
+
+def _default_get_setting() -> Callable[[str, str], str]:
+    import db_reader
+    return db_reader.get_setting
+
+
+def _default_set_setting() -> Callable[[str, str], None]:
+    import db_reader
+    return db_reader.set_setting
+
+
+def load(vin: str, get_setting: Optional[Callable] = None) -> dict[str, str]:
+    """Load the per-VIN verdict map. `get_setting(key, default)` lets the poller pass its own
+    settings accessor (db.get_setting); defaults to web's db_reader."""
+    try:
+        get_setting = get_setting or _default_get_setting()
+        raw = get_setting(_key(vin), "")
+        return json.loads(raw) if raw else {}
+    except Exception:
+        return {}
+
+
+def save(vin: str, profile: dict[str, str], set_setting: Optional[Callable] = None) -> None:
+    set_setting = set_setting or _default_set_setting()
+    set_setting(_key(vin), json.dumps(profile, separators=(",", ":")))
+
+
+def set_verdict(vin: str, feature: str, verdict: str,
+                get_setting: Optional[Callable] = None, set_setting: Optional[Callable] = None) -> None:
+    """Record an empirical result (working/broken/untested) for one feature."""
+    assert verdict in ("working", "broken", "untested")
+    p = load(vin, get_setting)
+    p[feature] = verdict
+    save(vin, p, set_setting)
+
+
+def verdict(vin: str, feature: str, default: str = "untested",
+            get_setting: Optional[Callable] = None) -> str:
+    if is_core(feature):
+        return "working"
+    return load(vin, get_setting).get(feature, default)
+
+
+def is_shown(vin: str, feature: str, get_setting: Optional[Callable] = None) -> bool:
+    """Show everything EXCEPT what is confirmed 'broken'. CORE features are NEVER hidden
+    (they power Mate's own reports/charts). Unknown/'untested' features are shown — we
+    never hide on a guess."""
+    if is_core(feature):
+        return True
+    return load(vin, get_setting).get(feature, "untested") != "broken"
+
+
+def command_shown(vin: str, command_key: str, get_setting: Optional[Callable] = None) -> bool:
+    """Should a UI/MQTT command button named `command_key` be exposed? Maps the command key to
+    its gating feature (COMMAND_FEATURE); commands with no mapped feature are always shown."""
+    feat = COMMAND_FEATURE.get(command_key)
+    return True if feat is None else is_shown(vin, feat, get_setting)
+
+
+def seed_from_signals(vin: str, signals: dict, *, overwrite: bool = False,
+                      get_setting: Optional[Callable] = None, set_setting: Optional[Callable] = None) -> dict[str, str]:
+    """Read-only seed. CORE features → 'working' (proven by Mate's existing functionality,
+    regardless of the instantaneous value). Non-core → 'working' if the car reports a live
+    non-default value, else left 'untested' (a 0 may just mean off/closed — never 'broken').
+    Existing 'broken'/'working' verdicts are preserved unless overwrite=True."""
+    p = {} if overwrite else load(vin, get_setting)
+    for feat, meta in FEATURES.items():
+        if meta.get("core"):
+            p[feat] = "working"
+            continue
+        if not overwrite and p.get(feat) in ("working", "broken"):
+            continue
+        if meta["signals"] and any(_is_meaningful(signals.get(sid)) for sid in meta["signals"]):
+            p[feat] = "working"
+        else:
+            p.setdefault(feat, "untested")
+    save(vin, p, set_setting)
+    return p

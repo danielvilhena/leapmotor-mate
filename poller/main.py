@@ -112,6 +112,7 @@ def _mqtt_tick(db, client, data, service):
             use_tls=db.get_setting("mqtt_tls") == "1",
             tls_insecure=db.get_setting("mqtt_tls_insecure") == "1",
             discovery_enabled=db.get_setting("mqtt_discovery", "1") == "1",
+            get_setting=db.get_setting,
         )
         service.on_command = lambda vin, cmd, val: _handle_mqtt_command(client, service, db, vin, cmd, val)
     try:
