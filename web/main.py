@@ -980,6 +980,22 @@ _COMMANDS = {
     "battery_preheat":   command_client.battery_preheat,
     "open_sunshade":     command_client.open_sunshade,
     "close_sunshade":    command_client.close_sunshade,
+    # New in 0.3.1 (gated in the UI by the vehicle's rights):
+    "ac_off":            command_client.ac_off,
+    "battery_preheat_off": command_client.battery_preheat_off,
+    "open_sunroof":      command_client.open_sunroof,
+    "close_sunroof":     command_client.close_sunroof,
+    "unlock_charger":    command_client.unlock_charger,
+    "sentry_on":         command_client.sentry_on,
+    "sentry_off":        command_client.sentry_off,
+    "steering_heat_on":  command_client.steering_heat_on,
+    "steering_heat_off": command_client.steering_heat_off,
+    "mirror_heat_on":    command_client.mirror_heat_on,
+    "mirror_heat_off":   command_client.mirror_heat_off,
+    "seat_heat_driver_on":  command_client.seat_heat_driver_on,
+    "seat_heat_driver_off": command_client.seat_heat_driver_off,
+    "seat_vent_driver_on":  command_client.seat_vent_driver_on,
+    "seat_vent_driver_off": command_client.seat_vent_driver_off,
 }
 
 @app.get("/api/cmd-grid", response_class=HTMLResponse)
@@ -1126,8 +1142,8 @@ _OPTIMISTIC = {
     "close_sunshade":{"sunshade_open": 0},
 }
 
-# Climate tiles: a tile that's ON is turned off by sending ac_switch (the only
-# command that deactivates climate); a tile that's OFF sends its own mode command.
+# Climate tiles: a tile that's ON is turned off by sending ac_off() (dedicated off
+# command in leapmotor-api 0.3.1); a tile that's OFF sends its own mode command.
 # Direction is decided from the real signal state. NO optimistic overlay — climate
 # state is read from signals (2669 cool / 2681 heat / 1945 defrost / 1938 on), so the
 # UI never shows a fake value. Frontend is unchanged; this is backend logic only.
@@ -1194,14 +1210,15 @@ async def run_command(name: str, background_tasks: BackgroundTasks):
         return HTMLResponse(f'<span style="color:#fbbf24">⏳ {label} {wait}s</span>')
     _last_command_at = time.time()
 
-    # Climate: decide direction from the real state. A tile that's on → ac_switch
-    # (deactivate); a tile that's off → its own command. No optimistic overlay.
+    # Climate: decide direction from the real state. A tile that's on → ac_off()
+    # (dedicated off command in leapmotor-api 0.3.1); a tile that's off → its own
+    # command. No optimistic overlay.
     overrides = dict(_OPTIMISTIC.get(name) or {})
     field = _CLIMATE_TILES.get(name)
     if field:
         cur = db_reader.get_latest_status() or {}
         if cur.get(field):                      # currently on → turn off
-            fn = command_client.ac_on           # ac_switch = deactivate climate
+            fn = command_client.ac_off          # dedicated A/C off (no toggle guard)
         overrides = {}                          # never fake climate state
 
     import asyncio

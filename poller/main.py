@@ -53,7 +53,7 @@ def _handle_mqtt_command(client, service, db, vin: str, cmd: str, value):
             elif cmd == "unlock":      api.unlock_vehicle(vin)
             elif cmd == "open_trunk":  api.open_trunk(vin)
             elif cmd == "close_trunk": api.close_trunk(vin)
-            elif cmd == "find_car":    api._remote_control(vin=vin, action="find_car")
+            elif cmd == "find_car":    api.find_vehicle(vin)
             elif cmd == "climate_cool":
                 api.quick_cool(vin);         optimistic = ("climate_on", True)
             elif cmd == "climate_heat":
@@ -61,12 +61,9 @@ def _handle_mqtt_command(client, service, db, vin: str, cmd: str, value):
             elif cmd == "climate_defrost":
                 api.windshield_defrost(vin); optimistic = ("climate_on", True)
             elif cmd == "climate_off":
-                # ac_switch is a toggle (the only A/C deactivation command this API has);
-                # only send it when the A/C is known to be on, so an "A/C Off" press can't
-                # accidentally switch it on. The web UI guards direction the same way.
-                if getattr(service, "last_climate_on", None) is False:
-                    return
-                api.ac_switch(vin);          optimistic = ("climate_on", False)
+                # leapmotor-api 0.3.1 has a dedicated ac_off() (operate=close), so no more
+                # toggle-guard hack — this reliably turns the climate off.
+                api.ac_off(vin);             optimistic = ("climate_on", False)
             else:
                 return
         log.info("MQTT: executed command %s %s", cmd, value or "")

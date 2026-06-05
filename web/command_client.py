@@ -331,18 +331,33 @@ def lock():              return _session.execute(lambda api, vin: api.lock_vehic
 def unlock():            return _session.execute(lambda api, vin: api.unlock_vehicle(vin))
 def open_trunk():        return _session.execute(lambda api, vin: api.open_trunk(vin))
 def close_trunk():       return _session.execute(lambda api, vin: api.close_trunk(vin))
-# No public find_car() on the pip client — drive the registered action (cmd_id 120,
-# {"value":"true"}) through the generic remote-control entry point.
-def find_car():          return _session.execute(lambda api, vin: api._remote_control(vin=vin, action="find_car"))
+def find_car():          return _session.execute(lambda api, vin: api.find_vehicle(vin))
 def ac_on():             return _session.execute(lambda api, vin: api.ac_switch(vin))
+def ac_off():            return _session.execute(lambda api, vin: api.ac_off(vin))
 def quick_cool():        return _session.execute(lambda api, vin: api.quick_cool(vin))
 def quick_heat():        return _session.execute(lambda api, vin: api.quick_heat(vin))
 def windshield_defrost():return _session.execute(lambda api, vin: api.windshield_defrost(vin))
 def open_windows():      return _session.execute(lambda api, vin: api.open_windows(vin, value="2"))
 def close_windows():     return _session.execute(lambda api, vin: api.close_windows(vin, value="0"))
 def battery_preheat():   return _session.execute(lambda api, vin: api.battery_preheat(vin))
+def battery_preheat_off():return _session.execute(lambda api, vin: api.battery_preheat_off(vin))
 def open_sunshade():     return _session.execute(lambda api, vin: api.open_sunshade(vin))
 def close_sunshade():    return _session.execute(lambda api, vin: api.close_sunshade(vin))
+# New in 0.3.1 — gated in the UI by the vehicle's rights (see /commands).
+def open_sunroof():      return _session.execute(lambda api, vin: api.open_sunroof(vin))
+def close_sunroof():     return _session.execute(lambda api, vin: api.close_sunroof(vin))
+def unlock_charger():    return _session.execute(lambda api, vin: api.unlock_charger(vin))
+def sentry_on():         return _session.execute(lambda api, vin: api.sentry_mode_on(vin))
+def sentry_off():        return _session.execute(lambda api, vin: api.sentry_mode_off(vin))
+def steering_heat_on():  return _session.execute(lambda api, vin: api.steering_wheel_heat_on(vin))
+def steering_heat_off(): return _session.execute(lambda api, vin: api.steering_wheel_heat_off(vin))
+def mirror_heat_on():    return _session.execute(lambda api, vin: api.rearview_mirror_heat_on(vin))
+def mirror_heat_off():   return _session.execute(lambda api, vin: api.rearview_mirror_heat_off(vin))
+# Seats: position 1=driver, 2=front passenger; level 0=off, 3=max.
+def seat_heat_driver_on():  return _session.execute(lambda api, vin: api.seat_heat(vin, position=1, level=3))
+def seat_heat_driver_off(): return _session.execute(lambda api, vin: api.seat_heat(vin, position=1, level=0))
+def seat_vent_driver_on():  return _session.execute(lambda api, vin: api.seat_ventilation(vin, position=1, level=3))
+def seat_vent_driver_off(): return _session.execute(lambda api, vin: api.seat_ventilation(vin, position=1, level=0))
 def send_destination(name, address, lat, lon):
     """Push a navigation destination to the car (cmd_id 180, no PIN)."""
     return _session.execute(lambda api, vin: api.send_destination(
