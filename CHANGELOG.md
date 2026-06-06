@@ -3,12 +3,25 @@
 All notable changes to LeapMotor Mate are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
-## [1.11.5] — 2026-06-06
+## [1.11.5] — 2026-06-07
 
 ### Added
-- **Unlock charge cable** button on the Commands → Battery card, next to Preheat (with a confirm
-  prompt). Sends the B10 charge-port unlock command (`unlock_charger`, right 192) — promised on #19.
-  i18n in en/it/fr/de.
+- **Unlock charge cable** button (B10 charge-port unlock, `unlock_charger`, right 192) — promised on
+  #19. Lives in the new **Quick actions** card, with a confirm prompt. i18n in en/it/fr/de.
+
+### Changed
+- **Commands page restyle.** A full pass over the page's look & layout:
+  - **Icons → Material Design Icons** everywhere, from a single source (`partials/_icons.html` `mdi()`
+    macro): automotive glyphs (vehicle lock = `shield-car` green/red, boot = `car-back`, windows =
+    `car-side`, roof = `car-convertible`, climate = `air-conditioner`/`snowflake`/`heat-wave`/`fan`/
+    `car-defrost-front`, defrost, EV plug, etc.). Card headers and status pills use them too.
+  - **Uniform tiles** — fixed icon/label slots + bottom-anchored controls so every tile in a row
+    aligns, regardless of label length or control type (slider vs toggle vs button).
+  - **Rebalanced two-column layout** — LEFT = Vehicle + Climate, RIGHT = Comfort + Quick actions;
+    Comfort widened to 3-up so the columns are height-matched (bottom-left void measured 618px → 72px).
+    Collapses to a single column on mobile (vehicle controls first).
+  - **Consistent card headers** (icon + title) on every card, including Vehicle.
+  - Merged the old Find Car + Battery cards into **Quick actions**; "Preheat" → "Preheat battery".
 
 ### Note
 - Local/test build — **not released**. Pending on-car verification that the B10 actually actuates
