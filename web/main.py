@@ -305,13 +305,14 @@ async def map_page(request: Request):
 # Seats are shown per-side (driver/passenger), mirrors per-side (left/right); gating is at the
 # feature level (e.g. both seat-heat tiles hide together if seat_heat is broken on this car).
 _COMFORT_ROWS = (
-    ("seat_heat_driver",     "seat_heat",     "comfort_seat_heat_driver",     "🔥"),
-    ("seat_heat_passenger",  "seat_heat",     "comfort_seat_heat_passenger",  "🔥"),
-    ("seat_vent_driver",     "seat_vent",     "comfort_seat_vent_driver",     "💨"),
-    ("seat_vent_passenger",  "seat_vent",     "comfort_seat_vent_passenger",  "💨"),
-    ("steering_heat",        "steering_heat", "comfort_steering_heat",        "🛞"),
-    ("mirror_heat_left",     "mirror_heat",   "comfort_mirror_heat_left",     "🪞"),
-    ("mirror_heat_right",    "mirror_heat",   "comfort_mirror_heat_right",     "🪞"),
+    # (comfort_state key, gating feature, i18n label, icon kind, accent)
+    ("seat_heat_driver",     "seat_heat",     "comfort_seat_heat_driver",     "seat",     "heat"),
+    ("seat_heat_passenger",  "seat_heat",     "comfort_seat_heat_passenger",  "seat",     "heat"),
+    ("seat_vent_driver",     "seat_vent",     "comfort_seat_vent_driver",     "seat",     "vent"),
+    ("seat_vent_passenger",  "seat_vent",     "comfort_seat_vent_passenger",  "seat",     "vent"),
+    ("steering_heat",        "steering_heat", "comfort_steering_heat",        "steering", "heat"),
+    ("mirror_heat_left",     "mirror_heat",   "comfort_mirror_heat_left",     "mirror",   "heat"),
+    ("mirror_heat_right",    "mirror_heat",   "comfort_mirror_heat_right",     "mirror",   "heat"),
 )
 
 
@@ -327,11 +328,11 @@ def _comfort_rows(vin):
     except ValueError:
         state = {}
     rows = []
-    for skey, feat, label_key, icon in _COMFORT_ROWS:
+    for skey, feat, label_key, icon, accent in _COMFORT_ROWS:
         if not capability_profile.is_shown(vin, feat):
             continue
         v = int(state.get(skey) or 0)
-        rows.append({"icon": icon, "label_key": label_key, "value": v, "on": v > 0})
+        rows.append({"icon": icon, "accent": accent, "label_key": label_key, "value": v, "on": v > 0})
     return rows
 
 

@@ -77,10 +77,30 @@
 {% endmacro %}
 
 
-<div id="cmd-grid" class="grid grid-cols-1 lg:grid-cols-2 gap-4 max-w-3xl">
+{# Comfort icons — real SVGs (steering wheel, car seat, side mirror), not emoji. #}
+{% macro comfort_icon(kind) %}
+{% if kind == 'steering' %}
+<svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+  <circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.4"/>
+  <path d="M12 14.4V21"/><path d="M9.8 11.2 3.7 8.6"/><path d="M14.2 11.2 20.3 8.6"/>
+</svg>
+{% elif kind == 'mirror' %}
+<svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M4 8c5-2.2 11-2.2 16 0l-1.8 5.2c-4-1.4-8.4-1.4-12.4 0z"/>
+  <path d="M12 13.6V18"/><path d="M8.5 21h7"/>
+</svg>
+{% else %}{# seat #}
+<svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M7 4v8h7l3 3v5"/><path d="M7 12 5 20"/><path d="M17 20H8"/>
+</svg>
+{% endif %}
+{% endmacro %}
+
+
+<div id="cmd-grid" class="grid grid-cols-1 md:grid-cols-2 gap-4">
 
   <!-- Vehicle controls — climate-style tiles -->
-  <div class="card lg:col-span-2">
+  <div class="card md:col-span-2">
     <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
 
       <!-- Lock -->
@@ -209,7 +229,7 @@
   </div>
 
   <!-- Climate — 4 toggle, off via ac_switch -->
-  <div class="card lg:col-span-2">
+  <div class="card md:col-span-2">
     <div class="flex items-center justify-between mb-3">
       <div class="flex items-center gap-2">
         <span class="text-2xl">❄️</span>
@@ -232,7 +252,7 @@
   <!-- Comfort — read-only state sensors (shown only where they work on this car; no buttons,
        because the matching remote commands don't actuate on the B10) -->
   {% if comfort %}
-  <div class="card lg:col-span-2">
+  <div class="card md:col-span-2">
     <div class="flex items-center gap-2 mb-3">
       <span class="text-2xl">🛋️</span>
       <span class="font-semibold text-white">{{ t('comfort_section') }}</span>
@@ -241,7 +261,7 @@
       {% for c in comfort %}
       <div class="rounded-lg border p-3 flex items-center gap-3
         {% if c.on %}border-amber-400/40 bg-amber-400/5{% else %}border-slate-700 bg-slate-800/40{% endif %}">
-        <span class="text-2xl leading-none shrink-0">{{ c.icon }}</span>
+        <span class="shrink-0 {% if not c.on %}text-slate-500{% elif c.accent == 'vent' %}text-sky-400{% else %}text-amber-400{% endif %}">{{ comfort_icon(c.icon) }}</span>
         <span class="text-xs font-medium text-slate-200 flex-1 min-w-0">{{ t(c.label_key) }}</span>
         <span class="text-[11px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap shrink-0
           {% if c.on %}text-amber-400 bg-amber-400/10 border border-amber-400/30
