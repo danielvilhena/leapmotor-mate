@@ -17,7 +17,7 @@ import command_client
 import i18n
 import ha_client
 import geocode
-import mqtt_test
+import mqtt_check
 import auth
 
 MATE_VERSION = "1.11.5"  # bump together with the git tag + add-on config.yaml at release
@@ -1003,7 +1003,7 @@ async def test_mqtt(request: Request):
     form = await request.form()
     import asyncio
     ok, reason = await asyncio.get_event_loop().run_in_executor(
-        None, lambda: mqtt_test.test_connection(
+        None, lambda: mqtt_check.check_connection(
             form.get("mqtt_broker", ""),
             form.get("mqtt_port", "1883"),
             form.get("mqtt_user") or None,
@@ -1072,7 +1072,7 @@ async def mqtt_status(request: Request):
         return _status_dot("amber", t("status_unconfigured"))
     import asyncio
     ok, _reason = await asyncio.get_event_loop().run_in_executor(
-        None, lambda: mqtt_test.test_connection(
+        None, lambda: mqtt_check.check_connection(
             broker,
             db_reader.get_setting("mqtt_port", "1883"),
             db_reader.get_setting("mqtt_user", "") or None,

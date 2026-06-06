@@ -15,8 +15,8 @@ _CONNACK = {
 }
 
 
-def test_connection(broker, port, username=None, password=None,
-                    use_tls=False, tls_insecure=False, timeout=6):
+def check_connection(broker, port, username=None, password=None,
+                     use_tls=False, tls_insecure=False, timeout=6):
     """Return (ok: bool, reason: str). Does a bounded TCP check first (so a wrong
     host/port fails fast instead of hanging), then a real MQTT CONNECT to surface
     auth/TLS/protocol errors via the CONNACK code."""
