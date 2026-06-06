@@ -7,10 +7,9 @@ telemetry that trips, charges, reports and charts depend on.
 ## The two-axis model
 
 A **SENSOR** (the car reports the state) and a **COMMAND** (we can actuate it remotely) are
-**independent**. On the B10 the comfort family is the archetype: the state sensor works
-(reflects manual activation) but the remote command is *accepted-but-not-executed*. So they
-are separate features — e.g. `seat_heat` (sensor, shown read-only) vs `seat_heat_cmd`
-(command/button, hidden when broken).
+**independent** — they're classified separately (e.g. `seat_heat` the sensor vs `seat_heat_cmd`
+the command). A sensor can work while its command doesn't, or vice-versa, so each gets its own
+verdict and the UI/MQTT decide per-axis what to expose.
 
 Verdicts: `working` (proven), `broken` (confirmed accepted-but-not-executed, or a dead sensor),
 `untested` (unknown → shown; we never hide on a guess). Stored per VIN in the `settings`
@@ -18,35 +17,48 @@ table as `capabilities_<vin>`.
 
 ## What the API does / doesn't do on the B10 (empirical)
 
-Tested live on the car: commands via the public `leapmotor-api` `_remote_control_raw`, effects
-read back from `get_fresh_signals`. Contributed upstream: **markoceri/leapmotor-api#3**.
+Tested live on the car: commands via the public `leapmotor-api` client, effects read back from
+the fresh signals. The hard cases (A/C full-off, comfort) were cracked on-car + with payloads
+captured by **@kerniger** (leapmotor-ha #41/#42); we shared the B10 READY PID `1258` back, and
+the A/C-off finding went upstream as **markoceri/leapmotor-api#3** (closed).
 
 ### CORE — always work, never hidden
 soc, range, odometer, vehicle state, gear, speed, GPS, charge state/power, plug, inside &
-battery temperature, tyres, doors, trunk, lock, sunshade, window open/closed.
+battery temperature, tyres, doors, trunk, lock, sunshade, window open/closed, **READY** (signal
+`1258` bcmKeyPositionOn3, driven only by the physical key).
 
-### Climate
-- Quick **COOL / HEAT / VENTILATION** (cmd_id 170, `operate=manual`): **command works**.
-- Full A/C **OFF**: **broken** — neither the `ac_switch` toggle nor cmd_170 `operate=close`
-  ever drives `1938 acSwitch → 0`. Worse: on the B10 `operate=close` flips the HVAC into
-  **AUTO** and leaves it running, so it can be *worse than a no-op*. A true full-off is only
-  possible from the car's physical control. (Best remote mitigation: `operate=manual` +
-  `windlevel=1` — fan at minimum, avoids the AUTO ramp. Still doesn't power off.)
+### Climate — WORKING on the B10
+- Quick **COOL / HEAT / VENTILATION** (cmd_id 170, `operate=manual`): **work**.
+- Full A/C **OFF**: **SOLVED** (shipped v1.11.3). The B10 powers the A/C fully off with
+  **`ac_switch` + `{"operate":"off"}`**, which drives `1938 acSwitch → 0` (confirmed on-car,
+  ≤3 s). NB the library's old `ac_off()` sent `operate=close`, which on the B10 only flips HVAC
+  to **AUTO** (never powers off) — that was the source of the old "can't turn it off" reports.
+- Target **temperature** stepper 18–32 °C (cmd 170, auto cool/heat vs cabin temp): works.
 
-### Comfort — SENSOR works / COMMAND broken
-Seat heating (driver `2100` / passenger `2118`), seat ventilation (`2101` / `2119`),
-steering-wheel heat (`1816`), mirror heat (left `49` / right `50`). The state sensors reflect
-manual activation instantly; the remote commands return success (`code=0`) but never move the
-signal — verified both **parked** and **in READY**. → Mate shows these as **read-only
-sensors** (the Comfort side card) and hides the control buttons.
+### Comfort — SENSOR **and** COMMAND working (since v1.11.4)
+Both axes work on the B10 using the payloads captured by @kerniger (leapmotor-ha 0.6.11):
+- **Seat heating** (301) / **seat ventilation** (370): `{"position":"driver|copilot","level":"0..3"}`
+  — actuates sensors driver `2100`/`2118` (heat) and `2101`/`2119` (vent); levels 0–3 map exactly.
+- **Steering-wheel heat** (320): ON `{"level":"2"}` / OFF `{"level":"1"}` — sensor `1816`.
+- **Mirror heat** (440): ON `{"value":"2"}` / OFF `{"value":"1"}` — sensors `49`/`50`.
 
-### Others
-- **sentry** (`3636`): command broken.
-- **window opening-%** (`3727/3728/1879/1880`): sensor **dead** on the B10 (windows physically
-  open but %=0) → hidden. Window open/closed *state* works.
-- **cmd_id recon:** `420` is accepted but inert in every state; `340` = native charge-limit that
-  actuates (`{"chargesoc":80}`, audible relay); `410` ON3 is vehicle-gated (signal `1258`
-  bcmKeyPositionOn3 is driven only by the physical key); `361` = read-only prepare-car schedule.
+→ Mate exposes these as full **controls** (per-seat 0–3 level sliders; steering & mirror on/off
+toggles) on the Commands page, plus the read-only state. The international payloads are shared
+across C10/B10 (no B10-specific flow); our earlier failure was sending `position` as a numeric
+index instead of the string `"driver"/"copilot"`.
+
+### Still broken / unsupported on the B10
+- **sentry** (`3636`, cmd 220): command accepted (`code=0`) but never actuates.
+- **window open/close & opening-%** (`3727/3728/1879/1880`): command accepted-but-not-executed,
+  and the opening-% sensor is **dead** (windows physically open but %=0) → hidden. Window
+  open/closed *state* works.
+- **`unlock_charger`** (charge-port unlock, right 192): exposed in v1.11.5 (web + MQTT) but its
+  on-car actuation on the B10 is **not yet confirmed** — may turn out accepted-but-not-executed
+  like the old A/C-off; pull/gate it if so.
+- Minor: defrost engages heating but signal `1945` doesn't move.
+- **cmd_id recon:** `340` = native charge-limit that actuates (`{"chargesoc":80}`); `410` ON3 is
+  vehicle-gated (only the physical key raises `1258`); `420` accepted-but-inert; `361` = read-only
+  prepare-car schedule.
 
 ### Not exposed on the B10 at all
 Outside/ambient temperature, tyre temperature, window opening-%.
@@ -54,33 +66,34 @@ Outside/ambient temperature, tyre temperature, window opening-%.
 ## How it's wired
 
 - `web/capability_profile.py` (+ a copy in `poller/`, per the `session_share.py`/`crypto.py`
-  duplication convention): the feature registry + `is_shown()` logic, with a parameterized
-  settings accessor so both the web app (`db_reader`) and the poller (`db.get_setting`) can use it.
-- The **poller** writes the live comfort states each poll as `comfort_state_<vin>` in `settings`
-  (no `positions` schema change), so the web UI — which reads the positions row, not raw signals
-  — can display them.
-- **MQTT discovery** hides the broken *A/C Off* button on the B10 (clears its retained config so
-  Home Assistant drops it) and publishes the working comfort sensors; everything gated per-VIN by
-  `is_shown`.
-- The **Commands page** shows a read-only **Comfort** side card with the comfort sensors as tiles
-  (same tile style as the rest of the page; real car MDI icons).
+  duplication convention): the feature registry + `is_shown()` / `command_shown()` logic, with a
+  parameterized settings accessor so both the web app (`db_reader`) and the poller
+  (`db.get_setting`) can use it.
+- The **poller** writes the live comfort states each poll as `comfort_state_<vin>` in `settings`,
+  so the web UI can display them and drive the comfort tiles.
+- **MQTT discovery** publishes the working command buttons (climate incl. A/C Off, comfort, find
+  car, unlock charge cable) and the comfort sensors, each gated per-VIN by `command_shown` — a
+  button confirmed `broken` on a car has its retained config cleared so Home Assistant drops it.
+- The **Commands page** shows the comfort controls (sliders/toggles) and a battery/quick-actions
+  card, all in the unified MDI-icon tile style (post-v1.11.5 restyle).
 
-## Status
+## Status (current: v1.11.5)
 
 ### Done
 - Capability registry (two-axis) + persisted B10 verdicts.
-- MQTT: A/C-Off hidden on the B10; comfort sensors published (gated).
-- Commands page: Comfort side card (page-style tiles, MDI car icons), placed beside the controls
-  block at the same height.
-- Battery card display fix (show `NN°`; stop the header texts overlapping when narrow).
-- (Separate work this session) HA install-path docs fix for the 2026.2 *Apps* rename, and an
-  add-on-repo auto-sync CI workflow.
+- **A/C full-off** solved (`operate=off`, v1.11.3) and **all B10 comfort commands working**
+  (seat heat/vent levels, steering & mirror heating, v1.11.4) — none hidden anymore.
+- **READY** indicator (signal `1258`) on the Overview battery card.
+- MQTT: comfort + climate (incl. A/C Off) + find car + unlock charge cable buttons published
+  (gated); comfort sensors published.
+- Commands page restyle (v1.11.5): MDI icons from one source, uniform tiles, balanced two-column
+  layout, per-card headers.
 
 ### To do
-- Publish to GitHub when authorized (currently committed locally on `prebuild`).
-- More at-the-car probes to generalise: seat heat `301` `{"value":"1,3"}` (sensor `2100`) and
-  seat vent `370` (sensor `2101`) in READY; re-test sentry `220` / defrost `460` in READY.
-- Wire `is_shown` into more of the UI/MQTT surface as new commands get exposed.
+- Confirm **`unlock_charger`** actually actuates on the B10 (on-car); gate/pull if it's a no-op.
+- **sentry (220)** and **window open/close & window-%** still accepted-but-not-executed — could
+  ask @kerniger for those payloads too (he supplied the comfort ones).
+- Wire `is_shown`/`command_shown` into more of the UI/MQTT surface as new commands get exposed.
 
 ## Notes
 Detailed reverse-engineering of the official app (static decompile / dynamic unpacking — both
