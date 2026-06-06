@@ -364,12 +364,14 @@ def battery_preheat():   return _session.execute(lambda api, vin: api.battery_pr
 def battery_preheat_off():return _session.execute(lambda api, vin: api.battery_preheat_off(vin))
 def open_sunshade():     return _session.execute(lambda api, vin: api.open_sunshade(vin))
 def close_sunshade():    return _session.execute(lambda api, vin: api.close_sunshade(vin))
-# Staged for 0.3.1 but NOT exposed in any UI: live testing showed the B10 ACCEPTS these
-# (cloud returns OK) but does NOT actuate them — same behaviour as A/C off — so they'd be
-# misleading "Done" buttons. Kept ready so they can be wired up instantly if a future
-# leapmotor-api / vehicle update makes them work on the B10. (No sunroof: the existing
-# open/close "sunshade" already operates the B10's panoramic roof.)
+# Charge-port cable unlock (right 192). Exposed on the battery card (promised on mate#19).
+# NB: a 2026-Q2 staging note flagged this as "accepted but not actuated" on the B10 (same as
+# the old A/C-off) — re-verify on-car before any release; pull the button if it's a no-op.
 def unlock_charger():    return _session.execute(lambda api, vin: api.unlock_charger(vin))
+# Staged but NOT exposed in any UI: live testing showed the B10 ACCEPTS these (cloud returns
+# OK) but does NOT actuate them — so they'd be misleading "Done" buttons. Kept ready so they
+# can be wired up instantly if a future leapmotor-api / vehicle update makes them work on the
+# B10. (No sunroof: the existing open/close "sunshade" already operates the B10's panoramic roof.)
 def sentry_on():         return _session.execute(lambda api, vin: api.sentry_mode_on(vin))
 def sentry_off():        return _session.execute(lambda api, vin: api.sentry_mode_off(vin))
 # Steering / mirror heat — kerniger 0.6.11 payloads (B10-verified): level/value 1=off, 2=on.

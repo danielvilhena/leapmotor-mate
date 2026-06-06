@@ -3,6 +3,18 @@
 All notable changes to LeapMotor Mate are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.11.5] — 2026-06-06
+
+### Added
+- **Unlock charge cable** button on the Commands → Battery card, next to Preheat (with a confirm
+  prompt). Sends the B10 charge-port unlock command (`unlock_charger`, right 192) — promised on #19.
+  i18n in en/it/fr/de.
+
+### Note
+- Local/test build — **not released**. Pending on-car verification that the B10 actually actuates
+  `unlock_charger` (an earlier staging note flagged it as possibly accepted-but-not-actuated, like the
+  old A/C-off); pull the button if it proves a no-op.
+
 ## [1.11.4] — 2026-06-06
 
 ### Added

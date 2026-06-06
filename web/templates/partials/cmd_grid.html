@@ -218,6 +218,7 @@
     </div>
     <div class="flex gap-2 items-center flex-wrap">
       {{ action_btn("battery_preheat", t('btn_preheat')) }}
+      {{ action_btn("unlock_charger", t('btn_unlock_charger'), t('unlock_charger_confirm')) }}
     </div>
     <span id="badge-plug" class="text-xs text-slate-500 mt-2 block">
       {% if plugged is not none %}{% if plugged %}{{ t('cable_connected') }}{% else %}{{ t('cable_not_connected') }}{% endif %}{% endif %}
