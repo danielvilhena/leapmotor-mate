@@ -3,6 +3,35 @@
 All notable changes to LeapMotor Mate are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.11.0] — 2026-06-06
+
+### Added
+- **Comfort sensors on the Commands page.** A new **Comfort** card (beside the controls block)
+  shows the read-only state of the **heated/ventilated seats** (driver & passenger), the
+  **heated steering wheel** and the **heated mirrors** (left & right) — as tiles matching the
+  rest of the page, with proper car icons. These reflect what the car reports. They are also
+  published to Home Assistant as native **MQTT sensors**.
+
+### Changed
+- **Model-aware controls (per vehicle).** Mate now shows only what *your* car actually supports.
+  On the **B10**, for example, the over-MQTT **A/C Off** button is hidden, because the Leapmotor
+  cloud does not honour a remote full power-off on that model (an open limitation tracked with the
+  API maintainers). CORE telemetry — trips, charges, reports, charts — is never affected.
+
+### Fixed
+- **Battery card.** The minimum battery temperature now shows correctly as `NN°` (it previously
+  rendered a raw label such as `22min_temp`), and the header texts no longer overlap on narrow
+  layouts.
+
+### Docs
+- Updated the Home Assistant install instructions for the **2026.2 "Apps" rename** (formerly
+  "Add-ons"; *Applicazioni* in Italian).
+
+### Internal
+- New per-VIN **capability profile** that drives the model-aware UI/MQTT (each feature classified
+  working / broken / untested from on-car probing; confirmed-broken non-core features are hidden).
+- CI workflow that auto-syncs the add-on repository's version on each published release.
+
 ## [1.10.0] — 2026-06-05
 
 ### Added
