@@ -20,15 +20,18 @@ Supported models: **B10 · C10 · T03** (European spec).
 
 ## Features
 
-- **🆕 Overview** — live status, battery, range, **READY state**, location map, vehicle picture.
+- **Overview** — live status, battery, range, **READY state**, location map, vehicle picture.
 - **Trips** — automatic trip detection with route map, distance, energy, efficiency and regen. Each trip also shows its **total kWh consumed** and its **cost** (energy × the price per kWh of the last charge before the trip, in your currency).
 - **Charges** — charge sessions with AC/DC detection, energy added, power and a distribution chart.
 - **Charge prices** — flat 24h pricing or **time-of-use bands**: set prices per time window, per **day of the week** and per charge type, and each session is costed correctly (energy split across the bands it spans by the real power curve).
-- **Wallbox (optional)** — pair a wallbox already in Home Assistant to see live charging power/status, set the max charging current, and compare **AC delivered by the wallbox** vs **DC into the battery** per session, with charging efficiency.
+- **🆕 Charge scheduling** — a dedicated **Scheduling** page to program a charge window: on/off, target SoC, start/end time and **days of the week**; saving preserves the car's existing day selection.
+- **🆕 CSV export** — export your trips and charges to **CSV** (plus per-trip **GPX**), from the Trips/Charges pages or *Settings → Export/Backup*.
+- **Wallbox (optional)** — pair a wallbox already in Home Assistant to see live charging power/status, set the max charging current, and compare **AC delivered by the wallbox** vs **DC into the battery** per session, with charging efficiency. A **🆕 "show all entities" advanced mode** lets you map *any* sensor — handy for foreign-language entity names or a generic energy-meter/relay.
 - **ABRP (optional)** — forward live telemetry to **A Better Route Planner** for live route planning (enable it with your ABRP token).
 - **MQTT → Home Assistant (optional)** — publish the car to Home Assistant via **MQTT Discovery** as native entities (sensors, binary sensors, GPS tracker) plus command buttons.
+- **🆕 EVCC (optional)** — publish EVCC-friendly MQTT topics so an **EVCC** `type: custom` vehicle reads SoC, plug/charging status, range and odometer (ready-to-paste config in `docs/EVCC.md`).
 - **Statistics** — driving/AC/other energy split and a 6‑week consumption trend (from the Leapmotor cloud).
-- **🆕 Remote control** — lock, windows, trunk, panoramic roof, **climate** (cool / heat / ventilation / defrost, A/C on-off, target temperature), **heated & ventilated seats** (per-seat level), **heated steering wheel & mirrors**, find car, battery preheat, **unlock charge cable**.
+- **Remote control** — lock, windows, trunk, panoramic roof, **climate** (cool / heat / ventilation / defrost, A/C on-off, target temperature), **heated & ventilated seats** (per-seat level), **heated steering wheel & mirrors**, find car, battery preheat, **unlock charge cable**.
 - **Navigation** — search an address and **send the destination straight to the car's built‑in navigation**. Shows the car's current address too. Address lookup is keyless by default (OpenStreetMap) with an optional API key (Geoapify/LocationIQ/TomTom) for better house‑number coverage.
 - **Independent** — polls the Leapmotor cloud directly (configurable 10–30 s). No dependency on the phone app or Home Assistant; polling the cloud does **not** wake or drain the car.
 - **Multilingual UI** — English · Italiano · Français · Deutsch.
@@ -188,15 +191,18 @@ Modelli supportati: **B10 · C10 · T03** (spec. europea).
 
 ## Funzionalità
 
-- **🆕 Panoramica** — stato live, batteria, autonomia, **stato READY**, mappa posizione, immagine del veicolo.
+- **Panoramica** — stato live, batteria, autonomia, **stato READY**, mappa posizione, immagine del veicolo.
 - **Viaggi** — rilevamento automatico con mappa del percorso, distanza, energia, efficienza e regen. Ogni viaggio mostra anche i **kWh totali consumati** e il **costo** (energia × prezzo per kWh dell'ultima ricarica prima del viaggio, nella tua valuta).
 - **Ricariche** — sessioni con rilevamento AC/DC, energia aggiunta, potenza e grafico di distribuzione.
 - **Prezzi di ricarica** — prezzo fisso 24h o **fasce orarie**: prezzi per fascia, per **giorno della settimana** e per tipo di ricarica, e ogni sessione viene calcolata correttamente (energia ripartita tra le fasce attraversate dalla curva di potenza reale).
-- **Wallbox (opzionale)** — abbina una wallbox già presente in Home Assistant per vedere potenza/stato di carica live, impostare la corrente max e confrontare l'**AC erogato dalla wallbox** con il **DC entrato in batteria** per sessione, col rendimento di carica.
+- **🆕 Schedulazione ricarica** — una pagina **Schedulazione** dedicata per programmare una fascia di ricarica: on/off, SoC obiettivo, ora di inizio/fine e **giorni della settimana**; il salvataggio preserva i giorni già impostati sull'auto.
+- **🆕 Esportazione CSV** — esporta viaggi e ricariche in **CSV** (più **GPX** per viaggio), dalle pagine Viaggi/Ricariche o da *Impostazioni → Esporta/Backup*.
+- **Wallbox (opzionale)** — abbina una wallbox già presente in Home Assistant per vedere potenza/stato di carica live, impostare la corrente max e confrontare l'**AC erogato dalla wallbox** con il **DC entrato in batteria** per sessione, col rendimento di carica. Una **🆕 modalità avanzata "mostra tutte le entità"** permette di mappare *qualsiasi* sensore — utile per nomi in altre lingue o un contatore/relè generico.
 - **ABRP (opzionale)** — invia la telemetria live ad **A Better Route Planner** per la pianificazione dei percorsi (attivala col tuo token ABRP).
 - **MQTT → Home Assistant (opzionale)** — pubblica l'auto a Home Assistant via **MQTT Discovery** come entità native (sensori, binary sensor, tracker GPS) più pulsanti comando.
+- **🆕 EVCC (opzionale)** — pubblica topic MQTT compatibili con **EVCC** così un veicolo `type: custom` legge SoC, stato spina/ricarica, autonomia e odometro (configurazione pronta in `docs/EVCC.md`).
 - **Statistiche** — ripartizione energia guida/clima/altro e trend consumo a 6 settimane (dal cloud Leapmotor).
-- **🆕 Controllo remoto** — blocco, finestrini, bagagliaio, tetto panoramico, **clima** (raffredda / riscalda / ventilazione / sbrinamento, A/C on-off, temperatura), **sedili riscaldati e ventilati** (livello per sedile), **volante e specchietti riscaldati**, trova auto, preriscaldo batteria, **sblocco cavo di ricarica**.
+- **Controllo remoto** — blocco, finestrini, bagagliaio, tetto panoramico, **clima** (raffredda / riscalda / ventilazione / sbrinamento, A/C on-off, temperatura), **sedili riscaldati e ventilati** (livello per sedile), **volante e specchietti riscaldati**, trova auto, preriscaldo batteria, **sblocco cavo di ricarica**.
 - **Navigazione** — cerca un indirizzo e **invia la destinazione direttamente al navigatore di bordo dell'auto**. Mostra anche l'indirizzo attuale dell'auto. La ricerca indirizzi funziona senza chiave (OpenStreetMap) con una chiave API opzionale (Geoapify/LocationIQ/TomTom) per una copertura migliore dei civici.
 - **Indipendente** — interroga direttamente il cloud Leapmotor (configurabile 10–30 s). Nessuna dipendenza dall'app o da Home Assistant; interrogare il cloud **non** sveglia né scarica l'auto.
 - **UI multilingua** — Italiano · English · Français · Deutsch.
