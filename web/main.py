@@ -20,7 +20,7 @@ import geocode
 import mqtt_check
 import auth
 
-MATE_VERSION = "1.11.5"  # bump together with the git tag + add-on config.yaml at release
+MATE_VERSION = "1.11.6"  # bump together with the git tag + add-on config.yaml at release
 
 app = FastAPI(title="LeapMotor Mate")
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
@@ -425,6 +425,17 @@ def _parse_vehicle_status(sig: dict) -> dict:
     }
 
 
+@app.get("/scheduling", response_class=HTMLResponse)
+async def scheduling_page(request: Request):
+    """Dedicated page for the charge schedule (cmd 190). The card lazy-loads its current values
+    from the car via api/charge-schedule. Climate (pre-conditioning) scheduling is intentionally
+    NOT shown here — the B10 rejects the climate write (code -2); tracked as ClimaSchedulerT01."""
+    vehicle, _ = db_reader.get_vehicle()
+    return templates.TemplateResponse(request, "scheduling.html", _ctx(
+        page="scheduling", vehicle=vehicle,
+    ))
+
+
 @app.get("/vehicle", response_class=HTMLResponse)
 async def vehicle_page(request: Request):
     vehicle, _ = db_reader.get_vehicle()
@@ -625,17 +636,27 @@ async def wallbox_status(request: Request):
 
 
 @app.get("/api/wallbox/entities", response_class=HTMLResponse)
-async def wallbox_entities(request: Request):
+async def wallbox_entities(request: Request, show_all: int = 0):
     """Lazy-loaded entity picker: discovered HA entities + role selects,
-    pre-filled with the saved mapping or an auto-detected best guess."""
-    all_entities = ha_client.list_entities(only_wallbox=True)
+    pre-filled with the saved mapping or an auto-detected best guess.
+
+    show_all=1 (advanced mode, issue #21): list EVERY sensor/number entity instead of just
+    charger-named/typed ones, and skip the device-narrowing filter — so foreign-language names
+    or a generic energy-meter/relay (not a branded wallbox) can be mapped manually."""
+    advanced = bool(show_all)
+    all_entities = ha_client.list_entities(only_wallbox=not advanced)
     # Auto-detected defaults for any role, overridden by what the user saved →
     # new roles get a sensible pre-fill while saved choices are preserved.
     mapping = {**ha_client.auto_map(all_entities), **ha_client.get_mapping()}
-    # Offer only the wallbox device's own sensors in the dropdowns (not every HA entity).
-    entities = ha_client.filter_device_entities(all_entities, mapping)
+    if advanced:
+        # Keep only mappable domains (sensor/number) so the dropdowns stay usable.
+        entities = [e for e in all_entities
+                    if e["entity_id"].split(".", 1)[0] in ("sensor", "number", "input_number")]
+    else:
+        # Offer only the wallbox device's own sensors in the dropdowns (not every HA entity).
+        entities = ha_client.filter_device_entities(all_entities, mapping)
     return templates.TemplateResponse(request, "partials/wallbox_entities.html", _ctx(
-        entities=entities, mapping=mapping, roles=ha_client.WB_ROLES,
+        entities=entities, mapping=mapping, roles=ha_client.WB_ROLES, show_all=advanced,
     ))
 
 
@@ -1331,6 +1352,59 @@ async def set_charge_limit(request: Request):
     if ok:
         return HTMLResponse(f'<span style="color:#22c55e">✓ Limit set to {percent}%</span>')
     return HTMLResponse(f'<span style="color:#ef4444">✗ {msg}</span>')
+
+
+# ── Scheduling (native B10: charge cmd 190, climate cmd 171) ───────────────────
+@app.get("/api/charge-schedule")
+async def get_charge_schedule_api():
+    """Current charge schedule (read-only) — populates the Charges-page form."""
+    import asyncio
+    sched = await asyncio.get_event_loop().run_in_executor(None, command_client.get_charge_schedule)
+    return sched or {}
+
+
+@app.post("/api/charge-schedule", response_class=HTMLResponse)
+async def save_charge_schedule_api(request: Request):
+    """Read-modify-write the charge window (enable / target SoC / start / end / days). Days come
+    as `days` checkbox values = their position in the Monday-first `cycles` mask (0=Mon..6=Sun);
+    the chips are DISPLAYED in the app's Dom→Sab order but each carries its Mon-first index.
+    Changes the car's stored schedule — fired only on explicit user save."""
+    import re, asyncio
+    form = await request.form()
+    enabled = (form.get("enabled") or "") in ("1", "on", "true", "True")
+    try:
+        soc = int(form.get("soc_limit") or 80)
+    except (ValueError, TypeError):
+        soc = 80
+    start = (form.get("start_time") or "").strip()
+    end = (form.get("end_time") or "").strip()
+    sel_days = set(form.getlist("days"))                      # Mon-first positions, e.g. {"0","1"} = Mon+Tue
+    cycles = command_client.cycles_from_day_flags([str(i) in sel_days for i in range(7)])
+    t = i18n.get_t(db_reader.get_language())
+    if not re.match(r"^\d{2}:\d{2}$", start) or not re.match(r"^\d{2}:\d{2}$", end):
+        return HTMLResponse(f'<span style="color:#ef4444">✗ {t("sched_bad_time")}</span>', status_code=400)
+    if not (50 <= soc <= 100):
+        return HTMLResponse('<span style="color:#ef4444">✗ 50–100%</span>', status_code=400)
+    ok, msg = await asyncio.get_event_loop().run_in_executor(
+        None, lambda: command_client.save_charge_schedule(
+            enabled=enabled, soc_limit=soc, start_time=start, end_time=end, cycles=cycles))
+    if ok:
+        return HTMLResponse(f'<span style="color:#22c55e">✓ {t("sched_saved")}</span>')
+    return HTMLResponse(f'<span style="color:#ef4444">✗ {msg}</span>')
+
+
+@app.get("/api/climate-schedule", response_class=HTMLResponse)
+async def climate_schedule_api(request: Request):
+    """Read-only list of the car's climate (pre-conditioning) schedules, as an HTML partial.
+    STAGED / not currently surfaced by any page (ClimaSchedulerT01): climate was taken off the
+    Scheduling page because the SET (cmd 171) is rejected by the B10 cloud (code -2 "Request
+    failed") even with valid data. The GET works, so this route+partial are kept ready to surface
+    a read-only card once the write path is solved. The write stays unwired in
+    command_client.save_climate_schedule. Edit climate schedules in the Leapmotor app meanwhile."""
+    import asyncio
+    sched = await asyncio.get_event_loop().run_in_executor(None, command_client.get_climate_schedule)
+    return templates.TemplateResponse(request, "partials/climate_schedule.html",
+                                      _ctx(climate_schedule=sched or []))
 
 
 _OPTIMISTIC = {

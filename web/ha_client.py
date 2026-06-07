@@ -27,6 +27,8 @@ _TIMEOUT = 8  # seconds — local network, keep snappy
 _WB_KEYWORDS = (
     "wallbox", "charger", "charging", "evse", "easee", "go-e", "goe",
     "keba", "wallbe", "zaptec", "openevse", "tesla_wall", "pulsar",
+    # FR/other-language charger terms (issue #21 — Feyree relay via Tuya Local)
+    "borne", "recharge", "feyree", "borne_recharge",
 )
 _WB_DEVICE_CLASSES = ("power", "energy", "current", "voltage")
 

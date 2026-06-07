@@ -7,9 +7,18 @@
 {% macro eff_hex(e) %}{% if e < 18 %}#4ade80{% elif e < 22 %}#facc15{% else %}#f87171{% endif %}{% endmacro %}
 
 {% block content %}
-<div class="mb-6">
-  <h1 class="text-2xl font-bold text-white">{{ t('trips_title') }}</h1>
-  <p class="text-slate-400 text-sm mt-1">{{ total }} {{ t('recorded_trips') }}</p>
+<div class="mb-6 flex items-start justify-between gap-4">
+  <div>
+    <h1 class="text-2xl font-bold text-white">{{ t('trips_title') }}</h1>
+    <p class="text-slate-400 text-sm mt-1">{{ total }} {{ t('recorded_trips') }}</p>
+  </div>
+  {% if total %}
+  <a href="api/export/trips.csv" download
+     class="shrink-0 inline-flex items-center gap-2 rounded-lg border border-slate-600 bg-slate-800/60 px-3 py-2 text-sm font-medium text-slate-200 hover:bg-slate-700 hover:border-brand/50 transition-all">
+    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M5,20H19V18H5M19,9H15V3H9V9H5L12,16L19,9Z"/></svg>
+    {{ t('export_csv') }}
+  </a>
+  {% endif %}
 </div>
 
 {% if summary and summary.count %}

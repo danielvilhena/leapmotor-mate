@@ -141,9 +141,24 @@ class MqttService:
         pub("steering_heat", data.steering_heat)
         pub("mirror_heat_left", data.mirror_heat_left);     pub("mirror_heat_right", data.mirror_heat_right)
         pub("last_seen", datetime.now(timezone.utc).isoformat())
+        self._publish_evcc(base, data)
         self.client.publish(f"{base}/location",
                             json.dumps({"latitude": data.latitude, "longitude": data.longitude}),
                             retain=True)
+
+    def _publish_evcc(self, base, data):
+        """EVCC-friendly boolean mirrors of plug/charging/climate.
+
+        EVCC's Go config parser (strconv.ParseBool) accepts true/false/1/0 but NOT the
+        ON/OFF we publish for Home Assistant. These extra `evcc/*` topics let a `type:
+        custom` EVCC vehicle read charge status via the documented combined plugged+charging
+        pattern (and optional climater). Cheap retained topics — only read if the user wires
+        up EVCC. See docs/EVCC.md for a ready-to-paste vehicle config."""
+        def b(v):
+            return "" if v is None else ("true" if v else "false")
+        self.client.publish(f"{base}/evcc/plugged",  b(data.plug_connected),            retain=True)
+        self.client.publish(f"{base}/evcc/charging", b((data.charging_status or 0) > 0), retain=True)
+        self.client.publish(f"{base}/evcc/climate",  b(data.climate_on),                retain=True)
 
     def publish_state(self, vin, key, value):
         """Publish a single retained state topic — used for an optimistic update the

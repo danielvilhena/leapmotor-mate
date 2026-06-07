@@ -1,0 +1,42 @@
+{% import 'partials/_icons.html' as ico %}
+{# Read-only list of the car's climate (pre-conditioning) schedules — cmd 171. The GET works, but
+   the B10 cloud REJECTS the SET (code -2 "Request failed") even with the car's own valid data, so
+   Mate shows these read-only; set/edit them in the Leapmotor app. days: 0=Sun…6=Sat (lib doc;
+   the sibling charge `cycles` is Mon-first, so this may be off for schedules with specific days —
+   moot for the common empty/"once" case). #}
+{% set _dow = [t('dow_sun'), t('dow_mon'), t('dow_tue'), t('dow_wed'), t('dow_thu'), t('dow_fri'), t('dow_sat')] %}
+{% if climate_schedule %}
+<ul class="space-y-2">
+  {% for s in climate_schedule %}
+  {% set on = (s.on in ['1', 1, true]) %}
+  {% set mode = s.mode or '' %}
+  <li class="flex items-center gap-3 rounded-lg border border-slate-700 bg-slate-800/40 px-3 py-2">
+    <span class="shrink-0 {% if on %}text-sky-400{% else %}text-slate-500{% endif %}">
+      {%- if mode == 'cold' %}{{ ico.mdi('snowflake', 'w-5 h-5') }}
+      {%- elif mode == 'hot' %}{{ ico.mdi('heat-wave', 'w-5 h-5') }}
+      {%- elif mode == 'wind' %}{{ ico.mdi('fan', 'w-5 h-5') }}
+      {%- else %}{{ ico.mdi('air-conditioner', 'w-5 h-5') }}{% endif -%}
+    </span>
+    <div class="flex-1 min-w-0">
+      <div class="text-sm font-medium text-slate-200">
+        {{ s.start_time[11:16] if (s.start_time and s.start_time|length >= 16) else (s.start_time or '—') }}
+        {% if s.temperature %}<span class="text-slate-400 font-normal">· {{ s.temperature }}°</span>{% endif %}
+      </div>
+      <div class="text-xs text-slate-400">
+        {% if not s.days %}{{ t('sched_once') }}
+        {% elif s.days|length >= 7 %}{{ t('sched_every_day') }}
+        {% else %}{% for d in s.days %}{% if 0 <= d|int <= 6 %}{{ _dow[d|int] }}{% if not loop.last %}, {% endif %}{% endif %}{% endfor %}{% endif %}
+      </div>
+    </div>
+    <span class="text-[11px] font-bold px-2 py-0.5 rounded-full shrink-0
+      {% if on %}text-green-400 bg-green-400/10 border border-green-400/30
+      {% else %}text-slate-400 bg-slate-700 border border-slate-600{% endif %}">
+      {% if on %}{{ t('sched_active') }}{% else %}{{ t('sched_inactive') }}{% endif %}
+    </span>
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<div class="text-sm text-slate-400">{{ t('sched_climate_none') }}</div>
+{% endif %}
+<div class="text-[11px] text-slate-500 mt-2">{{ t('sched_climate_hint') }}</div>

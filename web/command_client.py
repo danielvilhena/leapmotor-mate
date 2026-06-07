@@ -209,6 +209,40 @@ class LeapmotorSession:
                     self._reset()
             return None
 
+    def get_charge_schedule(self) -> dict | None:
+        """Native charge schedule (cmd 190) — flat dict: chargeEnable, chargesoc,
+        circulation, cycles, starttime, endtime, recharge. Read-only, safe."""
+        with self._lock:
+            for attempt in range(2):
+                try:
+                    self._connect()
+                    return self._api.get_charge_schedule(self._vehicle.vin)
+                except Exception as e:
+                    log.warning("Charge schedule fetch (attempt %d): %s", attempt + 1, e)
+                    self._reset()
+            return None
+
+    def get_climate_schedule(self) -> list | None:
+        """Native climate schedule (cmd 171) — list of control dicts. Read-only, safe.
+
+        Control-dict shape, confirmed live on the B10 (2026-06-07) — the partial
+        templates/partials/climate_schedule.html depends on these exact keys:
+            {"on": "1"/"0", "mode": "cold"/"hot"/"wind"/"nohotcold", "operate": "auto"/"manual",
+             "start_time": "YYYY-MM-DD HH:MM:SS", "temperature": "26", "windlevel": "7",
+             "days": [int]  # [] = once; order per lib doc 0=Sun..6=Sat but UNCONFIRMED on B10
+             #               (charge `cycles` proved Mon-first) — "position":"all","circle":"in",
+             "set_id": "...", "wshld": "0"/"1"}
+        NB `days` is a LIST OF INTS here (unlike the charge schedule's flag-string `cycles`)."""
+        with self._lock:
+            for attempt in range(2):
+                try:
+                    self._connect()
+                    return self._api.get_climate_schedule(self._vehicle.vin)
+                except Exception as e:
+                    log.warning("Climate schedule fetch (attempt %d): %s", attempt + 1, e)
+                    self._reset()
+            return None
+
     def get_car_picture(self) -> bytes | None:
         """Static owner vehicle PNG, extracted from the car-picture package ZIP
         (android/xxhdpi/carpic_for_tripsum.png) — same as the HA integration's
@@ -326,6 +360,110 @@ def get_charge_plan() -> dict | None:
 
 def set_charge_limit(percent: int):
     return _session.execute(lambda api, vin: api.set_charge_limit(vin, percent))
+
+
+# ── Scheduling (native B10 support) ───────────────────────────────────────────
+# Reads are safe (no actuation). The charge schedule (cmd 190) is a flat object; the
+# climate schedule (cmd 171) is a FULL-STATE-REPLACEMENT list, so its write is read-only
+# here for now (editing it would have to read-modify-write all controls to avoid wiping
+# schedules set in the official app).
+def get_charge_schedule() -> dict | None:
+    return _session.get_charge_schedule()
+
+
+def get_climate_schedule() -> list | None:
+    return _session.get_climate_schedule()
+
+
+def save_climate_schedule(*, enabled: bool, mode: str, temperature: int, start_hhmm: str,
+                          day_positions, wshld: str = "0", windlevel: str = "7"):
+    """Write the climate (pre-conditioning) schedule (cmd 171) — a FULL-STATE-REPLACEMENT list.
+
+    ⚠️ DOES NOT WORK ON THE B10 — kept staged/UNWIRED (no route calls it). Confirmed on-car
+    2026-06-07: the SET is rejected by the cloud with **code -2 "Request failed"** even when
+    re-sending the car's OWN current schedule verbatim (PIN verify returns code 0 first, then the
+    ac_schedule step fails). So it's the endpoint/library path that the B10 refuses, not our
+    payload — the official app must use a different `setAppointment` endpoint the lib doesn't
+    implement. The READ (get_climate_schedule) works fine, so Mate shows climate schedules
+    read-only. Re-wire this only if a future leapmotor-api / kerniger payload makes the SET work.
+    (Charge schedule via cmd 190 / RemoteActionCtlChargePlan DOES work — see save_charge_schedule.)
+
+    SAFETY (if ever re-wired): Mate manages a SINGLE schedule tagged `set_id` `mate_`; every OTHER
+    (app-set) entry is read back and re-sent UNTOUCHED so app schedules are never wiped. `days`
+    convention + `set_id` acceptance would need on-car confirmation. `mode`: cold|hot|wind;
+    `wshld`: "1" = windshield defrost."""
+    import time as _t
+    cur = _session.get_climate_schedule() or []
+    controls = [c for c in cur if not str(c.get("set_id", "")).startswith("mate_")]
+    if enabled:
+        try:
+            import sys, pathlib
+            sys.path.insert(0, str(pathlib.Path(__file__).parent))
+            import db_reader as _dr
+            dev = _dr.get_or_create_device_id()
+        except Exception:
+            dev = "mate"
+        now_ms = int(_t.time() * 1000)
+        prior = next((c for c in cur if str(c.get("set_id", "")).startswith("mate_")), None)
+        set_id = prior.get("set_id") if prior else f"mate_{dev}_{now_ms}"
+        controls.append({
+            "circle": "in",
+            "days": sorted({int(d) for d in day_positions}),  # Mon-first 0..6 (to confirm on-car)
+            "mode": mode,
+            "on": "1",
+            "operate": "manual",
+            "position": "all",
+            "set_id": set_id,
+            "start_time": f"{_t.strftime('%Y-%m-%d')} {start_hhmm}:00",
+            "temperature": str(int(temperature)),
+            "update_time": str(now_ms),
+            "windlevel": str(windlevel),
+            "wshld": str(wshld),
+        })
+    return _session.execute(lambda api, vin: api.set_climate_schedule(vin, controls=controls))
+
+
+# `cycles` is the charge schedule's per-weekday mask: a 7-field comma string where field i is
+# "1" (charge that day) or "0". Position order is **MONDAY-first** (0=Mon, 1=Tue … 6=Sun) —
+# confirmed on-car 2026-06-07: Mate sent "1,0,0,0,0,0,0" and the Leapmotor app showed Monday
+# active. (The app DISPLAYS days Dom-first, but the stored mask is Mon-first.) These helpers are
+# weekday-agnostic — they just map flags[i] ↔ position i; the UI maps each chip to its position.
+def cycles_from_day_flags(flags) -> str:
+    """7 truthy/falsy values in cycles-position order (Mon..Sun) → "1,0,1,…" mask. Empty
+    selection → all-days (a charge window with no days would never fire)."""
+    f = [bool(x) for x in list(flags)[:7]]
+    f += [False] * (7 - len(f))
+    if not any(f):
+        f = [True] * 7
+    return ",".join("1" if x else "0" for x in f)
+
+
+def day_flags_from_cycles(cycles) -> list:
+    """"1,0,1,…" → [bool x7] in cycles-position order (Mon..Sun). Tolerant of short/garbage
+    input (missing → False)."""
+    parts = (cycles or "").split(",")
+    return [(parts[i].strip() == "1") if i < len(parts) else False for i in range(7)]
+
+
+def save_charge_schedule(*, enabled: bool, soc_limit: int, start_time: str, end_time: str,
+                         cycles: str | None = None):
+    """Read-modify-write the charge schedule: change enable/SoC/window (+ days when `cycles` is
+    given) and PRESERVE the car's `circulation` and `recharge`.
+
+    `cycles` is the Monday-first 7-flag per-weekday mask, pos 0=Mon..6=Sun (see
+    cycles_from_day_flags) — confirmed on-car 2026-06-07. When the caller passes None we round-trip
+    the car's existing mask verbatim (or all-days if the car has no schedule yet). The live B10 GET
+    returns "1,1,1,1,1,1,1"; upstream lib docs are inconsistent (some use day-NUMBER lists), so the
+    mask format/order is anchored to the on-car confirmation (Mate sent pos0 → app showed Monday)."""
+    cur = _session.get_charge_schedule() or {}
+    if not cycles:
+        cycles = cur.get("cycles") or "1,1,1,1,1,1,1"
+    circulation = int(cur.get("circulation", 1) or 0)
+    recharge    = int(cur.get("recharge", 0) or 0)
+    return _session.execute(lambda api, vin: api.set_charge_schedule(
+        vin, enabled=enabled, soc_limit=int(soc_limit),
+        start_time=start_time, end_time=end_time,
+        cycles=cycles, circulation=circulation, recharge=recharge))
 
 
 def lock():              return _session.execute(lambda api, vin: api.lock_vehicle(vin))

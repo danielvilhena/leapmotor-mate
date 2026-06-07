@@ -1,4 +1,13 @@
-<form hx-post="api/settings/wallbox-entities" hx-target="#wb-entities-result" hx-swap="innerHTML">
+<div id="wb-picker" class="mt-3">
+  <!-- Advanced mode (issue #21): show every sensor/number entity so foreign-language names or a
+       generic energy-meter/relay can be mapped. Toggling reloads this whole block. -->
+  <label class="flex items-center gap-2 text-xs text-slate-400 mb-3 cursor-pointer">
+    <input type="checkbox" class="w-4 h-4 accent-brand" {% if show_all %}checked{% endif %}
+           hx-get="api/wallbox/entities{% if not show_all %}?show_all=1{% endif %}"
+           hx-target="#wb-picker" hx-swap="outerHTML">
+    {{ t('wb_show_all') }}
+  </label>
+  <form hx-post="api/settings/wallbox-entities" hx-target="#wb-entities-result" hx-swap="innerHTML">
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
     {% for role in roles %}
     <div>
@@ -24,3 +33,4 @@
       </button>
     </div>
   </form>
+</div>

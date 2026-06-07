@@ -1,0 +1,83 @@
+<!-- Charge schedule (native cmd 190) — charge only inside a time window. Self-contained card
+     (form + populate script); included on the Scheduling page. -->
+<div class="card">
+  <div class="flex items-center gap-2 mb-1">
+    <span class="text-xl">⏰</span>
+    <span class="font-semibold text-white">{{ t('sched_charge_title') }}</span>
+    <span id="cs-badge" class="ml-auto text-sm font-bold px-3 py-1 rounded-full text-slate-400 bg-slate-700 border border-slate-600">—</span>
+  </div>
+  <div class="text-xs text-slate-500 mb-3">{{ t('sched_charge_desc') }}</div>
+  <form hx-post="api/charge-schedule" hx-target="#cs-result" hx-swap="innerHTML"
+        hx-confirm="{{ t('sched_confirm') }}"
+        class="flex flex-wrap gap-4 items-end">
+    <label class="flex items-center gap-2 text-sm text-slate-300 self-end pb-1.5">
+      <input id="cs-enabled" type="checkbox" name="enabled" value="1" class="w-4 h-4 accent-brand">
+      {{ t('sched_enabled') }}
+    </label>
+    <div class="flex flex-col gap-1">
+      <span class="text-xs text-slate-400">{{ t('sched_start') }}</span>
+      <input id="cs-start" type="time" name="start_time" value="22:00"
+             class="px-2 py-1.5 rounded-lg text-sm text-white border border-slate-600 bg-slate-800 focus:outline-none focus:border-brand">
+    </div>
+    <div class="flex flex-col gap-1">
+      <span class="text-xs text-slate-400">{{ t('sched_end') }}</span>
+      <input id="cs-end" type="time" name="end_time" value="08:00"
+             class="px-2 py-1.5 rounded-lg text-sm text-white border border-slate-600 bg-slate-800 focus:outline-none focus:border-brand">
+    </div>
+    <div class="flex flex-col gap-1">
+      <span class="text-xs text-slate-400">{{ t('sched_target') }}</span>
+      <div class="flex items-center gap-1">
+        <input id="cs-soc" type="number" name="soc_limit" min="50" max="100" step="5" value="80"
+               class="w-20 px-2 py-1.5 rounded-lg text-sm text-white border border-slate-600 bg-slate-800 focus:outline-none focus:border-brand">
+        <span class="text-slate-400 text-sm">%</span>
+      </div>
+    </div>
+    <button type="submit"
+            class="px-4 py-2 rounded-lg text-sm font-medium text-white border border-slate-600 hover:bg-slate-600 active:scale-95 transition-all cursor-pointer self-end">
+      {{ t('sched_save') }}
+    </button>
+    <span id="cs-result" class="text-xs self-center min-w-[60px]"></span>
+
+    <!-- Days of week. Chips are shown in the Leapmotor app's order (Dom→Sab) but each chip's
+         VALUE is its position in the `cycles` mask. Confirmed on-car 2026-06-07: cycles is
+         MONDAY-first → Mon=0, Tue=1, Wed=2, Thu=3, Fri=4, Sat=5, Sun=6. -->
+    <div class="w-full">
+      <span class="text-xs text-slate-400 block mb-1">{{ t('sched_days') }}</span>
+      <div class="flex flex-wrap gap-1.5">
+        {% set _days = [(t('dow_sun'), 6), (t('dow_mon'), 0), (t('dow_tue'), 1), (t('dow_wed'), 2), (t('dow_thu'), 3), (t('dow_fri'), 4), (t('dow_sat'), 5)] %}
+        {% for label, pos in _days %}
+        <label class="cursor-pointer">
+          <input type="checkbox" name="days" value="{{ pos }}" id="cs-day-{{ pos }}" class="peer sr-only" checked>
+          <span class="inline-flex items-center justify-center min-w-[2.4rem] px-2 py-1 rounded-md text-xs font-medium border border-slate-600 text-slate-400
+                       peer-checked:bg-brand/20 peer-checked:border-brand peer-checked:text-white transition-colors">
+            {{ label }}
+          </span>
+        </label>
+        {% endfor %}
+      </div>
+    </div>
+  </form>
+</div>
+<script>
+// Populate the charge-schedule form from the car's current plan (read-only fetch)
+fetch('api/charge-schedule').then(r => r.json()).then(d => {
+  if (!d || Object.keys(d).length === 0) return;
+  var badge = document.getElementById('cs-badge');
+  var on = (d.chargeEnable == 1 || d.chargeEnable === true);
+  document.getElementById('cs-enabled').checked = on;
+  badge.textContent = on ? '{{ t("sched_active") }}' : '{{ t("sched_inactive") }}';
+  badge.className = 'ml-auto text-sm font-bold px-3 py-1 rounded-full ' + (on
+    ? 'text-green-400 bg-green-400/10 border border-green-400/30'
+    : 'text-slate-400 bg-slate-700 border border-slate-600');
+  if (d.starttime) document.getElementById('cs-start').value = d.starttime;
+  if (d.endtime)   document.getElementById('cs-end').value   = d.endtime;
+  if (d.chargesoc) document.getElementById('cs-soc').value   = d.chargesoc;
+  if (d.cycles) {                       // 7-flag mask, Monday-first (0=Mon..6=Sun) — tick matching days
+    var flags = String(d.cycles).split(',');
+    for (var i = 0; i < 7; i++) {
+      var box = document.getElementById('cs-day-' + i);
+      if (box) box.checked = (flags[i] !== undefined && flags[i].trim() === '1');
+    }
+  }
+}).catch(() => {});
+</script>

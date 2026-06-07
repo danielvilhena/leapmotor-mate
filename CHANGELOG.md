@@ -3,6 +3,31 @@
 All notable changes to LeapMotor Mate are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.11.6] — 2026-06-07
+
+### Added
+- **Charge scheduling** — a new **Scheduling** page (sidebar). The **charge schedule** (cmd 190) is
+  read **and write**: enable, target SoC, start/end window, and a **7-day picker**. Days match the
+  Leapmotor app (shown Dom→Sab; stored Monday-first in the `cycles` mask). Writes use read-modify-write
+  so the car's existing day mask / repeat / recharge are preserved. (Confirmed on-car.)
+  Climate (pre-conditioning) scheduling is **not** included: the B10 cloud rejects the climate-schedule
+  write (cmd 171, code -2) even with valid data, so set those in the Leapmotor app for now; we're
+  investigating the write path separately.
+- **EVCC integration.** The MQTT bridge now also publishes EVCC-friendly `evcc/plugged`, `evcc/charging`
+  and `evcc/climate` booleans (`true`/`false`, which EVCC's parser accepts) next to the Home Assistant
+  topics — so an EVCC `type: custom` vehicle can read SoC / status / range / odometer. Ready-to-paste
+  config in `docs/EVCC.md`.
+- **CSV export buttons** on the Trips and Charges pages (links the export that already lived in
+  Settings → Export/Backup, plus per-trip GPX).
+- **Wallbox — advanced entity mapping** (#21). A **"Show all entities"** toggle in Settings → Wallbox
+  lists every sensor/number entity, not just charger-named/typed ones, so foreign-language names or a
+  generic energy-meter/relay can be mapped manually. Added FR charger keywords (`borne`, `recharge`,
+  `feyree`) to auto-detection (#19).
+
+### Changed
+- **Commands page polish.** Uniform tile sizing across all cards; **Quick actions** are now vertical
+  tiles with action buttons (Find / Preheat / Unlock cable); stacked columns are equal width on mobile.
+
 ## [1.11.5] — 2026-06-07
 
 ### Added
