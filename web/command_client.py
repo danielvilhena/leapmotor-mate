@@ -243,6 +243,24 @@ class LeapmotorSession:
                     self._reset()
             return None
 
+    def get_prepare_car_schedule(self) -> list | None:
+        """Native one-touch prepare-car schedule (cmd 361) — list of entry dicts. Read-only, safe.
+        Each entry (decoded on the B10, PrepareCarT01 2026-06-08):
+            {"set_id": "ios_<32hex><epoch>", "start_time": "YYYY-MM-DD HH:MM:SS", "enable": bool,
+             "days": [int]  # 0=Sun..6=Sat ([]=once),
+             "datacontent": {"air_condition": {...climate vocab...}, "seat_setting": {...},
+                             "steeringWheelHeatCtrl": {...}, "rearMirrorHeating": {...}, "syn_path": {...}}}
+        Only the ENABLED dimensions are present in datacontent."""
+        with self._lock:
+            for attempt in range(2):
+                try:
+                    self._connect()
+                    return self._api.get_prepare_car_schedule(self._vehicle.vin)
+                except Exception as e:
+                    log.warning("Prepare-car schedule fetch (attempt %d): %s", attempt + 1, e)
+                    self._reset()
+            return None
+
     def get_car_picture(self) -> bytes | None:
         """Static owner vehicle PNG, extracted from the car-picture package ZIP
         (android/xxhdpi/carpic_for_tripsum.png) — same as the HA integration's
@@ -462,6 +480,117 @@ def save_climate_schedule(*, enabled: bool, preset: str, start_hhmm: str, day_po
         "wshld": spec["wshld"],
     }
     return _session.execute(lambda api, vin: api.set_climate_schedule(vin, controls=[entry]))
+
+
+# ── One-touch prepare-car (cmd 360 immediate / 361 schedule) ──────────────────────────────────
+# Decoded from the official app via read-after-app-change (PrepareCarT01, 2026-06-08). The bundle
+# (`datacontent`) carries ONLY the enabled dimensions; air_condition reuses the validated climate
+# vocabulary (CLIMATE_PRESETS). Seat per-seat value: off="0", heat="3", vent="13" (the app's level-3
+# defaults). steering/mirror appear only when on (default level/value "2"). syn_path = nav destination.
+PREPARE_SEAT_CODES = {"off": "0", "heat": "3", "vent": "13"}
+
+
+def build_prepare_bundle(*, ac_preset=None, ac_temperature=None,
+                         seats=None, steering=False, mirror=False, dest=None) -> dict:
+    """Build the prepare-car `datacontent` bundle. Omits any dimension that is off (matching the app).
+    `seats` = {"driver"|"copilot"|"left_rear"|"right_rear": "off"|"heat"|"vent"}. `dest` = None or
+    {"lat","lon","address","name","key"}."""
+    bundle: dict = {}
+    if ac_preset:
+        spec = CLIMATE_PRESETS.get(ac_preset)
+        if spec is None:
+            raise ValueError(f"unknown ac preset: {ac_preset}")
+        temp = spec["temperature"] or str(int(ac_temperature if ac_temperature is not None else 25))
+        bundle["air_condition"] = {
+            "circle": spec["circle"], "enable": True, "mode": spec["mode"],
+            "operate": spec["operate"], "position": "all", "temperature": temp,
+            "windlevel": spec["windlevel"], "wshld": spec["wshld"],
+        }
+    seats = seats or {}
+    if any(seats.get(s, "off") != "off" for s in ("driver", "copilot", "left_rear", "right_rear")):
+        bundle["seat_setting"] = {
+            s: PREPARE_SEAT_CODES.get(seats.get(s, "off"), "0")
+            for s in ("driver", "copilot", "left_rear", "right_rear")
+        }
+        bundle["seat_setting"]["enable"] = True
+    if steering:
+        bundle["steeringWheelHeatCtrl"] = {"enable": True, "level": "2"}
+    if mirror:
+        bundle["rearMirrorHeating"] = {"enable": True, "value": "2"}
+    if dest and dest.get("lat") is not None and dest.get("lon") is not None:
+        bundle["syn_path"] = {
+            "address": str(dest.get("address", "")), "addressname": str(dest.get("name", "")),
+            "addresskey": str(dest.get("key", "")), "config": "0110",
+            "latitude": str(dest["lat"]), "longitude": str(dest["lon"]),
+            "linenum": "0", "enable": True,
+        }
+    return bundle
+
+
+def build_prepare_entry(*, bundle: dict, start_hhmm: str, day_positions, set_id=None) -> dict:
+    """One cmd-361 schedule entry wrapping a bundle. start_time anchored to the next future
+    occurrence (avoids the -2 expired-appointment rejection, same lesson as the climate schedule)."""
+    import time as _t
+    days = sorted({int(d) for d in (day_positions or [])})
+    return {
+        "datacontent": bundle,
+        "days": days,                                    # 0=Sun..6=Sat
+        "enable": True,
+        "set_id": set_id or _mint_climate_set_id(),      # same ios_<32hex><epoch> shape (cloud-opaque)
+        "start_time": _next_climate_start(days, start_hhmm),
+        "update_time": str(int(_t.time() * 1000)),
+    }
+
+
+def get_prepare_car_schedule() -> list | None:
+    """Current one-touch prepare-car schedule (cmd 361), list of entries. Read-only, safe."""
+    return _session.get_prepare_car_schedule()
+
+
+def set_prepare_car_schedule(controls: list) -> tuple:
+    """Write the FULL prepare-car schedule list (cmd 361, full-state replacement — pass every entry
+    you want to keep; [] cancels all). The lib has no setter for 361, so we drive the proven lower-level
+    PIN/signing path directly with cmd_id=361 and the same {"controls":[...]} envelope as the climate
+    schedule (verified gateway-recognised; PrepareCarT01)."""
+    body = json.dumps({"controls": controls}, separators=(",", ":"))
+    return _session.execute(lambda api, vin: api._remote_control_raw(
+        vin=vin, cmd_id="361", cmd_content=body, action_label="prepare_car_alarm"))
+
+
+def cancel_prepare_car_schedule() -> tuple:
+    """Remove all prepare-car schedules (empty controls list)."""
+    return set_prepare_car_schedule([])
+
+
+def prepare_car_now(bundle: dict) -> tuple:
+    """Trigger an IMMEDIATE one-touch preparation (cmd 360). ⚠️ ACTUATES the car now. `bundle` is the
+    same datacontent shape as a schedule entry's (air_condition/seat_setting/steering/mirror/syn_path)."""
+    return _session.execute(lambda api, vin: api.prepare_car(vin, params=bundle))
+
+
+def prepare_car_off() -> tuple:
+    """Cancel an active preparation — turn A/C + both front seats (heat & vent) + steering + mirror OFF.
+    Uses Mate's individually-validated B10 off-commands (no untested 360 'off' payload). Best-effort:
+    runs every step and reports any that failed (turning off something already off is a harmless no-op).
+    (ac_off / seat_comfort / steering_heat_off / mirror_heat_off are defined below; resolved at call time.)"""
+    steps = [
+        ("A/C", ac_off),
+        ("seat vent driver", lambda: seat_comfort("vent", "driver", 0)),
+        ("seat vent copilot", lambda: seat_comfort("vent", "copilot", 0)),
+        ("seat heat driver", lambda: seat_comfort("heat", "driver", 0)),
+        ("seat heat copilot", lambda: seat_comfort("heat", "copilot", 0)),
+        ("steering", steering_heat_off),
+        ("mirror", mirror_heat_off),
+    ]
+    failed = []
+    for name, fn in steps:
+        try:
+            ok, msg = fn()
+            if not ok:
+                failed.append(f"{name}: {msg}")
+        except Exception as e:
+            failed.append(f"{name}: {e}")
+    return (False, "; ".join(failed)) if failed else (True, "OK")
 
 
 # `cycles` is the charge schedule's per-weekday mask: a 7-field comma string where field i is

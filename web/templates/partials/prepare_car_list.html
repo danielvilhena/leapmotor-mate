@@ -1,0 +1,40 @@
+{% import 'partials/_icons.html' as ico %}
+{% if not entries %}
+  <div class="text-sm text-slate-500 py-2">{{ t('prep_no_sched') }}</div>
+{% else %}
+{% set _dl = {0: t('dow_sun'), 1: t('dow_mon'), 2: t('dow_tue'), 3: t('dow_wed'), 4: t('dow_thu'), 5: t('dow_fri'), 6: t('dow_sat')} %}
+<div class="space-y-2">
+  {% for e in entries %}
+  {% set dc = e.datacontent or {} %}
+  <div class="flex items-center gap-3 rounded-lg border border-slate-700 bg-slate-800/40 px-3 py-2">
+    <div class="text-lg font-bold text-white tabular-nums shrink-0">{{ (e.start_time or '')[11:16] or '--:--' }}</div>
+    <div class="flex-1 min-w-0">
+      <div class="text-[11px] text-slate-400">
+        {% if e.days %}{% for d in e.days %}{{ _dl[d] if d in _dl else d }}{% if not loop.last %} · {% endif %}{% endfor %}{% else %}{{ t('prep_once') }}{% endif %}
+      </div>
+      <div class="text-xs text-slate-300 truncate">
+        {% set parts = [] %}
+        {% if dc.air_condition %}{% set _ = parts.append(t('prep_ac')) %}{% endif %}
+        {% if dc.seat_setting %}{% set _ = parts.append(t('prep_seats')) %}{% endif %}
+        {% if dc.steeringWheelHeatCtrl %}{% set _ = parts.append(t('prep_steering')) %}{% endif %}
+        {% if dc.rearMirrorHeating %}{% set _ = parts.append(t('prep_mirror')) %}{% endif %}
+        {% if dc.syn_path %}{% set _ = parts.append(t('prep_dest')) %}{% endif %}
+        {{ parts | join(' · ') or '—' }}
+      </div>
+    </div>
+    {% if not e.enable %}<span class="text-[10px] text-slate-500 border border-slate-600 rounded px-1.5 py-0.5 shrink-0">{{ t('sched_inactive') }}</span>{% endif %}
+    <div class="flex items-center gap-1 shrink-0">
+      <button type="button" onclick='prepEdit(this)' data-entry='{{ e | tojson }}'
+              title="{{ t('prep_edit') }}"
+              class="text-slate-300 hover:text-white border border-slate-600 hover:border-brand rounded-lg px-2 py-1 text-xs">✏️</button>
+      <form hx-post="api/prepare-car/schedule/delete" hx-target="#prep-sch-result" hx-swap="innerHTML"
+            hx-confirm="{{ t('prep_del_confirm') }}">
+        <input type="hidden" name="set_id" value="{{ e.set_id }}">
+        <button type="submit" title="{{ t('prep_del_confirm') }}"
+                class="text-red-400 hover:text-red-300 border border-red-900/60 hover:border-red-500 rounded-lg px-2 py-1 text-xs">🗑</button>
+      </form>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}

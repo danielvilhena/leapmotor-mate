@@ -20,7 +20,7 @@ import geocode
 import mqtt_check
 import auth
 
-MATE_VERSION = "1.11.10"  # bump together with the git tag + add-on config.yaml at release
+MATE_VERSION = "1.11.11"  # bump together with the git tag + add-on config.yaml at release
 
 app = FastAPI(title="LeapMotor Mate")
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
@@ -442,6 +442,16 @@ async def scheduling_page(request: Request):
     vehicle, _ = db_reader.get_vehicle()
     return templates.TemplateResponse(request, "scheduling.html", _ctx(
         page="scheduling", vehicle=vehicle,
+    ))
+
+
+@app.get("/prepare-car", response_class=HTMLResponse)
+async def prepare_car_page(request: Request):
+    """One-touch vehicle preparation (cmd 360 immediate / 361 schedule). Mirrors the official app:
+    bundle A/C + seats + steering + mirror + destination, run now or on a schedule. B10/C10 only."""
+    vehicle, _ = db_reader.get_vehicle()
+    return templates.TemplateResponse(request, "prepare_car.html", _ctx(
+        page="prepare_car", vehicle=vehicle,
     ))
 
 
@@ -1472,6 +1482,132 @@ async def save_climate_schedule_api(request: Request):
     if ok:
         return HTMLResponse(f'<span style="color:#22c55e">✓ {t("sched_saved")}</span>',
                             headers={"HX-Trigger": "climateScheduleSaved"})
+    return HTMLResponse(f'<span style="color:#ef4444">✗ {msg}</span>')
+
+
+# ── One-touch prepare-car (cmd 360 immediate / 361 schedule) ─────────────────────────────────
+def _parse_prepare_form(form) -> dict:
+    """Build the prepare-car bundle (datacontent) from form fields. Off dimensions are omitted."""
+    ac_mode = (form.get("ac_mode") or "off").strip()
+    ac_preset = ac_mode if ac_mode in command_client.CLIMATE_PRESETS else None
+    try:
+        ac_temp = int(form.get("ac_temperature") or 25)
+    except (ValueError, TypeError):
+        ac_temp = 25
+    seats = {s: (form.get("seat_" + s) or "off") for s in ("driver", "copilot", "left_rear", "right_rear")}
+    seats = {k: (v if v in ("off", "heat", "vent") else "off") for k, v in seats.items()}
+    steering = (form.get("steering") or "") in ("1", "on", "true", "True")
+    mirror = (form.get("mirror") or "") in ("1", "on", "true", "True")
+    dest = None
+    dlat, dlon = (form.get("dest_lat") or "").strip(), (form.get("dest_lon") or "").strip()
+    if dlat and dlon:
+        try:
+            float(dlat); float(dlon)
+            dest = {"lat": dlat, "lon": dlon, "address": (form.get("dest_address") or "").strip(),
+                    "name": (form.get("dest_name") or "").strip(), "key": ""}
+        except (ValueError, TypeError):
+            dest = None
+    return command_client.build_prepare_bundle(
+        ac_preset=ac_preset, ac_temperature=ac_temp, seats=seats,
+        steering=steering, mirror=mirror, dest=dest)
+
+
+@app.get("/api/prepare-car/schedules", response_class=HTMLResponse)
+async def prepare_car_schedules_api(request: Request):
+    """Render the current one-touch prepare-car schedule list (cmd 361, read-only)."""
+    import asyncio
+    entries = await asyncio.get_event_loop().run_in_executor(None, command_client.get_prepare_car_schedule)
+    return templates.TemplateResponse(request, "partials/prepare_car_list.html",
+                                      _ctx(entries=entries or []))
+
+
+@app.post("/api/prepare-car/schedule", response_class=HTMLResponse)
+async def save_prepare_car_schedule_api(request: Request):
+    """Add or edit (by set_id) one prepare-car schedule entry (cmd 361). Full-state replacement: we
+    read the current list, replace/append our entry, and write them all back. start_time is anchored
+    to the next future occurrence (the -2 expired-appointment lesson). Fired only on save."""
+    import re, asyncio, time as _t
+    form = await request.form()
+    t = i18n.get_t(db_reader.get_language())
+    start = (form.get("start_time") or "").strip()
+    if not re.match(r"^\d{2}:\d{2}$", start):
+        return HTMLResponse(f'<span style="color:#ef4444">✗ {t("sched_bad_time")}</span>', status_code=400)
+    days = sorted(int(d) for d in form.getlist("days") if str(d).isdigit() and 0 <= int(d) <= 6)
+    set_id = (form.get("set_id") or "").strip() or None
+    bundle = _parse_prepare_form(form)
+    if not bundle:
+        return HTMLResponse(f'<span style="color:#ef4444">✗ {t("prep_pick_one")}</span>', status_code=400)
+
+    def _save():
+        cur = command_client.get_prepare_car_schedule() or []
+        entry = command_client.build_prepare_entry(
+            bundle=bundle, start_hhmm=start, day_positions=days, set_id=set_id)
+        others = []
+        for e in cur:
+            if e.get("set_id") == entry["set_id"]:
+                continue
+            e = dict(e)
+            e.setdefault("update_time", str(int(_t.time() * 1000)))  # keep preserved entries writable
+            others.append(e)
+        return command_client.set_prepare_car_schedule(others + [entry])
+
+    ok, msg = await asyncio.get_event_loop().run_in_executor(None, _save)
+    if ok:
+        return HTMLResponse(f'<span style="color:#22c55e">✓ {t("sched_saved")}</span>',
+                            headers={"HX-Trigger": "prepareCarSaved"})
+    return HTMLResponse(f'<span style="color:#ef4444">✗ {msg}</span>')
+
+
+@app.post("/api/prepare-car/schedule/delete", response_class=HTMLResponse)
+async def delete_prepare_car_schedule_api(request: Request):
+    """Delete one prepare-car schedule entry by set_id (writes back the remaining list)."""
+    import asyncio, time as _t
+    form = await request.form()
+    t = i18n.get_t(db_reader.get_language())
+    set_id = (form.get("set_id") or "").strip()
+
+    def _del():
+        cur = command_client.get_prepare_car_schedule() or []
+        remaining = []
+        for e in cur:
+            if e.get("set_id") == set_id:
+                continue
+            e = dict(e)
+            e.setdefault("update_time", str(int(_t.time() * 1000)))
+            remaining.append(e)
+        return command_client.set_prepare_car_schedule(remaining)
+
+    ok, msg = await asyncio.get_event_loop().run_in_executor(None, _del)
+    if ok:
+        return HTMLResponse(f'<span style="color:#22c55e">✓ {t("sched_saved")}</span>',
+                            headers={"HX-Trigger": "prepareCarSaved"})
+    return HTMLResponse(f'<span style="color:#ef4444">✗ {msg}</span>')
+
+
+@app.post("/api/prepare-car/now", response_class=HTMLResponse)
+async def prepare_car_now_api(request: Request):
+    """Trigger an IMMEDIATE one-touch preparation (cmd 360). ⚠️ Actuates the car now."""
+    import asyncio
+    form = await request.form()
+    t = i18n.get_t(db_reader.get_language())
+    bundle = _parse_prepare_form(form)
+    if not bundle:
+        return HTMLResponse(f'<span style="color:#ef4444">✗ {t("prep_pick_one")}</span>', status_code=400)
+    ok, msg = await asyncio.get_event_loop().run_in_executor(
+        None, lambda: command_client.prepare_car_now(bundle))
+    if ok:
+        return HTMLResponse(f'<span style="color:#22c55e">✓ {t("prep_sent")}</span>')
+    return HTMLResponse(f'<span style="color:#ef4444">✗ {msg}</span>')
+
+
+@app.post("/api/prepare-car/off", response_class=HTMLResponse)
+async def prepare_car_off_api(request: Request):
+    """Cancel an active preparation — turn A/C + seats + steering + mirror OFF (several commands)."""
+    import asyncio
+    t = i18n.get_t(db_reader.get_language())
+    ok, msg = await asyncio.get_event_loop().run_in_executor(None, command_client.prepare_car_off)
+    if ok:
+        return HTMLResponse(f'<span style="color:#22c55e">✓ {t("prep_off_done")}</span>')
     return HTMLResponse(f'<span style="color:#ef4444">✗ {msg}</span>')
 
 
