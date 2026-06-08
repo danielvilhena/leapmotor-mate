@@ -3,6 +3,29 @@
 All notable changes to LeapMotor Mate are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.11.16] — 2026-06-08
+
+### Fixed
+- **Two charge rows for one plug-in could share the same "Charged HH:MM → HH:MM" end time** (GitHub #23).
+  If the cloud API went unreachable mid-charge (3 errors → OFFLINE) and recovered, the poller opened a
+  *second* charge row instead of resuming the open one, leaving the first as an orphan. When that orphan was
+  later closed, its `ended_at` was set to the latest position — bleeding past the next charge so both rows'
+  active-power windows (and split costs) inherited the later charge's last power sample. Fixed at the source
+  (the `recorder` no longer opens a charge while one is already open; `close_orphan_charges` caps the orphan's
+  end at the next charge's start) **and** defensively in the web layer (the power-window/cost queries are
+  capped at the next charge's start, so already-recorded overlaps display and cost correctly too).
+- **Time-of-use "split" cost was distorted for a charge with a long pause between two power bursts.** The gap
+  between bursts was integrated as a phantom constant-power interval priced at the gap-start's band, skewing
+  the weighted-average price. Gaps over 15 min are now skipped (matching the energy-integration guard).
+- **A day-restricted off-peak band crossing midnight no longer drops its after-midnight hours to the base
+  price.** A "23:30 → 07:30" band on selected days now correctly prices the early-morning hours as belonging
+  to the previous (selected) day.
+
+### Changed
+- **Re-confirming a charge's type now refreshes its cost immediately** (instead of blanking it until reload)
+  and adds a tooltip showing whether the cost was billed on the wallbox **AC** energy or fell back to battery
+  **DC** (e.g. when the wallbox AC history is no longer available). The DC fallback is also logged.
+
 ## [1.11.15] — 2026-06-08
 
 ### Fixed

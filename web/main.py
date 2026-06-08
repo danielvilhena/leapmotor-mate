@@ -1,5 +1,6 @@
 """LeapMotor Mate — web server."""
 import json
+import logging
 import os
 import sys
 import time
@@ -20,7 +21,9 @@ import geocode
 import mqtt_check
 import auth
 
-MATE_VERSION = "1.11.15"  # bump together with the git tag + add-on config.yaml at release
+MATE_VERSION = "1.11.16"  # bump together with the git tag + add-on config.yaml at release
+
+log = logging.getLogger("mate.web")
 
 app = FastAPI(title="LeapMotor Mate")
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
@@ -881,15 +884,27 @@ async def set_charge_type(request: Request, charge_id: int):
     # reached the battery. Only when a wallbox is configured and its AC history is available — otherwise
     # fall back to DC (the only figure we have for public/away charges).
     ac_kwh = None
+    cost_title = None
     if location_type == "HOME" and db_reader.get_setting("wallbox_enabled", "0") == "1":
         try:
             ac_kwh = _session_energy(db_reader.get_charge_power_curve(charge_id)).get("ac_kwh")
-        except Exception:
+        except Exception as exc:
+            log.warning("set_charge_type: AC energy lookup failed for charge %s: %s", charge_id, exc)
             ac_kwh = None
+        t = i18n.get_t(db_reader.get_language())
+        if ac_kwh and ac_kwh > 0:
+            cost_title = t("cost_basis_ac")
+        else:
+            # No wallbox AC figure (HA not configured / no power entity / history purged) →
+            # compute_cost falls back to DC. Surface that so the cost isn't a silent no-op.
+            cost_title = t("cost_basis_dc")
+            log.info("set_charge_type: charge %s billed on DC — no wallbox AC energy available", charge_id)
     charge = db_reader.update_charge_type(charge_id, location_type, ac_kwh=ac_kwh)
     return templates.TemplateResponse(request, "partials/charge_type_badge.html", {
         "charge": charge,
         "charge_types": db_reader.CHARGE_TYPES,
+        "cost_oob": True,         # also refresh the cost cell (it changes with the type/basis)
+        "cost_title": cost_title,
     })
 
 

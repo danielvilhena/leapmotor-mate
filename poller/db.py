@@ -607,14 +607,30 @@ class Database:
 
         closed = 0
         for charge in orphans:
-            last_pos = self._conn.execute(
-                "SELECT soc, recorded_at FROM positions "
-                "WHERE vehicle_id = ? AND recorded_at >= ? ORDER BY id DESC LIMIT 1",
+            # Cap the search at the next charge's start so this orphan's ended_at/end_soc come
+            # from its OWN span — never from a later charge's positions. Otherwise the orphan's
+            # window bleeds past the next charge and corrupts that charge's power-window/cost.
+            nxt = self._conn.execute(
+                "SELECT MIN(started_at) AS s FROM charges WHERE vehicle_id = ? AND started_at > ?",
                 (vehicle_id, charge["started_at"]),
             ).fetchone()
+            next_start = nxt["s"] if nxt else None
+            if next_start:
+                last_pos = self._conn.execute(
+                    "SELECT soc, recorded_at FROM positions "
+                    "WHERE vehicle_id = ? AND recorded_at >= ? AND recorded_at < ? "
+                    "ORDER BY id DESC LIMIT 1",
+                    (vehicle_id, charge["started_at"], next_start),
+                ).fetchone()
+            else:
+                last_pos = self._conn.execute(
+                    "SELECT soc, recorded_at FROM positions "
+                    "WHERE vehicle_id = ? AND recorded_at >= ? ORDER BY id DESC LIMIT 1",
+                    (vehicle_id, charge["started_at"]),
+                ).fetchone()
 
             end_soc      = float((last_pos["soc"] if last_pos else None) or charge["start_soc"] or 0)
-            ended_at_iso = (last_pos["recorded_at"] if last_pos else None) or _now_iso()
+            ended_at_iso = (last_pos["recorded_at"] if last_pos else None) or next_start or _now_iso()
             energy_added = max((end_soc - charge["start_soc"]) / 100.0 * self.get_battery_capacity(), 0)
 
             started_at   = datetime.fromisoformat(charge["started_at"])

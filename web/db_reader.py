@@ -316,20 +316,31 @@ def _time_in_window(minute: int, start_min: int, end_min: int) -> bool:
 
 
 def _match_band(bands: list, weekday: int, minute: int):
-    """First band whose days include `weekday` and whose window covers `minute`.
-    Day/time are those of the moment being priced, so a 23:30→06:30 Saturday band
-    covers the Saturday-night part; the Sunday-morning part needs Sunday in days."""
+    """First band that covers this (weekday, minute-of-day). A band crossing midnight
+    (start > end, e.g. 23:30→07:30) is anchored to the day it STARTS: its pre-midnight
+    part [start,24:00) applies when that day is in `days`; its post-midnight part
+    [00:00,end) belongs to the PREVIOUS day's membership — so a Saturday-only off-peak
+    band also covers the early Sunday hours, but a Sunday-only band does not. (This fixes
+    day-restricted midnight-crossing bands, which previously dropped the after-midnight
+    hours to the base price.)"""
     for b in bands:
         days = b.get("days")
-        if not isinstance(days, list):
+        if not isinstance(days, list) or not days:
             days = list(range(7))
-        if weekday not in days:
-            continue
         s, e = _parse_hhmm(b.get("start")), _parse_hhmm(b.get("end"))
         if s is None or e is None:
             continue
-        if _time_in_window(minute, s, e):
-            return b
+        if s == e:                                        # whole-day band
+            if weekday in days:
+                return b
+        elif s < e:                                       # same-day window
+            if s <= minute < e and weekday in days:
+                return b
+        else:                                             # crosses midnight
+            if minute >= s and weekday in days:           # pre-midnight → this day
+                return b
+            if minute < e and (weekday - 1) % 7 in days:  # post-midnight → previous day
+                return b
     return None
 
 
@@ -341,6 +352,32 @@ def _resolve_price(band, ctype: str, base: float, base_set: bool):
         if bp is not None:
             return float(bp), True
     return base, base_set
+
+
+def _next_charge_start_utc(db, started_at) -> Optional[str]:
+    """UTC start of the first charge beginning strictly after `started_at` (a raw stored
+    value), or None. Used to cap a charge's power-sample window: an orphan/overlapping
+    charge whose ended_at bled past a later charge (see the poller's close_orphan_charges)
+    must NOT absorb the next charge's power samples into its own window or cost."""
+    try:
+        row = db.execute(
+            "SELECT MIN(started_at) AS s FROM charges WHERE started_at > ?", (started_at,)
+        ).fetchone()
+    except sqlite3.Error:
+        return None   # no charges table (isolated unit tests) → no cap
+    return _iso_to_utc(row["s"]) if (row and row["s"]) else None
+
+
+def _power_window_bounds(db, started_at, ended_at):
+    """(lower_utc, upper, upper_is_exclusive) for a charge's charging=1 samples, capping
+    the upper bound at the next charge's start so a window/cost never leaks across charges.
+    When capped, the upper bound is EXCLUSIVE (the next charge owns samples at its start)."""
+    lo = _iso_to_utc(started_at) or started_at
+    hi = _iso_to_utc(ended_at) or lo
+    nxt = _next_charge_start_utc(db, started_at)
+    if nxt and nxt <= hi:
+        return lo, nxt, True
+    return lo, hi, False
 
 
 def compute_cost(charge, config: Optional[dict] = None, ac_kwh: Optional[float] = None):
@@ -390,12 +427,20 @@ def compute_cost(charge, config: Optional[dict] = None, ac_kwh: Optional[float] 
     if config.get("method") == "start":
         return _start_band_cost()
 
-    # method 'split': integrate the power curve, price each interval by its band
+    # An in-progress charge (no ended_at) has no integrable curve yet → price by start band.
+    if not charge["ended_at"]:
+        return _start_band_cost()
+
+    # method 'split': integrate the power curve, price each interval by its band. The window
+    # is capped at the next charge's start so an orphan/overlapping charge can't integrate a
+    # later charge's power (which would also distort the band weighting).
     db = _get()
+    lo, hi, excl = _power_window_bounds(db, charge["started_at"], charge["ended_at"])
     rows = db.execute(
         "SELECT recorded_at, charge_voltage_v, charge_current_a FROM positions "
-        "WHERE charging = 1 AND recorded_at >= ? AND recorded_at <= ? ORDER BY recorded_at",
-        (charge["started_at"], charge["ended_at"] or charge["started_at"]),
+        "WHERE charging = 1 AND recorded_at >= ? AND recorded_at " + ("<" if excl else "<=")
+        + " ? ORDER BY recorded_at",
+        (lo, hi),
     ).fetchall()
     samples = []
     for r in rows:
@@ -407,8 +452,9 @@ def compute_cost(charge, config: Optional[dict] = None, ac_kwh: Optional[float] 
     total_e, weighted, any_set = 0.0, 0.0, False
     for (dt0, p0), (dt1, p1) in zip(samples, samples[1:]):
         hours = (dt1 - dt0).total_seconds() / 3600.0
-        if hours <= 0:
-            continue
+        if hours <= 0 or hours > 0.25:   # skip non-positive AND multi-hour gaps (charger
+            continue                     # paused / poll miss): never price a phantom interval
+                                         # across the gap (mirrors _integrate_charge_energy_kwh)
         e = (p0 + p1) / 2.0 * hours
         if e <= 0:
             continue
@@ -1040,11 +1086,14 @@ def _charge_active_window(db, started_at, ended_at):
     because positions.recorded_at is UTC while the charge timestamps may arrive localized."""
     if not started_at:
         return None, None
-    s = _iso_to_utc(started_at)
+    # Cap at the next charge's start so an orphan/overlapping charge (whose ended_at can
+    # bleed past a later charge — see the poller's close_orphan_charges) cannot inherit the
+    # next charge's last power sample as its own window end.
+    lo, hi, excl = _power_window_bounds(db, started_at, ended_at)
     row = db.execute(
         "SELECT MIN(recorded_at) AS s, MAX(recorded_at) AS e FROM positions "
-        "WHERE charging = 1 AND recorded_at >= ? AND recorded_at <= ?",
-        (s, _iso_to_utc(ended_at) or s),
+        "WHERE charging = 1 AND recorded_at >= ? AND recorded_at " + ("<" if excl else "<=") + " ?",
+        (lo, hi),
     ).fetchone()
     return (row["s"], row["e"]) if (row and row["s"]) else (None, None)
 

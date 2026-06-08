@@ -130,9 +130,15 @@ class Recorder:
                 self._finalize_trip(data)
                 self._active_trip_id = None
                 self._regen_kwh = 0.0
-            self._max_charge_kw = 0.0
-            if data:
-                self._active_charge_id = self._db.create_charge(self._vehicle_id, data)
+            # Only OPEN a new charge if none is already open. Re-entering CHARGING with a
+            # charge still open means we never unplugged — typically an OFFLINE gap mid-charge
+            # (3 API errors → OFFLINE → recovery → CHARGING). Opening a second row there would
+            # fragment one plug-in into two OVERLAPPING charges, whose power windows and costs
+            # then bleed into each other (GitHub #23). Resume the open charge instead.
+            if self._active_charge_id is None:
+                self._max_charge_kw = 0.0
+                if data:
+                    self._active_charge_id = self._db.create_charge(self._vehicle_id, data)
 
         elif frm == State.CHARGING and to in _PARKED_STATES:
             if self._active_charge_id and data:

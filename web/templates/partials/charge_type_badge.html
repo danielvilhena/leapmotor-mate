@@ -30,7 +30,6 @@
       <form hx-post="api/charges/{{ charge.id }}/type"
             hx-target="#charge-type-{{ charge.id }}"
             hx-swap="outerHTML"
-            hx-on::after-request="document.getElementById('cost-{{ charge.id }}').textContent = event.detail.xhr ? '' : ''"
             style="margin:0">
         <input type="hidden" name="location_type" value="{{ key }}">
         <button type="submit"
@@ -46,3 +45,10 @@
     </div>
   </div>
 </div>
+{% if cost_oob %}
+<!-- The cost changes with the type (and AC-vs-DC basis), so refresh the cost cell out-of-band.
+     title surfaces whether it was billed on wallbox AC energy or fell back to battery DC. -->
+<div id="cost-{{ charge.id }}" hx-swap-oob="true" style="font-size:16px;font-weight:700"
+     class="{% if charge.cost %}text-green-400{% else %}text-slate-600{% endif %}"
+     {% if cost_title %}title="{{ cost_title }}"{% endif %}>{{ charge.cost | money }}</div>
+{% endif %}
