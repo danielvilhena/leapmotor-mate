@@ -115,6 +115,10 @@ Set what each kWh costs on the dedicated **Charge Prices** page (💰 in the sid
 
 Cost changes apply to **new charges only**: a charge's cost is frozen when you confirm its type, so editing prices or bands later never changes past sessions.
 
+**How the kWh are counted (home charges):** if your wallbox is paired and exposes a **kWh energy counter**, Mate reads it at the **start** and at the **end** of the charge and bills the **difference** — the exact energy the wallbox delivered (conversion losses included), measured, not estimated. It works whether the counter is a lifetime total (like an odometer) or resets each session. The charge card shows both **🔋 in battery** and **🔌 wallbox (billed)**, and the cost is simply *wallbox kWh × price*. Without a wallbox counter (or for public charges), Mate bills the **battery (SoC) energy × price**. The instantaneous power is used only for the chart, never for the cost.
+
+> ⚠️ This applies to charges recorded from **v1.12.0 onward** (the start/end counter readings are captured live during the session). Older charges keep the value they were calculated with and can't be recomputed — if you want, you can delete an old session with the 🗑 button on its card.
+
 ### Optional: boost from Home Assistant
 
 If you run Home Assistant on the same network, you can trigger a temporary fast‑poll when a trip is about to start (e.g. from a Bluetooth/phone shortcut) by calling `POST http://<mate-host>:4000/api/boost`. With the default 30 s cadence this is optional.
@@ -293,6 +297,10 @@ Imposta quanto costa ogni kWh dalla pagina dedicata **Prezzi di ricarica** (💰
 - **Fasce orarie** — aggiungi una o più fasce, scegli i **giorni della settimana** in cui valgono (scorciatoie Tutti / Feriali / Weekend) e imposta un prezzo per tipo di ricarica per ogni fascia. Lascia un prezzo vuoto per usare il prezzo base, oppure metti `0` se in quella fascia è gratis. Una sessione a cavallo di due fasce viene ripartita dalla sua curva di potenza reale, e una che attraversa la mezzanotte sab→dom è tariffata per giorno correttamente.
 
 Le modifiche ai costi valgono solo per le **ricariche future**: il costo si congela alla conferma del tipo, quindi cambiare prezzi o fasce non altera le sessioni già fatte.
+
+**Come vengono contati i kWh (ricariche di casa):** se la tua wallbox è abbinata ed espone un **contatore di kWh**, Mate lo legge all'**inizio** e alla **fine** della ricarica e fattura la **differenza** — l'energia esatta erogata dalla wallbox (perdite di conversione incluse), misurata, non stimata. Funziona sia che il contatore sia un totale a vita (come un contachilometri) sia che si azzeri a ogni sessione. La card della ricarica mostra sia **🔋 in batteria** sia **🔌 wallbox (da pagare)**, e il costo è semplicemente *kWh wallbox × prezzo*. Senza contatore wallbox (o per le ricariche pubbliche) Mate fattura l'**energia in batteria (SoC) × prezzo**. La potenza istantanea serve solo al grafico, mai al costo.
+
+> ⚠️ Vale per le ricariche registrate **da v1.12.0 in poi** (le letture inizio/fine del contatore vengono catturate dal vivo durante la sessione). Le ricariche più vecchie mantengono il valore con cui erano state calcolate e non sono ricalcolabili — se vuoi puoi eliminare una vecchia sessione col pulsante 🗑 sulla sua card.
 
 ### Opzionale: boost da Home Assistant
 

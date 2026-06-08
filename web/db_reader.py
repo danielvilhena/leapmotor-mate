@@ -397,6 +397,9 @@ def compute_cost(charge, config: Optional[dict] = None, ac_kwh: Optional[float] 
     at the same times — so only the total energy differs.
     """
     location_type = charge["location_type"]
+    # `ac_kwh` (when given) is the wallbox energy the poller MEASURED for this charge — the counter
+    # delta start→stop, an exact figure, not an estimate. HOME charges are billed on it; everything
+    # else (and HOME without a wallbox) on the battery (DC/SoC) energy. The caller picks which.
     energy = ac_kwh if (ac_kwh and ac_kwh > 0) else (charge["energy_added_kwh"] or 0)
     if not location_type or energy <= 0:
         return None
@@ -473,10 +476,12 @@ def compute_cost(charge, config: Optional[dict] = None, ac_kwh: Optional[float] 
     return round(energy * (weighted / total_e), 2)
 
 
-def update_charge_type(charge_id: int, location_type: str, ac_kwh: Optional[float] = None) -> dict:
-    """Set location_type and compute the cost from the pricing config in effect now
-    (flat or time-of-use). This freezes the cost — later price/band edits do not
-    change it (the 'new charges only' rule). `ac_kwh` (HOME + wallbox only) bills the real AC energy."""
+def update_charge_type(charge_id: int, location_type: str) -> dict:
+    """Set location_type and (re)compute the cost from the pricing config in effect now (flat or
+    time-of-use). Frozen afterwards (the 'new charges only' rule). HOME charges are billed on the
+    wallbox energy the POLLER measured at charge start/stop (charges.ac_energy_kwh = the counter
+    delta — exact, not estimated) when available; otherwise, and for every other type, on the
+    battery (DC/SoC) energy."""
     db = _conn_rw()
     row = db.execute("SELECT * FROM charges WHERE id=?", (charge_id,)).fetchone()
     if not row:
@@ -484,7 +489,9 @@ def update_charge_type(charge_id: int, location_type: str, ac_kwh: Optional[floa
 
     charge = dict(row)
     charge["location_type"] = location_type
-    cost = compute_cost(charge, ac_kwh=ac_kwh)
+    meter = charge.get("ac_energy_kwh")
+    billed = meter if (location_type == "HOME" and meter and meter > 0) else None
+    cost = compute_cost(charge, ac_kwh=billed)
 
     db.execute(
         "UPDATE charges SET location_type=?, cost=? WHERE id=?",
@@ -675,6 +682,15 @@ def delete_trip(trip_id: int) -> bool:
     db = _conn_rw()
     cur = db.execute("DELETE FROM trips WHERE id=?", (trip_id,))
     db.execute("DELETE FROM trip_positions WHERE trip_id=?", (trip_id,))
+    db.commit()
+    return cur.rowcount > 0
+
+
+def delete_charge(charge_id: int) -> bool:
+    """Permanently remove a charge session. Returns True if one was deleted. Day/month/lifetime
+    charge totals recompute from the DB automatically. The shared per-poll positions log is untouched."""
+    db = _conn_rw()
+    cur = db.execute("DELETE FROM charges WHERE id=?", (charge_id,))
     db.commit()
     return cur.rowcount > 0
 

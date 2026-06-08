@@ -3,6 +3,25 @@
 All notable changes to LeapMotor Mate are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.12.0] — 2026-06-09
+
+### Changed
+- **Home charge cost is now taken from the wallbox's own energy counter — measured, not estimated.**
+  When a wallbox with a kWh counter is paired, Mate reads the counter at the **start** and at the
+  **end** of each charge and bills the **difference** (the exact energy the wallbox delivered,
+  conversion losses included) — the same way a trip uses the start/end odometer. It's reset-safe:
+  works whether the counter is a lifetime total or zeroes each session. The charge card now shows both
+  **🔋 in battery** and **🔌 wallbox (billed)**, and the cost is plainly *wallbox kWh × price*. With no
+  wallbox counter (or for public charges) the **battery (SoC) energy × price** is used. The previous
+  method integrated the fluctuating power curve, which under-counted on short/sparse sessions and gave
+  costs that didn't add up — that estimation is gone; instantaneous power is now used only for the chart.
+  *(Charges recorded before 1.12.0 keep their earlier value and can't be recomputed — the start/end
+  counter readings weren't captured at the time.)*
+
+### Added
+- **Delete a charge session** — a 🗑 button on each charge card (with confirmation), mirroring the
+  existing delete-trip action. Day / month / lifetime totals recompute automatically.
+
 ## [1.11.18] — 2026-06-08
 
 ### Added

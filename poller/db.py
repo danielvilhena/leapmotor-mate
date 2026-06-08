@@ -103,7 +103,9 @@ CREATE TABLE IF NOT EXISTS charges (
     charge_type      TEXT DEFAULT 'AC',        -- AC / DC (from power level)
     location_type    TEXT DEFAULT NULL,         -- HOME / AC / FAST / HPC (user-set)
     max_power_kw     REAL,
-    cost             REAL
+    cost             REAL,
+    ac_energy_kwh    REAL,         -- wallbox energy a HOME charge is billed on = sum of the counter's rises
+    wallbox_energy_start_kwh REAL  -- last wallbox counter reading seen (running baseline for that sum)
 );
 
 CREATE INDEX IF NOT EXISTS idx_positions_vehicle ON positions(vehicle_id, recorded_at);
@@ -196,6 +198,12 @@ class Database:
             self._conn.execute("ALTER TABLE positions ADD COLUMN charge_current_a REAL DEFAULT NULL")
         if "ready" not in cols:
             self._conn.execute("ALTER TABLE positions ADD COLUMN ready INTEGER DEFAULT NULL")
+        # migration: per-charge wallbox AC energy (the "wallbox, to pay" figure) on existing DBs
+        ccols = {r[1] for r in self._conn.execute("PRAGMA table_info(charges)").fetchall()}
+        if "ac_energy_kwh" not in ccols:
+            self._conn.execute("ALTER TABLE charges ADD COLUMN ac_energy_kwh REAL")
+        if "wallbox_energy_start_kwh" not in ccols:
+            self._conn.execute("ALTER TABLE charges ADD COLUMN wallbox_energy_start_kwh REAL")
         self._conn.commit()
         self._repair_odometer_trips()
         self.migrate_secrets()
@@ -478,6 +486,11 @@ class Database:
         self._conn.execute("DELETE FROM trips WHERE id = ?", (trip_id,))
         self._conn.commit()
 
+    def delete_charge(self, charge_id: int) -> None:
+        """Remove a charge session. The per-poll positions log is shared (not per-charge) → untouched."""
+        self._conn.execute("DELETE FROM charges WHERE id = ?", (charge_id,))
+        self._conn.commit()
+
     # ── Charge ───────────────────────────────────────────────────────────────
 
     def create_charge(self, vehicle_id: int, data) -> int:
@@ -491,6 +504,33 @@ class Database:
         log.info("Charge #%d started — SOC %.1f%%", charge_id, data.soc)
         return charge_id
 
+    def set_charge_wallbox_start(self, charge_id: int, kwh: float) -> None:
+        """Seed the wallbox energy tracking at charge START: store the first counter reading and reset
+        the running total to 0. From here accumulate_wallbox_energy() sums the counter's positive rises."""
+        self._conn.execute(
+            "UPDATE charges SET wallbox_energy_start_kwh=?, ac_energy_kwh=0 WHERE id=?", (kwh, charge_id))
+        self._conn.commit()
+
+    def accumulate_wallbox_energy(self, charge_id: int, reading: float) -> None:
+        """Add the wallbox counter's POSITIVE rise since the last reading to the charge's running total
+        (ac_energy_kwh), called every poll while charging. Race/reset-proof: a counter that zeroes
+        mid-session is a single negative step (ignored) and the post-reset rise is still counted — so it
+        works whether the counter is a lifetime total or resets each session, and no matter WHEN it
+        resets relative to our polls. wallbox_energy_start_kwh holds the last reading seen (the running
+        baseline), persisted so the sum survives a poller restart mid-charge."""
+        row = self._conn.execute(
+            "SELECT wallbox_energy_start_kwh AS last, ac_energy_kwh AS accum FROM charges WHERE id=?",
+            (charge_id,)).fetchone()
+        if row is None:
+            return
+        last, accum = row["last"], (row["accum"] or 0.0)
+        if last is not None and reading >= last:
+            accum += reading - last
+        self._conn.execute(
+            "UPDATE charges SET wallbox_energy_start_kwh=?, ac_energy_kwh=? WHERE id=?",
+            (reading, round(accum, 3), charge_id))
+        self._conn.commit()
+
     def finalize_charge(self, charge_id: int, data, max_power_kw: float = 0.0,
                         price_per_kwh: float = 0.0) -> None:
         charge = self._conn.execute("SELECT * FROM charges WHERE id = ?", (charge_id,)).fetchone()
@@ -499,6 +539,8 @@ class Database:
         charge_type  = "DC" if max_power_kw > 11 else "AC"
         cost         = round(energy_added * price_per_kwh, 2) if price_per_kwh else None
 
+        # ac_energy_kwh is NOT touched here — it's the running wallbox-counter sum built up over the
+        # charge by accumulate_wallbox_energy() (the wallbox-billed energy).
         started_at   = datetime.fromisoformat(charge["started_at"])
         duration_min = (datetime.now(timezone.utc) - started_at).total_seconds() / 60
 

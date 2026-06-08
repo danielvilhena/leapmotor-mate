@@ -84,11 +84,16 @@ class Recorder:
             if not data.plug_connected and data.charge_current_a < -3.0:
                 self._regen_kwh += data.charge_power_kw * (self._sm.poll_driving / 3600)
 
-        # During active charge: track peak power (persisted so it survives a restart)
+        # During active charge: track peak power, and sum the wallbox counter's rises so the billed
+        # energy is MEASURED (reset/race-proof). Both are persisted → survive a poller restart mid-charge.
         if self._sm.state == State.CHARGING and self._active_charge_id:
             if data.charge_power_kw > self._max_charge_kw:
                 self._max_charge_kw = data.charge_power_kw
                 self._db.update_charge_max_power(self._active_charge_id, self._max_charge_kw)
+            wb = self._read_wallbox_energy()
+            if wb is not None:
+                self._db.accumulate_wallbox_energy(self._active_charge_id, wb)
+                log.debug("Charge #%d: wallbox counter %.3f kWh", self._active_charge_id, wb)
 
     # HA's leapmotor_trip ignores movements shorter than 0.5 km ("spostamento breve
     # ignorato"). Match it: finalize the trip, then drop it if it was a short hop.
@@ -110,6 +115,22 @@ class Recorder:
         events = self._sm.mark_online()
         for e in events:
             self._handle_event(e, None)
+
+    def _read_wallbox_energy(self) -> Optional[float]:
+        """Current wallbox kWh-counter reading from Home Assistant (best-effort, never raises).
+        Returns None when no wallbox is configured/reachable → the charge falls back to DC billing.
+        Reuses web/ha_client.get_live() (the same reader the web layer uses)."""
+        try:
+            import sys
+            import pathlib
+            web = str(pathlib.Path(__file__).resolve().parent.parent / "web")
+            if web not in sys.path:
+                sys.path.insert(0, web)
+            import ha_client
+            return ha_client.get_live().get("energy_kwh")
+        except Exception as e:  # noqa: BLE001
+            log.debug("wallbox energy read failed: %s", e)
+            return None
 
     def _handle_event(self, event: StateEvent, data: Optional[VehicleData]) -> None:
         frm, to = event.from_state, event.to_state
@@ -139,12 +160,21 @@ class Recorder:
                 self._max_charge_kw = 0.0
                 if data:
                     self._active_charge_id = self._db.create_charge(self._vehicle_id, data)
+                    start_wb = self._read_wallbox_energy()      # seed the wallbox-counter baseline
+                    if start_wb is not None:
+                        self._db.set_charge_wallbox_start(self._active_charge_id, start_wb)
+                        log.info("Charge #%d: wallbox counter at start = %.3f kWh",
+                                 self._active_charge_id, start_wb)
 
         elif frm == State.CHARGING and to in _PARKED_STATES:
             if self._active_charge_id and data:
+                end_wb = self._read_wallbox_energy()              # final reading → capture the last rise
+                if end_wb is not None:
+                    self._db.accumulate_wallbox_energy(self._active_charge_id, end_wb)
+                    log.info("Charge #%d: wallbox counter at stop = %.3f kWh",
+                             self._active_charge_id, end_wb)
                 self._db.finalize_charge(
-                    self._active_charge_id, data,
-                    max_power_kw=self._max_charge_kw,
+                    self._active_charge_id, data, max_power_kw=self._max_charge_kw,
                 )
             self._active_charge_id = None
             self._max_charge_kw = 0.0

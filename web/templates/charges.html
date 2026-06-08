@@ -321,11 +321,17 @@ fetch('api/charge-plan').then(r => r.json()).then(d => {
 
               <!-- Stats -->
               <div class="grid grid-cols-3 gap-2 mt-3">
+                {% set show_wb = c.ac_energy_kwh and c.location_type == 'HOME' %}
                 <div style="background:#0f172a;border-radius:8px;padding:8px 12px">
-                  <div class="stat-label" style="font-size:10px">{{ t('energy') }}</div>
+                  <div class="stat-label" style="font-size:10px">{% if show_wb %}🔋 {{ t('energy_in_battery') }}{% else %}{{ t('energy') }}{% endif %}</div>
                   <div style="font-size:16px;font-weight:700;color:#fbbf24">
                     +{{ "%.1f"|format(c.energy_added_kwh or 0) }}<span style="font-size:11px;color:#94a3b8;font-weight:400"> kWh</span>
                   </div>
+                  {% if show_wb %}
+                  <div style="font-size:10px;color:#60a5fa;margin-top:3px" title="{{ t('wallbox_billed_help') }}">
+                    🔌 {{ "%.1f"|format(c.ac_energy_kwh) }} kWh · {{ t('wallbox_billed') }}
+                  </div>
+                  {% endif %}
                 </div>
                 <div style="background:#0f172a;border-radius:8px;padding:8px 12px">
                   <div class="stat-label" style="font-size:10px">{{ t('soc_gain') }}</div>
@@ -339,6 +345,13 @@ fetch('api/charge-plan').then(r => r.json()).then(d => {
                     {% if c.cost %}{{ c.cost | money }}{% else %}—{% endif %}
                   </div>
                 </div>
+              </div>
+
+              <div class="flex justify-end mt-2">
+                <button hx-delete="api/charges/{{ c.id }}" hx-confirm="{{ t('charge_delete_confirm') }}"
+                        style="background:transparent;border:none;cursor:pointer;font-size:11px;color:#64748b"
+                        onmouseover="this.style.color='#f87171'" onmouseout="this.style.color='#64748b'">
+                  🗑 {{ t('charge_delete') }}</button>
               </div>
 
               <!-- Power curve (expandable, lazy-loaded on first open) -->

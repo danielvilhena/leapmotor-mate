@@ -21,7 +21,7 @@ import geocode
 import mqtt_check
 import auth
 
-MATE_VERSION = "1.11.18"  # bump together with the git tag + add-on config.yaml at release
+MATE_VERSION = "1.12.0-dev"  # bump together with the git tag + add-on config.yaml at release
 
 log = logging.getLogger("mate.web")
 
@@ -264,6 +264,15 @@ async def delete_trip(request: Request, trip_id: int):
     db_reader.delete_trip(trip_id)
     base = request.headers.get("x-ingress-path", "")
     return Response(status_code=200, headers={"HX-Redirect": f"{base}/trips"})
+
+
+@app.delete("/api/charges/{charge_id}")
+async def delete_charge(request: Request, charge_id: int):
+    """Permanently delete one charge session (HTMX, confirmed in the UI). Reloads the charges list,
+    so day/month/lifetime totals recompute."""
+    db_reader.delete_charge(charge_id)
+    base = request.headers.get("x-ingress-path", "")
+    return Response(status_code=200, headers={"HX-Redirect": f"{base}/charges"})
 
 
 @app.get("/charges", response_class=HTMLResponse)
@@ -896,27 +905,13 @@ async def wallbox_set_max_current(request: Request):
 async def set_charge_type(request: Request, charge_id: int):
     form = await request.form()
     location_type = form.get("location_type", "HOME")
-    # HOME charges go through the home wallbox, so bill the AC energy the wallbox actually delivered
-    # (what you pay the utility, incl. AC→DC conversion losses) instead of just the DC energy that
-    # reached the battery. Only when a wallbox is configured and its AC history is available — otherwise
-    # fall back to DC (the only figure we have for public/away charges).
-    ac_kwh = None
-    cost_title = None
-    if location_type == "HOME" and db_reader.get_setting("wallbox_enabled", "0") == "1":
-        try:
-            ac_kwh = _session_energy(db_reader.get_charge_power_curve(charge_id)).get("ac_kwh")
-        except Exception as exc:
-            log.warning("set_charge_type: AC energy lookup failed for charge %s: %s", charge_id, exc)
-            ac_kwh = None
-        t = i18n.get_t(db_reader.get_language())
-        if ac_kwh and ac_kwh > 0:
-            cost_title = t("cost_basis_ac")
-        else:
-            # No wallbox AC figure (HA not configured / no power entity / history purged) →
-            # compute_cost falls back to DC. Surface that so the cost isn't a silent no-op.
-            cost_title = t("cost_basis_dc")
-            log.info("set_charge_type: charge %s billed on DC — no wallbox AC energy available", charge_id)
-    charge = db_reader.update_charge_type(charge_id, location_type, ac_kwh=ac_kwh)
+    # The cost is computed in update_charge_type: a HOME charge is billed on the wallbox energy the
+    # poller measured at charge start/stop (the counter delta — exact), if available, else on the
+    # battery (DC/SoC) energy. No power-curve estimation here anymore.
+    charge = db_reader.update_charge_type(charge_id, location_type)
+    t = i18n.get_t(db_reader.get_language())
+    cost_title = t("cost_basis_ac") if (location_type == "HOME" and charge.get("ac_energy_kwh")) \
+        else t("cost_basis_dc")
     return templates.TemplateResponse(request, "partials/charge_type_badge.html", {
         "charge": charge,
         "charge_types": db_reader.CHARGE_TYPES,
