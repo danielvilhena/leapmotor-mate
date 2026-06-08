@@ -2,7 +2,7 @@
 import json
 import sqlite3
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Optional
 import os
@@ -1345,6 +1345,76 @@ def get_battery_health(min_soc_delta: float = 12.0) -> dict:
         "latest_capacity_kwh": latest_cap,
         "latest_soh_pct": latest_soh,
     }
+
+
+def get_vampire_drain(min_hours: float = 1.0, min_drop_pct: float = 0.5,
+                      lookback_days: int = 90, limit: int = 60) -> dict:
+    """Vampire drain = SoC lost while the car is PARKED and NOT charging. Scans the per-poll
+    `positions` log, groups consecutive parked-idle samples (charging=0, not moving) into windows
+    bounded by any charging or driving — driving is detected by speed OR a rise in odometer between
+    idle samples, so a drive that happened during a reporting gap can't be mistaken for drain. Each
+    kept window reports its SoC drop and a normalised %/day rate; windows shorter than `min_hours`
+    or with a drop below `min_drop_pct` (sensor jitter) are discarded. Pure read over data Mate
+    already records every poll — no extra polling, no user input."""
+    db = _get()
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=lookback_days)).isoformat()
+    rows = db.execute(
+        "SELECT recorded_at, soc, charging, speed_kmh, odometer_km FROM positions "
+        "WHERE soc IS NOT NULL AND recorded_at >= ? ORDER BY recorded_at",
+        (cutoff,),
+    ).fetchall()
+
+    windows = []
+
+    def _flush(w):
+        if not w:
+            return
+        t0, t1 = _local_dt(w["t0"]), _local_dt(w["t_last"])
+        if t0 is None or t1 is None:
+            return
+        hours = (t1 - t0).total_seconds() / 3600.0
+        drop = (w["soc0"] or 0) - (w["soc_last"] or 0)
+        if hours >= min_hours and drop >= min_drop_pct:
+            windows.append({
+                "start": t0.isoformat(), "end": t1.isoformat(),
+                "hours": round(hours, 1),
+                "soc_start": round(w["soc0"], 1), "soc_end": round(w["soc_last"], 1),
+                "drop_pct": round(drop, 1),
+                "pct_per_day": round(drop / hours * 24, 1),
+            })
+
+    cur = None
+    for r in rows:
+        idle = (not r["charging"]) and ((r["speed_kmh"] or 0) < 1)
+        odo = r["odometer_km"]
+        # a rise in odometer since the window's last idle sample → a drive happened (even if its
+        # samples were missed) → the park ended there.
+        if (cur is not None and odo is not None and cur["odo_last"] is not None
+                and odo - cur["odo_last"] > 0.5):
+            _flush(cur)
+            cur = None
+        if not idle:                        # driving / charging now → park ended
+            _flush(cur)
+            cur = None
+            continue
+        if cur is None:                     # start a new parked window
+            cur = {"t0": r["recorded_at"], "soc0": r["soc"],
+                   "t_last": r["recorded_at"], "soc_last": r["soc"], "odo_last": odo}
+        else:                               # extend the current parked window
+            cur["t_last"] = r["recorded_at"]
+            cur["soc_last"] = r["soc"]
+            if odo is not None:
+                cur["odo_last"] = odo
+    _flush(cur)
+
+    windows = windows[-limit:]
+    rates = sorted(w["pct_per_day"] for w in windows)
+    typical = None
+    if rates:
+        n = len(rates)
+        typical = round(rates[n // 2] if n % 2 else (rates[n // 2 - 1] + rates[n // 2]) / 2, 1)
+    return {"windows": windows, "count": len(windows),
+            "typical_pct_per_day": typical, "lookback_days": lookback_days}
 
 
 # ── Global map (all tracks + frequent places) ──────────────────────────────────

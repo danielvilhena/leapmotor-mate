@@ -84,4 +84,70 @@
   </div>
 </div>
 {% endif %}
+
+<!-- Vampire drain — SoC lost while parked & not charging -->
+<div class="mt-8 mb-4">
+  <h2 class="text-lg font-bold text-white">🦇 {{ t('battery_vampire_title') }}</h2>
+  <p class="text-sm text-slate-400 mt-1">{{ t('battery_vampire_subtitle') }}</p>
+</div>
+
+{% if vampire.count %}
+<div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+  <div style="background:#1e293b;border:1px solid #334155;border-radius:12px;padding:14px 16px">
+    <div style="font-size:10px;color:#64748b;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">{{ t('battery_vampire_typical') }}</div>
+    <div style="font-size:1.6rem;font-weight:700" class="text-purple-400">
+      {{ vampire.typical_pct_per_day }}<span style="font-size:0.85rem;font-weight:400;color:#94a3b8"> %/{{ t('day_unit') }}</span>
+    </div>
+  </div>
+</div>
+
+<div class="card mb-3">
+  <div id="vampire-chart" style="height:300px"></div>
+</div>
+<p class="text-xs text-slate-500 leading-relaxed">{{ t('battery_vampire_help') }}</p>
+
+<script>
+(function () {
+  var el = document.getElementById('vampire-chart');
+  if (!el || typeof ApexCharts === 'undefined') return;
+  var wins = {{ vampire.windows | tojson }};
+  // Category axis (one labelled bar per parked window) — a datetime axis mis-places sparse bars
+  // (the bar lands near the NEXT day's tick). Label = the day the park STARTED (DD/MM); the
+  // tooltip carries the time, duration, drop and SoC range.
+  var meta = wins.map(function (w) {
+    return { drop: w.drop_pct, hours: w.hours, s0: w.soc_start, s1: w.soc_end,
+             when: w.start.slice(8, 10) + '/' + w.start.slice(5, 7) + ' ' + w.start.slice(11, 16) };
+  });
+  el._c = new ApexCharts(el, {
+    chart: { type: 'bar', height: 300, fontFamily: 'inherit', background: 'transparent', toolbar: { show: false } },
+    series: [{ name: '%/{{ t('day_unit') }}', data: wins.map(function (w) { return w.pct_per_day; }) }],
+    colors: ['#a855f7'],
+    plotOptions: { bar: { columnWidth: '55%', borderRadius: 3 } },
+    dataLabels: { enabled: false },
+    xaxis: { type: 'category',
+             categories: wins.map(function (w) { return w.start.slice(8, 10) + '/' + w.start.slice(5, 7); }),
+             labels: { style: { colors: '#94a3b8' } },
+             axisBorder: { color: '#334155' }, axisTicks: { color: '#334155' } },
+    yaxis: { labels: { style: { colors: '#94a3b8' }, formatter: function (v) { return v.toFixed(1); } },
+             title: { text: '%/{{ t('day_unit') }}', style: { color: '#64748b' } } },
+    grid: { borderColor: '#1e293b' },
+    tooltip: { theme: 'dark',
+               y: { formatter: function (v, o) {
+                 var d = meta[o.dataPointIndex];
+                 return v + ' %/{{ t('day_unit') }}  ·  −' + d.drop + '% / ' + d.hours + ' h  ·  ' + d.s0 + '→' + d.s1 + '%';
+               }, title: { formatter: function () { return ''; } } },
+               x: { formatter: function (val, o) { return (o && meta[o.dataPointIndex]) ? meta[o.dataPointIndex].when : val; } } }
+  });
+  el._c.render();
+})();
+</script>
+{% else %}
+<div class="card flex items-center justify-center h-48 text-slate-500">
+  <div class="text-center max-w-md px-4">
+    <div class="text-4xl mb-3">🦇</div>
+    <div class="font-medium text-slate-400 mb-1">{{ t('battery_vampire_no_data') }}</div>
+    <div class="text-xs text-slate-500">{{ t('battery_vampire_help') }}</div>
+  </div>
+</div>
+{% endif %}
 {% endblock %}

@@ -21,7 +21,7 @@ import geocode
 import mqtt_check
 import auth
 
-MATE_VERSION = "1.11.17"  # bump together with the git tag + add-on config.yaml at release
+MATE_VERSION = "1.11.18"  # bump together with the git tag + add-on config.yaml at release
 
 log = logging.getLogger("mate.web")
 
@@ -298,8 +298,9 @@ async def statistics(request: Request):
 async def battery_page(request: Request):
     vehicle, _ = db_reader.get_vehicle()
     health = db_reader.get_battery_health()
+    vampire = db_reader.get_vampire_drain()
     return templates.TemplateResponse(request, "battery.html", _ctx(
-        page="battery", vehicle=vehicle, health=health,
+        page="battery", vehicle=vehicle, health=health, vampire=vampire,
     ))
 
 

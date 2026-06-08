@@ -137,6 +137,13 @@ class LeapmotorSession:
         low = err.lower()
         return any(k in low for k in ("token", "verification", "unauthori", "login"))
 
+    def _is_token_error(self, err: str) -> bool:
+        """A genuine access-token expiry/invalidity — refreshable WITHOUT a full re-login. Narrower
+        than _is_auth_error: a 'verification'/cert failure is NOT refreshable and must re-login."""
+        low = err.lower()
+        return "token" in low and any(k in low for k in
+                                      ("expire", "invalid", "unauthor", "not valid"))
+
     def _is_connection_error(self, err: str) -> bool:
         low = err.lower()
         return any(k in low for k in ("connection aborted", "remotedisconnected", "connectionerror",
@@ -154,7 +161,8 @@ class LeapmotorSession:
 
     def execute(self, action_fn) -> tuple[bool, str]:
         with self._lock:
-            for attempt in range(2):
+            refreshed = False
+            for attempt in range(3):
                 try:
                     self._connect()
                     action_fn(self._api, self._vehicle.vin)
@@ -165,13 +173,26 @@ class LeapmotorSession:
                     if self._is_connection_error(err):
                         # Stale keep-alive connection — reset and retry immediately
                         self._reset()
-                        if attempt == 1:
+                        if attempt >= 1:
                             return False, err
                         continue
                     if not self._is_auth_error(err):
                         return False, err
+                    # Genuine token expiry → refresh the token (keeps the same session) BEFORE any
+                    # full re-login. login() evicts the user's official-app session on a shared
+                    # account; token_refresh() does not. session_share patches token_refresh to
+                    # persist the new token, so the poller picks it up too (no divergent login).
+                    if self._is_token_error(err) and not refreshed:
+                        refreshed = True
+                        try:
+                            self._api.token_refresh()
+                            log.info("Command auth: token refreshed (no re-login)")
+                            continue
+                        except Exception as re_err:  # noqa: BLE001
+                            log.warning("token refresh failed (%s) — falling back to re-login", re_err)
+                    # Fallback: full re-login (also heals a vanished cert / 'verification' errors)
                     self._reset()
-                    if attempt == 1:
+                    if attempt >= 1:
                         return False, err
                     time.sleep(3)  # avoid rate limit before re-login
             return False, "Unknown error"
