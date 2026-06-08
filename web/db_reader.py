@@ -343,7 +343,7 @@ def _resolve_price(band, ctype: str, base: float, base_set: bool):
     return base, base_set
 
 
-def compute_cost(charge, config: Optional[dict] = None):
+def compute_cost(charge, config: Optional[dict] = None, ac_kwh: Optional[float] = None):
     """Cost for ONE charge using the pricing config in effect *now*. This is the
     single place a charge's cost is set, and it is frozen afterwards (no retroactive
     recompute when prices/bands change later). Returns a float (0.0 = free) or None
@@ -352,9 +352,15 @@ def compute_cost(charge, config: Optional[dict] = None):
         TOU 'start' → price of the band matching the start day+time (else base)
         TOU 'split' → energy split across bands by the real power curve, each
                       sample priced by the band matching its own day+time
+
+    `ac_kwh`: for HOME charges on a configured wallbox, the caller passes the real AC energy the
+    wallbox delivered (what you actually pay the utility, incl. AC→DC conversion losses). When given
+    (>0) it replaces the DC SOC-energy as the billed amount; otherwise we bill the DC energy (the only
+    figure we have for public/away charges). The band-weighting (timing) is unchanged — AC and DC flow
+    at the same times — so only the total energy differs.
     """
     location_type = charge["location_type"]
-    energy = charge["energy_added_kwh"] or 0
+    energy = ac_kwh if (ac_kwh and ac_kwh > 0) else (charge["energy_added_kwh"] or 0)
     if not location_type or energy <= 0:
         return None
     if location_type == "FREE":
@@ -421,10 +427,10 @@ def compute_cost(charge, config: Optional[dict] = None):
     return round(energy * (weighted / total_e), 2)
 
 
-def update_charge_type(charge_id: int, location_type: str) -> dict:
+def update_charge_type(charge_id: int, location_type: str, ac_kwh: Optional[float] = None) -> dict:
     """Set location_type and compute the cost from the pricing config in effect now
     (flat or time-of-use). This freezes the cost — later price/band edits do not
-    change it (the 'new charges only' rule)."""
+    change it (the 'new charges only' rule). `ac_kwh` (HOME + wallbox only) bills the real AC energy."""
     db = _conn_rw()
     row = db.execute("SELECT * FROM charges WHERE id=?", (charge_id,)).fetchone()
     if not row:
@@ -432,7 +438,7 @@ def update_charge_type(charge_id: int, location_type: str) -> dict:
 
     charge = dict(row)
     charge["location_type"] = location_type
-    cost = compute_cost(charge)
+    cost = compute_cost(charge, ac_kwh=ac_kwh)
 
     db.execute(
         "UPDATE charges SET location_type=?, cost=? WHERE id=?",

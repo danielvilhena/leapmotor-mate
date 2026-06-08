@@ -20,7 +20,7 @@ import geocode
 import mqtt_check
 import auth
 
-MATE_VERSION = "1.11.13"  # bump together with the git tag + add-on config.yaml at release
+MATE_VERSION = "1.11.14"  # bump together with the git tag + add-on config.yaml at release
 
 app = FastAPI(title="LeapMotor Mate")
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
@@ -870,7 +870,17 @@ async def wallbox_set_max_current(request: Request):
 async def set_charge_type(request: Request, charge_id: int):
     form = await request.form()
     location_type = form.get("location_type", "HOME")
-    charge = db_reader.update_charge_type(charge_id, location_type)
+    # HOME charges go through the home wallbox, so bill the AC energy the wallbox actually delivered
+    # (what you pay the utility, incl. AC→DC conversion losses) instead of just the DC energy that
+    # reached the battery. Only when a wallbox is configured and its AC history is available — otherwise
+    # fall back to DC (the only figure we have for public/away charges).
+    ac_kwh = None
+    if location_type == "HOME" and db_reader.get_setting("wallbox_enabled", "0") == "1":
+        try:
+            ac_kwh = _session_energy(db_reader.get_charge_power_curve(charge_id)).get("ac_kwh")
+        except Exception:
+            ac_kwh = None
+    charge = db_reader.update_charge_type(charge_id, location_type, ac_kwh=ac_kwh)
     return templates.TemplateResponse(request, "partials/charge_type_badge.html", {
         "charge": charge,
         "charge_types": db_reader.CHARGE_TYPES,
