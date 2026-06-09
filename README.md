@@ -87,6 +87,19 @@ The database is stored in the add‑on's persistent `/data`, so it survives rest
 
 ### Option B — Standalone Docker
 
+**Easiest — run the prebuilt image** (no clone, no build):
+
+```bash
+docker run -d --name leapmotor-mate \
+  -p 4000:4000 \
+  -v "$(pwd)/data:/data" \
+  ghcr.io/protossblaster/leapmotor-mate:latest
+```
+
+To update later: `docker pull ghcr.io/protossblaster/leapmotor-mate:latest` then recreate the container (or use [Watchtower](https://containrrr.dev/watchtower/) for automatic updates).
+
+**Or build from source:**
+
 ```bash
 git clone https://github.com/ProtossBlaster/leapmotor-mate.git
 cd leapmotor-mate
@@ -275,6 +288,19 @@ I dati restano in un database SQLite locale. Nulla viene inviato altrove se non 
 Il database è salvato nella `/data` persistente dell'add‑on, quindi sopravvive a riavvii e aggiornamenti.
 
 ### Opzione B — Docker standalone
+
+**Più semplice — immagine già pronta** (niente clone, niente build):
+
+```bash
+docker run -d --name leapmotor-mate \
+  -p 4000:4000 \
+  -v "$(pwd)/data:/data" \
+  ghcr.io/protossblaster/leapmotor-mate:latest
+```
+
+Per aggiornare in seguito: `docker pull ghcr.io/protossblaster/leapmotor-mate:latest` e ricrea il container (oppure usa [Watchtower](https://containrrr.dev/watchtower/) per gli aggiornamenti automatici).
+
+**Oppure build da sorgente:**
 
 ```bash
 git clone https://github.com/ProtossBlaster/leapmotor-mate.git
