@@ -19,6 +19,25 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
+
+
+def _add_file_log() -> None:
+    """Mirror the poller's stdout logs to a small rotating file under the data dir, so the
+    Settings → Diagnostics card can show them to a user without digging through container logs.
+    Best-effort: a read-only data dir just means no file (stdout logging is unaffected)."""
+    try:
+        from logging.handlers import RotatingFileHandler
+        data_dir = pathlib.Path(os.environ.get("DB_PATH", "/data/leapmotor_mate.db")).parent
+        fh = RotatingFileHandler(str(data_dir / "mate-poller.log"),
+                                 maxBytes=1_000_000, backupCount=2)
+        fh.setFormatter(logging.Formatter(
+            "%(asctime)s [%(levelname)s] %(name)s: %(message)s", "%Y-%m-%d %H:%M:%S"))
+        logging.getLogger().addHandler(fh)
+    except Exception:  # noqa: BLE001 — never let logging setup crash the poller
+        pass
+
+
+_add_file_log()
 log = logging.getLogger("leapmotor_mate")
 
 
@@ -270,6 +289,8 @@ def main():
                     int(db.get_setting("poll_driving", "10") or 10),
                 )
                 set_charge_current_min(float(db.get_setting("charge_detect_min_a", "2.0") or 2.0))
+                recorder.set_reconstruct_min_pct(
+                    float(db.get_setting("charge_reconstruct_min_pct", "2.0") or 2.0))
             except (TypeError, ValueError):
                 pass
             with _API_LOCK:

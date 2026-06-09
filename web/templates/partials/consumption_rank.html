@@ -8,14 +8,14 @@
 {% if cr and cr.weeks %}
 <div id="ec-chart" class="-mx-2"></div>
 <div class="text-xs text-slate-500 mt-1">
-  {{ t('current_consumption') }}: <span class="text-white font-medium">{{ cr.current_ec }} kWh/100km</span>
+  {{ t('current_consumption') }}: <span class="text-white font-medium">{{ cr.current_ec | eff }}</span>
 </div>
 <script>
 (function () {
   var el = document.getElementById('ec-chart');
   if (!el || typeof ApexCharts === 'undefined') return;
   if (el._chart) { try { el._chart.destroy(); } catch (e) {} }
-  var data = {{ cr.weeks | map(attribute='ec') | list | tojson }};
+  var data = [{% for w in cr.weeks %}{{ eff_val(w.ec) if w.ec else 'null' }}{{ "," if not loop.last }}{% endfor %}];
   var labels = {{ cr.weeks | map(attribute='start') | list | tojson }}.map(function (s) {
     if (!s) return '';
     var p = s.split('-');
@@ -24,7 +24,7 @@
   el._chart = new ApexCharts(el, {
     chart: { type: 'area', height: 175, toolbar: { show: false }, zoom: { enabled: false },
              fontFamily: 'inherit', background: 'transparent', parentHeightOffset: 0 },
-    series: [{ name: 'kWh/100km', data: data }],
+    series: [{ name: '{{ eff_unit() }}', data: data }],
     xaxis: { categories: labels, tooltip: { enabled: false },
              labels: { style: { colors: '#64748b', fontSize: '10px' } },
              axisBorder: { show: false }, axisTicks: { show: false } },
@@ -36,7 +36,7 @@
     dataLabels: { enabled: false },
     grid: { borderColor: '#1e293b', strokeDashArray: 4, padding: { left: 8, right: 8 } },
     markers: { size: 4, colors: ['#14b8a6'], strokeColors: '#0f172a', strokeWidth: 2, hover: { size: 6 } },
-    tooltip: { theme: 'dark', y: { formatter: function (v) { return v + ' kWh/100km'; } } }
+    tooltip: { theme: 'dark', y: { formatter: function (v) { return v + ' {{ eff_unit() }}'; } } }
   });
   el._chart.render();
 })();

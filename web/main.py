@@ -21,8 +21,28 @@ import geocode
 import mqtt_check
 import auth
 
-MATE_VERSION = "1.13.0"  # bump together with the git tag + add-on config.yaml at release
+MATE_VERSION = "1.14.0"  # bump together with the git tag + add-on config.yaml at release
 
+import diagnostics
+
+
+def _add_file_log() -> None:
+    """Mirror web logs to a small rotating file under the data dir for the Diagnostics card
+    (companion to the poller's). Best-effort; never blocks startup."""
+    try:
+        from logging.handlers import RotatingFileHandler
+        fh = RotatingFileHandler(str(diagnostics.data_dir() / diagnostics.WEB_LOG),
+                                 maxBytes=1_000_000, backupCount=2)
+        fh.setFormatter(logging.Formatter(
+            "%(asctime)s [%(levelname)s] %(name)s: %(message)s", "%Y-%m-%d %H:%M:%S"))
+        root = logging.getLogger()
+        root.addHandler(fh)
+        root.setLevel(logging.INFO)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+_add_file_log()
 log = logging.getLogger("mate.web")
 
 app = FastAPI(title="LeapMotor Mate")
@@ -55,6 +75,19 @@ def _money(x) -> str:
     return f"{sym}{s}" if cur["pos"] == "before" else f"{s}\u00a0{sym}"
 
 templates.env.filters["money"] = _money
+
+# Display-time unit conversion (DB stays metric — see units.py). Filters format "<value> <unit>";
+# the *_unit() / *_val() globals give a bare unit label or converted number (chart axes / JS data).
+import units
+for _name in ("dist", "speed", "temp", "pressure"):
+    templates.env.filters[_name] = getattr(units, _name)
+templates.env.filters["eff"] = units.efficiency
+templates.env.globals.update(
+    dist_unit=units.dist_unit, speed_unit=units.speed_unit, temp_unit=units.temp_unit,
+    pressure_unit=units.pressure_unit, eff_unit=units.eff_unit,
+    dist_val=units.dist_val, speed_val=units.speed_val, temp_val=units.temp_val,
+    eff_val=units.eff_val, unit_system=units.get_unit_system,
+)
 app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")
 
 
@@ -466,11 +499,15 @@ def _parse_vehicle_status(sig: dict) -> dict:
     def is_open(k):
         v = i(k); return None if v is None else (v != 0)
     return {
+        # Wheel→signal mapping corrected from a TWO-B10 vs official-app cross-check (GitHub #32:
+        # the UK reporter's car + Silvio's IT car, both showing 280 kPa at the rear-right):
+        # pressures map ascending 2646=FL/2653=FR/2660=RL/2667=RR (the leapmotor-api doc order was
+        # wrong); each pressure's paired state signal moves with it (FL=2655/FR=2648/RL=2662/RR=2641).
         "tyres": {
-            "fl": {"bar": bar("2667"), "low": i("2641") == 1},
+            "fl": {"bar": bar("2646"), "low": i("2655") == 1},
             "fr": {"bar": bar("2653"), "low": i("2648") == 1},
-            "rl": {"bar": bar("2646"), "low": i("2655") == 1},
-            "rr": {"bar": bar("2660"), "low": i("2662") == 1},
+            "rl": {"bar": bar("2660"), "low": i("2662") == 1},
+            "rr": {"bar": bar("2667"), "low": i("2641") == 1},
         },
         "doors": {
             "driver":     is_open("1277"), "passenger": is_open("1278"),
@@ -619,6 +656,7 @@ async def settings_page(request: Request):
         wb_keywords=db_reader.get_setting("wb_keywords", ""),
         currencies=db_reader.CURRENCIES,
         currency_code=db_reader.get_currency_code(),
+        diag=diagnostics.build_system_info(MATE_VERSION),
     ))
 
 
@@ -1256,6 +1294,16 @@ async def set_currency(request: Request):
     return Response(status_code=204, headers={"HX-Refresh": "true"})
 
 
+@app.post("/api/settings/units")
+async def set_units(request: Request):
+    """Change the measurement system (metric / imperial UK / imperial US). Display-only — the DB
+    stays metric — so a page reload (HX-Refresh) re-renders every km/°C/bar in the chosen units."""
+    form = await request.form()
+    sys = form.get("unit_system", "metric")
+    db_reader.set_setting("unit_system", sys if sys in units.UNIT_SYSTEMS else "metric")
+    return Response(status_code=204, headers={"HX-Refresh": "true"})
+
+
 # ── HTMX partial ─────────────────────────────────────────────────────────────
 
 @app.get("/api/charging-live", response_class=HTMLResponse)
@@ -1285,6 +1333,75 @@ async def refresh_now(request: Request):
         db_reader.save_fresh_signals(signals)
     # Global button (sidebar) → reload the current page so the fresh state shows wherever the user is.
     return Response(status_code=200, headers={"HX-Refresh": "true"})
+
+
+@app.get("/api/debug/signals", response_class=JSONResponse)
+async def debug_signals():
+    """Read-only diagnostic: the car's current RAW signal dict from the cloud (same fetch as the
+    Refresh button — no data is stored or changed). Used to reverse-engineer a signal that arrives
+    wrong, e.g. GitHub #30: a UK car shown in the sea because its longitude comes through with the
+    wrong sign. `gps_signals` isolates the GPS ids so a west-longitude user can paste just those;
+    `all_signals` is the full dict for spotting an unmapped sign/hemisphere field."""
+    import asyncio
+    sig = await asyncio.get_event_loop().run_in_executor(None, command_client.get_fresh_signals)
+    if not sig:
+        return JSONResponse(
+            {"error": "no live signals (car asleep or unreachable) — retry right after using the car"},
+            status_code=503)
+    gps_ids = ("3724", "3725", "2190", "2191")   # 3724=longitude, 3725=latitude (2190/2191 fallbacks)
+    return JSONResponse({
+        "gps_signals": {k: sig.get(k) for k in gps_ids if k in sig},
+        "parsed": {"latitude":  float(sig.get("3725") or sig.get("2190") or 0),
+                   "longitude": float(sig.get("3724") or sig.get("2191") or 0)},
+        "all_signals": sig,
+    })
+
+
+def _diag_pre(text: str, label: str) -> HTMLResponse:
+    """An HTMX fragment: a scrollable monospace block of `text` with a Copy button. The copy logic
+    lives in a `diagCopy(btn)` JS helper on the settings page — NOT an inline onclick — so we never
+    have to escape quotes into the attribute (an earlier inline version broke the HTML)."""
+    import html as _html
+    t = i18n.get_t(db_reader.get_language())
+    return HTMLResponse(
+        f'<div data-diag class="mt-3">'
+        f'<div class="flex items-center justify-between mb-1">'
+        f'<span class="text-[11px] text-slate-500 font-mono">{_html.escape(label)}</span>'
+        f'<button type="button" data-copied="{_html.escape(t("diag_copied"))}" onclick="diagCopy(this)" '
+        f'class="text-[11px] border border-slate-600 text-slate-300 rounded px-2 py-1 hover:border-brand">'
+        f'{_html.escape(t("diag_copy"))}</button>'
+        f'</div>'
+        f'<pre class="bg-slate-900 border border-slate-700 rounded-lg p-3 text-[11px] text-slate-300 '
+        f'font-mono max-h-96 overflow-auto whitespace-pre-wrap break-words">{_html.escape(text)}</pre>'
+        f'</div>')
+
+
+@app.get("/api/diagnostics/logs", response_class=HTMLResponse)
+async def diagnostics_logs(which: str = "poller"):
+    """Recent lines of the poller/web rotating log file (redacted), as an HTMX fragment."""
+    return _diag_pre(diagnostics.read_log_tail(which, lines=200), f"mate-{which}.log")
+
+
+@app.get("/api/diagnostics/signals", response_class=HTMLResponse)
+async def diagnostics_signals_fragment():
+    """The car's current raw signal dict (live fetch), as an HTMX fragment for the card."""
+    import asyncio
+    sig = await asyncio.get_event_loop().run_in_executor(None, command_client.get_fresh_signals)
+    text = (json.dumps(sig, indent=2, sort_keys=True) if sig
+            else "(no live signals — car asleep or unreachable; retry right after using the car)")
+    return _diag_pre(text, "signals.json")
+
+
+@app.get("/api/diagnostics/bundle")
+async def diagnostics_bundle(parts: str = "info,poller,web"):
+    """Redacted snapshot as a downloadable .txt the user can attach to a GitHub issue. `parts`
+    (comma-separated: info, poller, web) selects which sections to include — chosen via the card's
+    checkboxes. No live cloud call and NO GPS — VIN/credentials masked → safe to share publicly.
+    Raw signals (which include location) stay a separate, explicit action."""
+    sel = [p.strip() for p in parts.split(",") if p.strip()]
+    body = diagnostics.build_bundle(MATE_VERSION, parts=sel)
+    return Response(content=body, media_type="text/plain; charset=utf-8",
+                    headers={"Content-Disposition": "attachment; filename=leapmotor-mate-diagnostics.txt"})
 
 
 # ── Command routes ────────────────────────────────────────────────────────────

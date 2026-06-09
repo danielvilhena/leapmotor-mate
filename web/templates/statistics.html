@@ -16,8 +16,7 @@
   <div class="card">
     <div class="stat-label">{{ t('total_distance') }}</div>
     <div class="flex items-baseline gap-1">
-      <span class="stat-value">{{ totals.total_km or 0 }}</span>
-      <span class="text-slate-400 text-sm">km</span>
+      <span class="stat-value">{{ (totals.total_km or 0) | dist(0) }}</span>
     </div>
   </div>
   <div class="card">
@@ -25,9 +24,8 @@
     <div class="flex items-baseline gap-1">
       {% if totals.avg_efficiency %}
       <span class="stat-value {% if totals.avg_efficiency < 18 %}text-green-400{% elif totals.avg_efficiency < 22 %}text-yellow-400{% else %}text-red-400{% endif %}">
-        {{ totals.avg_efficiency }}
+        {{ totals.avg_efficiency | eff }}
       </span>
-      <span class="text-slate-400 text-sm">kWh/100km</span>
       {% else %}
       <span class="stat-value text-slate-500">—</span>
       {% endif %}
@@ -37,8 +35,7 @@
     <div class="stat-label">{{ t('best_efficiency') }}</div>
     <div class="flex items-baseline gap-1">
       {% if totals.best_efficiency %}
-      <span class="stat-value text-green-400">{{ totals.best_efficiency }}</span>
-      <span class="text-slate-400 text-sm">kWh/100km</span>
+      <span class="stat-value text-green-400">{{ totals.best_efficiency | eff }}</span>
       {% else %}
       <span class="stat-value text-slate-500">—</span>
       {% endif %}
@@ -126,7 +123,7 @@
 {% macro eff_badge(v) %}
   {% if v %}
   <span class="{% if v < 18 %}text-green-400{% elif v < 22 %}text-yellow-400{% else %}text-red-400{% endif %} font-medium">
-    {{ v }} <span class="text-slate-500 font-normal text-xs">kWh/100km</span>
+    {{ v | eff }}
   </span>
   {% endif %}
 {% endmacro %}
@@ -144,7 +141,7 @@
       </div>
       <div class="flex items-center flex-wrap justify-end gap-x-5 gap-y-1 text-sm text-right">
         <span class="text-slate-500 whitespace-nowrap">{{ year.trip_count }} trips</span>
-        <span class="text-white font-semibold whitespace-nowrap">{{ year.total_km }} km</span>
+        <span class="text-white font-semibold whitespace-nowrap">{{ year.total_km | dist(0) }}</span>
         <span class="text-slate-400 whitespace-nowrap">{{ year.total_kwh }} kWh</span>
         {{ eff_badge(year.avg_efficiency) }}
       </div>
@@ -163,7 +160,7 @@
           </div>
           <div class="flex items-center flex-wrap justify-end gap-x-5 gap-y-1 text-xs text-right">
             <span class="text-slate-500 whitespace-nowrap">{{ month.trip_count }} trips</span>
-            <span class="text-slate-200 font-semibold whitespace-nowrap">{{ month.total_km }} km</span>
+            <span class="text-slate-200 font-semibold whitespace-nowrap">{{ month.total_km | dist(0) }}</span>
             <span class="text-slate-400 whitespace-nowrap">{{ month.total_kwh }} kWh</span>
             {{ eff_badge(month.avg_efficiency) }}
           </div>
@@ -188,8 +185,8 @@
         (function () {
           const trips    = {{ month.trips | tojson }};
           const labels   = trips.map(t => t.label);
-          const kmData   = trips.map(t => t.distance_km || 0);
-          const effData  = trips.map(t => t.efficiency_kwh_100km || null);
+          const kmData   = [{% for t in month.trips %}{{ dist_val(t.distance_km or 0) }}{{ "," if not loop.last }}{% endfor %}];
+          const effData  = [{% for t in month.trips %}{{ eff_val(t.efficiency_kwh_100km) if t.efficiency_kwh_100km else 'null' }}{{ "," if not loop.last }}{% endfor %}];
           const regenData = trips.map(t => t.regen_kwh || 0);
           const tick = { color: '#64748b', font: { size: 9 }, maxRotation: 45 };
           const grid = { color: '#1e293b' };
@@ -197,7 +194,7 @@
           new Chart(document.getElementById('chart-km-{{ mo_key }}'), {
             type: 'bar',
             data: { labels, datasets: [{
-              label: 'km', data: kmData,
+              label: '{{ dist_unit() }}', data: kmData,
               backgroundColor: '#14b8a650', borderColor: '#14b8a6',
               borderWidth: 1, borderRadius: 3,
             }]},
@@ -207,7 +204,7 @@
               scales: {
                 x: { ticks: tick, grid },
                 y: { beginAtZero: true, ticks: tick, grid,
-                     title: { display: true, text: 'km', color: '#475569', font: { size: 9 } } },
+                     title: { display: true, text: '{{ dist_unit() }}', color: '#475569', font: { size: 9 } } },
               }
             }
           });
@@ -215,7 +212,7 @@
           new Chart(document.getElementById('chart-eff-{{ mo_key }}'), {
             type: 'line',
             data: { labels, datasets: [{
-              label: 'kWh/100km', data: effData,
+              label: '{{ eff_unit() }}', data: effData,
               borderColor: '#f59e0b', backgroundColor: '#f59e0b15',
               fill: true, tension: 0.3, pointRadius: 3,
               pointBackgroundColor: '#f59e0b', spanGaps: true,
@@ -226,7 +223,7 @@
               scales: {
                 x: { ticks: tick, grid },
                 y: { beginAtZero: false, ticks: tick, grid,
-                     title: { display: true, text: 'kWh/100km', color: '#475569', font: { size: 9 } } },
+                     title: { display: true, text: '{{ eff_unit() }}', color: '#475569', font: { size: 9 } } },
               }
             }
           });

@@ -118,9 +118,9 @@
           </div>
         </div>
         <div class="text-right">
-          <div class="text-sm font-bold text-white">{{ "%.1f"|format(trip.distance_km or 0) }} km</div>
+          <div class="text-sm font-bold text-white">{{ (trip.distance_km or 0) | dist(1) }}</div>
           <div class="text-xs text-slate-400">
-            {% if trip.efficiency_kwh_100km %}{{ "%.1f"|format(trip.efficiency_kwh_100km) }} kWh/100km{% endif %}
+            {% if trip.efficiency_kwh_100km %}{{ trip.efficiency_kwh_100km | eff }}{% endif %}
           </div>
         </div>
       </a>

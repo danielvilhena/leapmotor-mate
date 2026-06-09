@@ -354,11 +354,15 @@ def _parse_signal(vin: str, sig: dict) -> VehicleData:
         window_fr_open=int(sig.get("1694") or 0) != 0,
         window_rl_open=int(sig.get("1695") or 0) != 0,
         window_rr_open=int(sig.get("1696") or 0) != 0,
-        # Tyre signal→wheel mapping per markoceri/leapmotor-api docs (B10 slots are
-        # NOT in the obvious order): 2667=LF, 2653=RF, 2646=LR, 2660=RR.
-        tire_fl_bar=round(float(sig.get("2667") or 0) / 100.0, 2),
+        # Tyre signal→wheel mapping. The leapmotor-api docs label these LF=2667/RF=2653/
+        # LR=2646/RR=2660, but that's WRONG: cross-checked on TWO real B10s against the official
+        # app's per-wheel view — the #32 reporter's UK car AND Silvio's IT car, both with the
+        # 280-kPa wheel at the REAR-RIGHT — the true order is the ascending-id one:
+        # 2646=FL, 2653=FR, 2660=RL, 2667=RR. (State signals pair the same way:
+        # FL=2655, FR=2648, RL=2662, RR=2641 — see _parse_vehicle_status.)
+        tire_fl_bar=round(float(sig.get("2646") or 0) / 100.0, 2),
         tire_fr_bar=round(float(sig.get("2653") or 0) / 100.0, 2),
-        tire_rl_bar=round(float(sig.get("2646") or 0) / 100.0, 2),
-        tire_rr_bar=round(float(sig.get("2660") or 0) / 100.0, 2),
+        tire_rl_bar=round(float(sig.get("2660") or 0) / 100.0, 2),
+        tire_rr_bar=round(float(sig.get("2667") or 0) / 100.0, 2),
         ready=int(sig.get("1258") or 0) == 1,   # B10 faithful READY (ON3) sensor
     )

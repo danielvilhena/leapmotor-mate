@@ -63,7 +63,7 @@
     <h2 class="font-semibold text-white mb-4 flex items-center gap-2">{{ mdi(IC_TIRE) }} {{ t('tyre_pressure') }}</h2>
     <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
       {% for tp, label in [(vs.tyres.fl, t('tyre_fl')), (vs.tyres.fr, t('tyre_fr')), (vs.tyres.rl, t('tyre_rl')), (vs.tyres.rr, t('tyre_rr'))] %}
-        {% set val = ('%.2f'|format(tp.bar) ~ ' bar') if tp.bar is not none else '—' %}
+        {% set val = (tp.bar | pressure) if tp.bar is not none else '—' %}
         {% if tp.bar is none %}
           {{ tyre_tile(mdi(IC_TIRE), label, val, '', 'text-slate-400') }}
         {% elif tp.low or tp.bar < 2.0 %}
@@ -109,8 +109,8 @@
   <div class="card">
     <h2 class="font-semibold text-white mb-4 flex items-center gap-2">{{ mdi(IC_THERMO) }} {{ t('temperatures') }}</h2>
     <div class="grid grid-cols-2 lg:grid-cols-3 gap-3">
-      {{ tile(mdi(IC_BATTERY), t('temp_battery'), ('%.0f'|format(vs.temps.battery) ~ '°C') if vs.temps.battery is not none else '—') }}
-      {{ tile(mdi(IC_THERMO),  t('temp_cabin'),   ('%.0f'|format(vs.temps.cabin)   ~ '°C') if vs.temps.cabin   is not none else '—') }}
+      {{ tile(mdi(IC_BATTERY), t('temp_battery'), (vs.temps.battery | temp(0)) if vs.temps.battery is not none else '—') }}
+      {{ tile(mdi(IC_THERMO),  t('temp_cabin'),   (vs.temps.cabin   | temp(0)) if vs.temps.cabin   is not none else '—') }}
     </div>
   </div>
 

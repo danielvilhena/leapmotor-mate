@@ -3,6 +3,38 @@
 All notable changes to LeapMotor Mate are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.14.0] — 2026-06-09
+
+### Added
+- **🩺 Diagnostics card (Settings → Diagnostics).** A one-stop place to grab everything we need when
+  something goes wrong, so you don't have to dig through container / Home-Assistant add-on logs. It shows a
+  read-only system snapshot (Mate version, model, masked VIN, DB size + row counts, last poll, which
+  integrations are on), lets you view the recent **poller / web logs** and the car's current **raw signals**
+  inline (with a Copy button), and a **Download diagnostics** button that bundles the parts you tick into one
+  `.txt` you can attach to a GitHub issue. **Privacy by design:** the downloadable logs always mask your
+  personal info — VIN, credentials and e-mail addresses — and never include GPS; the raw-signals view (which
+  does include your location) is a separate, explicit action.
+- **📏 Units: Metric / Imperial UK / Imperial US** (Settings → Units). Distances, speeds, temperatures and
+  tyre pressures now display in your chosen system — **km/°C/bar**, **miles + mph but °C** (the UK), or
+  **miles + °F + psi** (the US). It's **display-only**: your stored data always stays metric, so you can
+  switch back and forth any time with nothing lost.
+
+### Fixed
+- **🔌 Charges missed while the car was asleep are now recorded (#29).** A home charge that started and
+  finished while the car was offline/asleep to the cloud was never seen "live" and so was lost entirely.
+  Mate now notices the battery-level jump and **reconstructs the charge** from it (marked *auto-detected*),
+  instead of dropping it.
+- **🛞 Tyre pressures were shown on the wrong wheels (#32).** The wheel order inherited from the upstream
+  library was wrong for the B10; corrected (cross-checked on two real cars against the official app), so each
+  pressure now matches the right corner.
+- **🔄 The Refresh button is now reachable on phones.** On small / portrait screens it was hidden; it now sits
+  in the mobile header, always one tap away.
+
+### Changed
+- **Doors and seats are now labelled by physical position** (front-left / front-right …) instead of
+  driver / passenger. This reads correctly on both left- and right-hand-drive cars (the old labels were
+  inverted for RHD/UK vehicles).
+
 ## [1.13.0] — 2026-06-09
 
 ### Added

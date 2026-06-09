@@ -141,11 +141,20 @@
       <span class="text-sm font-medium text-brand">Mate</span>
       {% if version %}<span class="text-[10px] text-slate-500 font-normal self-end mb-0.5">v{{ version }}</span>{% endif %}
     </div>
-    <button id="mobile-menu-btn" class="p-2 text-slate-400 hover:text-white focus:outline-none">
-      <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16m-7 6h7"></path>
-      </svg>
-    </button>
+    <div class="flex items-center gap-1">
+      {% if vehicle %}
+      <button type="button" title="{{ t('refresh_help') }}" aria-label="{{ t('refresh_now') }}"
+              class="p-2 text-lg leading-none text-slate-300 hover:text-white focus:outline-none disabled:opacity-40"
+              hx-post="api/refresh" hx-swap="none" hx-disabled-elt="this">
+        <span class="htmx-indicator">⏳</span><span>🔄</span>
+      </button>
+      {% endif %}
+      <button id="mobile-menu-btn" class="p-2 text-slate-400 hover:text-white focus:outline-none">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16m-7 6h7"></path>
+        </svg>
+      </button>
+    </div>
   </header>
 
   <!-- Sidebar Overlay -->

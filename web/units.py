@@ -1,0 +1,111 @@
+"""Display-time unit conversion.
+
+Every value Mate stores is METRIC (km, km/h, °C, bar) — the Leapmotor cloud always reports
+metric (verified: the kerniger HA integration declares every sensor metric with no conversion;
+CAN telemetry is fixed-unit; the API's `language` param only sets HTTP headers, never scales a
+signal). These helpers convert ONLY for display, per the user's `unit_system` setting. Nothing
+in the DB or the poller is touched — switch the setting and everything re-displays, no migration.
+
+unit_system: 'metric' | 'imperial_uk' | 'imperial_us'
+  distance/speed: metric = km / km/h ; both imperial = mi / mph
+  temperature:    imperial_us = °F ; metric AND imperial_uk = °C   (the UK keeps Celsius)
+  pressure:       metric = bar ; both imperial = psi
+  efficiency:     metric = kWh/100km ; both imperial = mi/kWh
+"""
+import db_reader
+
+_KM_TO_MI = 0.621371
+_BAR_TO_PSI = 14.5037738
+
+UNIT_SYSTEMS = ("metric", "imperial_uk", "imperial_us")
+
+
+def get_unit_system() -> str:
+    s = db_reader.get_setting("unit_system", "metric")
+    return s if s in UNIT_SYSTEMS else "metric"
+
+
+def _imperial(system: str) -> bool:
+    return system in ("imperial_uk", "imperial_us")
+
+
+def _num(v: float, dec: int) -> str:
+    """Number with `dec` decimals, trailing zeros trimmed (matches main._nice)."""
+    s = f"{float(v):.{dec}f}"
+    return s.rstrip("0").rstrip(".") if dec else s
+
+
+# ── unit labels (for chart axes / headers: "Distance ({{ dist_unit() }})") ────
+def dist_unit(system=None) -> str:
+    return "mi" if _imperial(system or get_unit_system()) else "km"
+
+def speed_unit(system=None) -> str:
+    return "mph" if _imperial(system or get_unit_system()) else "km/h"
+
+def temp_unit(system=None) -> str:
+    return "°F" if (system or get_unit_system()) == "imperial_us" else "°C"
+
+def pressure_unit(system=None) -> str:
+    return "psi" if _imperial(system or get_unit_system()) else "bar"
+
+def eff_unit(system=None) -> str:
+    return "mi/kWh" if _imperial(system or get_unit_system()) else "kWh/100km"
+
+
+# ── converted numbers only (for JS chart data / attributes) ──────────────────
+def dist_val(km, dec=1, system=None):
+    if km is None:
+        return None
+    return round(km * _KM_TO_MI, dec) if _imperial(system or get_unit_system()) else round(km, dec)
+
+def speed_val(kmh, dec=0, system=None):
+    if kmh is None:
+        return None
+    return round(kmh * _KM_TO_MI, dec) if _imperial(system or get_unit_system()) else round(kmh, dec)
+
+def temp_val(c, dec=0, system=None):
+    if c is None:
+        return None
+    return round(c * 9 / 5 + 32, dec) if (system or get_unit_system()) == "imperial_us" else round(c, dec)
+
+def eff_val(kwh_100km, dec=1, system=None):
+    """Converted efficiency number only (for chart data). NB: imperial mi/kWh is the RECIPROCAL of
+    metric kWh/100km, so a chart switches sense (higher = better) when imperial — pair with eff_unit()."""
+    if not kwh_100km:
+        return None
+    s = system or get_unit_system()
+    return round(_KM_TO_MI * 100 / kwh_100km, dec) if _imperial(s) else round(kwh_100km, dec)
+
+
+# ── formatted "<value> <unit>" filters (the common case) ─────────────────────
+def dist(km, dec=1):
+    if km is None:
+        return "—"
+    s = get_unit_system()
+    return f"{_num(km * _KM_TO_MI, dec)} mi" if _imperial(s) else f"{_num(km, dec)} km"
+
+def speed(kmh, dec=0):
+    if kmh is None:
+        return "—"
+    s = get_unit_system()
+    return f"{_num(kmh * _KM_TO_MI, dec)} mph" if _imperial(s) else f"{_num(kmh, dec)} km/h"
+
+def temp(c, dec=0):
+    if c is None:
+        return "—"
+    if get_unit_system() == "imperial_us":
+        return f"{_num(c * 9 / 5 + 32, dec)} °F"
+    return f"{_num(c, dec)} °C"
+
+def pressure(bar):
+    if bar is None:
+        return "—"
+    s = get_unit_system()
+    return f"{_num(bar * _BAR_TO_PSI, 0)} psi" if _imperial(s) else f"{_num(bar, 2)} bar"
+
+def efficiency(kwh_100km, dec=1):
+    """kWh/100km (metric) ↔ mi/kWh (imperial). 0/None → em dash."""
+    if not kwh_100km:
+        return "—"
+    s = get_unit_system()
+    return f"{_num(_KM_TO_MI * 100 / kwh_100km, dec)} mi/kWh" if _imperial(s) else f"{_num(kwh_100km, dec)} kWh/100km"

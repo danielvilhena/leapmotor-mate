@@ -45,7 +45,7 @@
   <div class="hero-tile t-dist">
     <div class="hero-ico">🛣️</div>
     <div>
-      <div class="hero-val">{{ summary.km|nice }}<span class="u">km</span></div>
+      <div class="hero-val">{{ dist_val(summary.km, 2)|nice }}<span class="u">{{ dist_unit() }}</span></div>
       <div class="hero-label">{{ t('total_distance') }}</div>
     </div>
   </div>
@@ -61,7 +61,7 @@
     <div>
       {% if summary.avg_eff %}
       <div class="hero-val" style="color:{{ eff_hex(summary.avg_eff) }}">
-        {{ "%.1f"|format(summary.avg_eff) }}<span class="u">kWh/100</span>
+        {{ summary.avg_eff | eff }}
       </div>
       {% else %}<div class="hero-val">—</div>{% endif %}
       <div class="hero-label">{{ t('avg_efficiency') }}</div>
@@ -92,10 +92,10 @@
         </div>
         <div class="flex items-center flex-wrap justify-end gap-x-4 gap-y-1 text-sm">
           <span class="text-slate-500 whitespace-nowrap">{{ year.count }} {{ t('trips_plural') }}</span>
-          <span class="text-white font-semibold whitespace-nowrap">{{ year.km }} km</span>
+          <span class="text-white font-semibold whitespace-nowrap">{{ year.km | dist(1) }}</span>
           {% if year.avg_eff %}
           <span class="eff-pill {{ eff_cls(year.avg_eff) }}">
-            {{ year.avg_eff }} <span class="unit">kWh/100</span>
+            {{ year.avg_eff | eff }}
           </span>
           {% endif %}
         </div>
@@ -113,10 +113,10 @@
             </div>
             <div class="flex items-center flex-wrap justify-end gap-x-4 gap-y-1 text-xs">
               <span class="text-slate-500 whitespace-nowrap">{{ month.count }} {{ t('trips_plural') }}</span>
-              <span class="text-slate-200 font-semibold whitespace-nowrap">{{ month.km }} km</span>
+              <span class="text-slate-200 font-semibold whitespace-nowrap">{{ month.km | dist(1) }}</span>
               {% if month.avg_eff %}
               <span class="eff-pill {{ eff_cls(month.avg_eff) }}">
-                {{ month.avg_eff }} <span class="unit">kWh/100</span>
+                {{ month.avg_eff | eff }}
               </span>
               {% endif %}
             </div>
@@ -134,10 +134,10 @@
                   <span class="text-slate-600 text-xs hidden sm:inline">— {{ day.count }} {{ t('trips_plural') if day.count > 1 else t('trip_singular') }}</span>
                 </div>
                 <div class="flex items-center flex-wrap justify-end gap-x-3 gap-y-1 text-xs">
-                  <span class="text-slate-400 font-medium whitespace-nowrap">{{ day.km }} km</span>
+                  <span class="text-slate-400 font-medium whitespace-nowrap">{{ day.km | dist(1) }}</span>
                   {% if day.avg_eff %}
                   <span class="eff-pill {{ eff_cls(day.avg_eff) }}">
-                    {{ day.avg_eff }} <span class="unit">kWh/100</span>
+                    {{ day.avg_eff | eff }}
                   </span>
                   {% endif %}
                 </div>
@@ -180,10 +180,10 @@
 
                 <!-- Stats -->
                 <div class="text-right flex-shrink-0" style="min-width:84px">
-                  <div class="text-white text-sm font-bold">{{ "%.1f"|format(trip.distance_km or 0) }} km</div>
+                  <div class="text-white text-sm font-bold">{{ (trip.distance_km or 0) | dist(1) }}</div>
                   {% if trip.efficiency_kwh_100km %}
                   <span class="eff-pill {{ eff_cls(trip.efficiency_kwh_100km) }} mt-0.5">
-                    {{ "%.1f"|format(trip.efficiency_kwh_100km) }} <span class="unit">kWh/100</span>
+                    {{ trip.efficiency_kwh_100km | eff }}
                   </span>
                   {% endif %}
                 </div>

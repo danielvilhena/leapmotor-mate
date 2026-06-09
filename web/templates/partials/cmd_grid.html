@@ -188,8 +188,8 @@
       </div>
       {% if status and (status.inside_temp or status.climate_target_temp) %}
       <span class="text-xs text-slate-400">
-        {% if status.inside_temp %}{{ "%.0f"|format(status.inside_temp) }}°{% endif %}
-        {% if status.climate_target_temp %} → {{ "%.0f"|format(status.climate_target_temp) }}° {{ t('target_short') }}{% endif %}
+        {% if status.inside_temp %}{{ status.inside_temp | temp(0) }}{% endif %}
+        {% if status.climate_target_temp %} → {{ status.climate_target_temp | temp(0) }} {{ t('target_short') }}{% endif %}
       </span>
       {% endif %}
     </div>

@@ -41,6 +41,20 @@
             </select>
           </form>
         </div>
+        <div>
+          <label class="block text-xs text-slate-400 mb-1.5">{{ t('units_label') }}</label>
+          {% set us = unit_system() %}
+          <form hx-post="api/settings/units" hx-trigger="change">
+            <select name="unit_system"
+                    class="w-full px-4 py-3 rounded-xl bg-slate-800 border border-slate-600 text-white
+                           text-sm focus:outline-none focus:border-brand cursor-pointer">
+              <option value="metric"      {% if us == 'metric' %}selected{% endif %}>{{ t('units_metric') }}</option>
+              <option value="imperial_uk" {% if us == 'imperial_uk' %}selected{% endif %}>{{ t('units_imperial_uk') }}</option>
+              <option value="imperial_us" {% if us == 'imperial_us' %}selected{% endif %}>{{ t('units_imperial_us') }}</option>
+            </select>
+          </form>
+          <div class="text-[11px] text-slate-500 mt-1">{{ t('units_hint') }}</div>
+        </div>
       </div>
     </div>
 
@@ -433,6 +447,55 @@
       </div>
     </div>
 
+    <!-- Diagnostics / debug -->
+    <div class="card">
+      <h2 class="font-semibold text-white mb-1">🩺 {{ t('diag_section') }}</h2>
+      <p class="text-xs text-slate-400 mb-3">{{ t('diag_hint') }}</p>
+
+      <!-- System snapshot — read-only info (selectable text, not interactive) -->
+      <div class="text-[11px] text-slate-400 leading-relaxed bg-slate-900/40 border border-slate-700/60 rounded-lg px-3 py-2 mb-4 select-text">
+        <div>Mate <span class="text-slate-200">{{ diag.version }}</span> · {{ diag.model }}{% if diag.year and diag.year != '—' %} ({{ diag.year }}){% endif %} · {{ diag.vin_masked }}</div>
+        <div>DB {{ diag.db_size_mb }} MB · {{ diag.counts.trips }} {{ t('trips_title') | lower }} · {{ diag.counts.charges }} {{ t('charges_title') | lower }} · {{ diag.counts.positions }} pos</div>
+        <div>{{ t('diag_last_poll') }}:
+          {% if diag.last_poll_age_min is not none %}{{ diag.last_poll_age_min }} min · SoC {{ diag.last_soc }}% · {{ diag.last_gear }}{% if diag.last_charging %} · ⚡{% endif %}{% else %}{{ t('diag_never') }}{% endif %}
+        </div>
+        <div>{{ t('diag_integrations') }}:
+          {% for key, on in [('MQTT', diag.features.mqtt), ('Wallbox', diag.features.wallbox), ('ABRP', diag.features.abrp), ('Add-on', diag.features.addon)] %}<span class="{% if on %}text-emerald-400{% else %}text-slate-600{% endif %}">{{ key }} {% if on %}✓{% else %}✗{% endif %}</span>{% if not loop.last %} · {% endif %}{% endfor %}
+        </div>
+      </div>
+
+      <!-- View a log inline -->
+      <div class="text-xs font-medium text-slate-300 mb-1.5">{{ t('diag_view') }}</div>
+      <div class="flex flex-wrap gap-2 mb-3">
+        <button hx-get="api/diagnostics/logs?which=poller" hx-target="#diag-output" hx-swap="innerHTML"
+                class="border border-slate-600 text-slate-200 text-sm font-medium rounded-lg px-3 py-1.5 hover:border-brand">{{ t('diag_poller_log') }}</button>
+        <button hx-get="api/diagnostics/logs?which=web" hx-target="#diag-output" hx-swap="innerHTML"
+                class="border border-slate-600 text-slate-200 text-sm font-medium rounded-lg px-3 py-1.5 hover:border-brand">{{ t('diag_web_log') }}</button>
+        <button hx-get="api/diagnostics/signals" hx-target="#diag-output" hx-swap="innerHTML" hx-indicator="#diag-spin"
+                class="border border-slate-600 text-slate-200 text-sm font-medium rounded-lg px-3 py-1.5 hover:border-brand">{{ t('diag_signals') }}</button>
+        <span id="diag-spin" class="htmx-indicator text-xs text-slate-500 self-center">…</span>
+      </div>
+      <div id="diag-output" class="mb-4"></div>
+
+      <!-- Download a chosen selection -->
+      <div class="text-xs font-medium text-slate-300 mb-1.5">{{ t('diag_download_pick') }}</div>
+      <div class="flex flex-wrap gap-x-4 gap-y-1.5 mb-2 text-xs text-slate-300">
+        <label class="flex items-center gap-1.5 cursor-pointer"><input type="checkbox" class="diag-part accent-brand" value="info" checked> {{ t('diag_part_info') }}</label>
+        <label class="flex items-center gap-1.5 cursor-pointer"><input type="checkbox" class="diag-part accent-brand" value="poller" checked> {{ t('diag_poller_log') }}</label>
+        <label class="flex items-center gap-1.5 cursor-pointer"><input type="checkbox" class="diag-part accent-brand" value="web" checked> {{ t('diag_web_log') }}</label>
+      </div>
+      <div class="flex items-center gap-3">
+        <button type="button" onclick="diagDownload(this)" data-empty="{{ t('diag_pick_one') }}"
+                class="bg-brand text-white text-sm font-semibold rounded-lg px-4 py-2 hover:opacity-90">⬇ {{ t('diag_download') }}</button>
+        <span id="diag-dl-hint" class="text-[11px] text-amber-400"></span>
+      </div>
+
+      <!-- Privacy note -->
+      <p class="text-[11px] text-slate-400 mt-3 flex items-start gap-1.5">
+        <span>🔒</span><span>{{ t('diag_privacy') }}</span>
+      </p>
+    </div>
+
   </div>
 
 </div>
@@ -446,6 +509,25 @@
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: 'key=' + encodeURIComponent(key) + '&open=' + (open ? 1 : 0),
     });
+  }
+
+  // Diagnostics: copy the shown log/signals block (label set via data-copied).
+  function diagCopy(btn) {
+    const pre = btn.closest('[data-diag]').querySelector('pre');
+    navigator.clipboard.writeText(pre ? pre.textContent : '').then(function () {
+      const orig = btn.textContent;
+      btn.textContent = btn.dataset.copied || 'OK';
+      setTimeout(function () { btn.textContent = orig; }, 1500);
+    });
+  }
+
+  // Diagnostics: download only the ticked sections (info / poller / web).
+  function diagDownload(btn) {
+    const parts = Array.from(document.querySelectorAll('.diag-part:checked')).map(function (c) { return c.value; });
+    const hint = document.getElementById('diag-dl-hint');
+    if (!parts.length) { if (hint) { hint.textContent = btn.dataset.empty || ''; } return; }
+    if (hint) { hint.textContent = ''; }
+    window.location.href = 'api/diagnostics/bundle?parts=' + parts.join(',');
   }
 </script>
 {% endblock %}

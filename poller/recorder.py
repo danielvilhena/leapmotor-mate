@@ -4,7 +4,7 @@ Recorder: reacts to state machine events to persist trips, charges, and position
 import logging
 from typing import Optional
 
-from db import Database
+from db import Database, _now_iso
 from state_machine import State, StateMachine, StateEvent, _PARKED_STATES
 from client import VehicleData
 
@@ -21,6 +21,10 @@ class Recorder:
         self._regen_kwh: float = 0.0
         self._max_charge_kw: float = 0.0
         self._started: bool = False
+        # SoC-jump charge reconstruction (GitHub #29): baseline SoC + when we last saw it.
+        self._last_soc: Optional[float] = None
+        self._last_soc_ts: Optional[str] = None
+        self._reconstruct_min_pct: float = 2.0   # min SoC rise to call it a (missed) charge
 
     @property
     def state(self) -> State:
@@ -33,6 +37,11 @@ class Recorder:
     def set_poll_intervals(self, parked: int, driving: int) -> None:
         self._sm.poll_parked = parked
         self._sm.poll_driving = driving
+
+    def set_reconstruct_min_pct(self, pct: float) -> None:
+        """Min SoC rise (%) that counts as a charge missed while the car was asleep (Settings)."""
+        if pct and pct > 0:
+            self._reconstruct_min_pct = pct
 
     def _resume_or_close(self, data: VehicleData) -> None:
         """At startup, reconcile sessions left open by a previous run (poller/HA
@@ -66,6 +75,13 @@ class Recorder:
         if not self._started:
             self._started = True
             self._resume_or_close(data)
+            # Seed the SoC baseline from the last position on disk so a charge that happened
+            # while the poller was DOWN is still caught on the first poll back (GitHub #29).
+            prev_soc, prev_ts = self._db.get_last_soc(self._vehicle_id)
+            if prev_soc is not None:
+                self._last_soc, self._last_soc_ts = prev_soc, prev_ts
+            else:                                   # fresh DB → no baseline; skip first-poll reconstruct
+                self._last_soc, self._last_soc_ts = data.soc, _now_iso()
 
         self._db.save_position(self._vehicle_id, data)
 
@@ -94,6 +110,30 @@ class Recorder:
             if wb is not None:
                 self._db.accumulate_wallbox_energy(self._active_charge_id, wb)
                 log.debug("Charge #%d: wallbox counter %.3f kWh", self._active_charge_id, wb)
+
+        self._maybe_reconstruct_charge(data)
+
+    def _maybe_reconstruct_charge(self, data: VehicleData) -> None:
+        """Catch a charge that was never seen live. While the car is asleep/offline to the cloud
+        the poller gets no live signals (EmptyStatusError) — or only stale ones — so a home charge
+        can start and finish without a single poll ever showing plug/current: the live state machine
+        never enters CHARGING and the session is lost (GitHub #29; same root as the "not real-time"
+        reports #27/#28). The one trace left is a SoC that JUMPED up while parked. Detect that jump
+        and reconstruct the charge from the SoC delta.
+
+        Runs every poll. The baseline advances each poll, so a live charge (whose SoC rises gradually
+        while state == CHARGING) is skipped here — the live path records those, with real power and
+        wallbox cost. We only reconstruct when parked, with no charge open, and the rise clears the
+        threshold (so vampire-drain drops and BMS recalibration jitter never invent a phantom charge)."""
+        prev_soc, prev_ts = self._last_soc, self._last_soc_ts
+        self._last_soc, self._last_soc_ts = data.soc, _now_iso()   # advance baseline every poll
+        if prev_soc is None or prev_ts is None:
+            return
+        if self._sm.state not in _PARKED_STATES or self._active_charge_id is not None:
+            return                                                 # live charge/trip owns this
+        if data.soc - prev_soc < self._reconstruct_min_pct:
+            return                                                 # drop or jitter, not a charge
+        self._db.create_reconstructed_charge(self._vehicle_id, prev_soc, prev_ts, data)
 
     # HA's leapmotor_trip ignores movements shorter than 0.5 km ("spostamento breve
     # ignorato"). Match it: finalize the trip, then drop it if it was a short hop.

@@ -205,6 +205,10 @@ class Database:
             self._conn.execute("ALTER TABLE charges ADD COLUMN ac_energy_kwh REAL")
         if "wallbox_energy_start_kwh" not in ccols:
             self._conn.execute("ALTER TABLE charges ADD COLUMN wallbox_energy_start_kwh REAL")
+        # migration: flag charges reconstructed from a SoC jump (car was asleep/offline to the
+        # cloud during the charge, so it was never seen live — recorded from the SoC delta instead).
+        if "reconstructed" not in ccols:
+            self._conn.execute("ALTER TABLE charges ADD COLUMN reconstructed INTEGER DEFAULT 0")
         # migration: manual trip-merge link — a child trip points to the parent it was merged into
         tcols = {r[1] for r in self._conn.execute("PRAGMA table_info(trips)").fetchall()}
         if "merged_into_id" not in tcols:
@@ -400,6 +404,17 @@ class Database:
         )
         self._conn.commit()
 
+    def get_last_soc(self, vehicle_id: int):
+        """The most recent recorded (soc, recorded_at) for this vehicle, or (None, None).
+        Used to seed the recorder's SoC baseline across a poller restart so a charge that
+        happened while the poller was down is still caught (SoC-jump reconstruction)."""
+        row = self._conn.execute(
+            "SELECT soc, recorded_at FROM positions WHERE vehicle_id = ? "
+            "ORDER BY id DESC LIMIT 1", (vehicle_id,)).fetchone()
+        if row is None or row["soc"] is None:
+            return None, None
+        return float(row["soc"]), row["recorded_at"]
+
     # ── Trip ─────────────────────────────────────────────────────────────────
 
     def create_trip(self, vehicle_id: int, data) -> int:
@@ -507,6 +522,38 @@ class Database:
         self._conn.commit()
         charge_id = cur.lastrowid
         log.info("Charge #%d started — SOC %.1f%%", charge_id, data.soc)
+        return charge_id
+
+    def create_reconstructed_charge(self, vehicle_id: int, start_soc: float,
+                                    started_at: str, data) -> int:
+        """Record a charge that was never seen live — the car was asleep/offline to the cloud
+        during it, so no plug/current signal was ever polled and the only trace is a SoC that
+        JUMPED up while parked. Insert a COMPLETE, already-closed row from the SoC delta so the
+        charge isn't lost (GitHub #29). Timing is approximate (start = last known low-SoC time,
+        end = now); energy = ΔSoC × capacity. Marked reconstructed=1 and typed AC (asleep charges
+        are home AC — DC fast-charging keeps the car awake and reporting). max_power_kw is left
+        NULL (unknown) and cost stays NULL until the user confirms the charge type, exactly like a
+        live charge."""
+        energy_added = max((data.soc - start_soc) / 100.0 * self.get_battery_capacity(), 0)
+        ended_at = _now_iso()
+        try:
+            duration_min = round(
+                (datetime.fromisoformat(ended_at) - datetime.fromisoformat(started_at))
+                .total_seconds() / 60, 1)
+        except (TypeError, ValueError):
+            duration_min = None
+        cur = self._conn.execute(
+            """INSERT INTO charges
+               (vehicle_id, started_at, ended_at, start_soc, end_soc, energy_added_kwh,
+                duration_min, latitude, longitude, charge_type, reconstructed)
+               VALUES (?,?,?,?,?,?,?,?,?,?,1)""",
+            (vehicle_id, started_at, ended_at, start_soc, data.soc, round(energy_added, 3),
+             duration_min, data.latitude, data.longitude, "AC"),
+        )
+        self._conn.commit()
+        charge_id = cur.lastrowid
+        log.info("Charge #%d reconstructed — SOC %.1f→%.1f%% | +%.1f kWh (car was asleep/offline)",
+                 charge_id, start_soc, data.soc, energy_added)
         return charge_id
 
     def set_charge_wallbox_start(self, charge_id: int, kwh: float) -> None:
