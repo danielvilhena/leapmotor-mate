@@ -344,6 +344,10 @@ def _parse_signal(vin: str, sig: dict) -> VehicleData:
         seat_vent_driver=int(sig.get("2101") or 0),
         seat_vent_passenger=int(sig.get("2119") or 0),
         steering_heat=int(sig.get("1816") or 0),
+        # Mirror heat 49/50 are kept as separate left/right ON PURPOSE. On the B10 it's a UNIFIED
+        # both-mirror control (verified on-car: 49 and 50 report the same value), but other models
+        # may heat each mirror independently — so we read both rather than collapse to one. Don't
+        # "simplify" these into a single sensor; that would lose per-side data on those models.
         mirror_heat_left=int(sig.get("49") or 0),
         mirror_heat_right=int(sig.get("50") or 0),
         door_driver_open=int(sig.get("1277") or 0) != 0,
