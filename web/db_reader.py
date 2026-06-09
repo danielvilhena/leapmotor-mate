@@ -120,12 +120,16 @@ def get_db_size_bytes() -> int:
 
 
 def get_trip_track(trip_id: int) -> list[dict]:
-    """Full ordered GPS track for one trip (for GPX export — not downsampled)."""
+    """Full ordered GPS track for one trip (for GPX export — not downsampled). Group-aware: a
+    merged trip returns the union of all its segments' tracks, in chronological order."""
     db = _get()
+    ids = _segment_ids(db, trip_id)
+    ph = ",".join("?" * len(ids))
     rows = db.execute(
         "SELECT recorded_at, latitude, longitude, speed_kmh, soc FROM trip_positions "
-        "WHERE trip_id=? AND latitude IS NOT NULL AND longitude IS NOT NULL ORDER BY id",
-        (trip_id,),
+        f"WHERE trip_id IN ({ph}) AND latitude IS NOT NULL AND longitude IS NOT NULL "
+        "ORDER BY recorded_at, id",
+        ids,
     ).fetchall()
     return [dict(r) for r in rows]
 
@@ -697,8 +701,12 @@ def delete_trip(trip_id: int) -> bool:
     """Permanently remove a trip and its GPS track. Returns True if a trip was deleted.
     Day/month/lifetime trip totals recompute from the DB, so they update automatically."""
     db = _conn_rw()
-    cur = db.execute("DELETE FROM trips WHERE id=?", (trip_id,))
-    db.execute("DELETE FROM trip_positions WHERE trip_id=?", (trip_id,))
+    # Deleting a merged trip removes the whole group (the parent + every child) and their tracks.
+    ids = [trip_id] + [r["id"] for r in db.execute(
+        "SELECT id FROM trips WHERE merged_into_id=?", (trip_id,)).fetchall()]
+    ph = ",".join("?" * len(ids))
+    cur = db.execute(f"DELETE FROM trips WHERE id IN ({ph})", ids)
+    db.execute(f"DELETE FROM trip_positions WHERE trip_id IN ({ph})", ids)
     db.commit()
     return cur.rowcount > 0
 
@@ -712,16 +720,181 @@ def delete_charge(charge_id: int) -> bool:
     return cur.rowcount > 0
 
 
+# ── Manual trip merge (reversible) ──────────────────────────────────────────────
+# A merged trip is a parent + child trips (merged_into_id = parent.id), joined by the user when
+# a journey was split by a SHORT, NON-charging stop. Nothing is deleted or overwritten — the group
+# stats are computed on the fly, so "unmerge" restores the originals exactly.
+TRIP_MERGE_GAP_DEFAULT = 30   # minutes
+TRIP_MERGE_GAP_MIN = 5
+TRIP_MERGE_GAP_MAX = 90
+
+
+def _gap_minutes(end_iso, start_iso):
+    """Minutes from end_iso to start_iso (raw stored UTC ISO). None if unparseable."""
+    try:
+        return (datetime.fromisoformat(start_iso) - datetime.fromisoformat(end_iso)).total_seconds() / 60.0
+    except (TypeError, ValueError):
+        return None
+
+
+def _children_by_parent(db) -> dict:
+    """All merged child trips grouped by parent id (one query)."""
+    out: dict = {}
+    for r in db.execute("SELECT * FROM trips WHERE merged_into_id IS NOT NULL").fetchall():
+        out.setdefault(r["merged_into_id"], []).append(dict(r))
+    return out
+
+
+def _segment_ids(db, trip_id: int) -> list:
+    """Every trip id in the merge-group containing trip_id (parent + children); [trip_id] if none."""
+    row = db.execute("SELECT id, merged_into_id FROM trips WHERE id=?", (trip_id,)).fetchone()
+    if not row:
+        return [trip_id]
+    parent = row["merged_into_id"] or row["id"]
+    return [parent] + [r["id"] for r in
+            db.execute("SELECT id FROM trips WHERE merged_into_id=?", (parent,)).fetchall()]
+
+
+def _trip_group_stats(parent: dict, children: list) -> dict:
+    """Parent dict enriched with the combined stats of [parent + children] (earliest start →
+    latest end). Pure display math — stored rows are untouched. The merge guard guarantees no
+    charge in any gap, so the SoC delta (energy/efficiency) stays valid."""
+    d = dict(parent)
+    d["merged_count"] = 1
+    d["is_merged"] = False
+    if not children:
+        return d
+    segs = sorted([parent, *children], key=lambda t: t.get("started_at") or "")
+    first, last = segs[0], segs[-1]
+    d["started_at"], d["start_soc"] = first.get("started_at"), first.get("start_soc")
+    d["start_odometer_km"] = first.get("start_odometer_km")
+    d["start_lat"], d["start_lon"] = first.get("start_lat"), first.get("start_lon")
+    d["ended_at"], d["end_soc"] = last.get("ended_at"), last.get("end_soc")
+    d["end_odometer_km"] = last.get("end_odometer_km")
+    d["end_lat"], d["end_lon"] = last.get("end_lat"), last.get("end_lon")
+    so, eo = first.get("start_odometer_km"), last.get("end_odometer_km")
+    if so is not None and eo is not None and eo >= so and so > 0:
+        d["distance_km"] = round(eo - so, 2)
+    else:
+        d["distance_km"] = round(sum((s.get("distance_km") or 0) for s in segs), 2)
+    d["duration_min"] = round(sum((s.get("duration_min") or 0) for s in segs), 1)   # DRIVING only
+    d["regen_kwh"] = round(sum((s.get("regen_kwh") or 0) for s in segs), 3)
+    ssoc, esoc, dist = d["start_soc"], d["end_soc"], d.get("distance_km") or 0
+    if ssoc is not None and esoc is not None and dist > 0:
+        energy = max((ssoc - esoc) / 100.0 * get_battery_capacity_kwh(), 0)
+        d["efficiency_kwh_100km"] = round(energy / dist * 100, 1) if energy > 0 else None
+    d["merged_count"] = len(segs)
+    d["is_merged"] = True
+    d["segment_ids"] = [s["id"] for s in segs]
+    return d
+
+
+def get_mergeable_pairs(gap_min: int = TRIP_MERGE_GAP_DEFAULT) -> list:
+    """Eligible adjacent top-level trip pairs for the merge UI: B starts within gap_min of A's
+    (group) end AND B's start SoC is not higher than A's end SoC (a SoC rise = a charge in the
+    gap → never mergeable). Returns [{a_id, b_id, gap_min}]."""
+    db = _get()
+    kids = _children_by_parent(db)
+    tops = [dict(r) for r in db.execute(
+        "SELECT * FROM trips WHERE merged_into_id IS NULL AND ended_at IS NOT NULL "
+        "ORDER BY started_at").fetchall()]
+    groups = [_trip_group_stats(t, kids.get(t["id"], [])) for t in tops]
+    pairs = []
+    for a, b in zip(groups, groups[1:]):
+        gap = _gap_minutes(a.get("ended_at"), b.get("started_at"))
+        if gap is None or gap < 0 or gap >= gap_min:
+            continue
+        if (a.get("end_soc") is not None and b.get("start_soc") is not None
+                and b["start_soc"] > a["end_soc"]):
+            continue   # SoC rose → charged in the gap
+        pairs.append({"a_id": a["id"], "b_id": b["id"], "gap_min": round(gap)})
+    return pairs
+
+
+def merge_trips(parent_id: int, child_id: int, gap_min: int = TRIP_MERGE_GAP_DEFAULT) -> dict:
+    """Merge child into parent (the earlier of the two becomes the parent). Re-validates the
+    eligibility server-side. Reversible: only sets merged_into_id, nothing is overwritten."""
+    db = _conn_rw()
+    a = db.execute("SELECT * FROM trips WHERE id=? AND merged_into_id IS NULL", (parent_id,)).fetchone()
+    b = db.execute("SELECT * FROM trips WHERE id=? AND merged_into_id IS NULL", (child_id,)).fetchone()
+    if not a or not b:
+        return {"ok": False, "error": "not_found_or_already_merged"}
+    a, b = dict(a), dict(b)
+    if (a.get("started_at") or "") > (b.get("started_at") or ""):
+        a, b = b, a                                   # parent = earlier trip
+    kids = _children_by_parent(db)
+    a_grp = _trip_group_stats(a, kids.get(a["id"], []))
+    gap = _gap_minutes(a_grp.get("ended_at"), b.get("started_at"))
+    if gap is None or gap < 0 or gap >= gap_min:
+        return {"ok": False, "error": "gap_too_large"}
+    if (a_grp.get("end_soc") is not None and b.get("start_soc") is not None
+            and b["start_soc"] > a_grp["end_soc"]):
+        return {"ok": False, "error": "soc_rose_charge_in_gap"}
+    # absorb B and any of B's own children into A (flatten the chain so all point to A)
+    db.execute("UPDATE trips SET merged_into_id=? WHERE id=? OR merged_into_id=?",
+               (a["id"], b["id"], b["id"]))
+    db.commit()
+    return {"ok": True, "parent_id": a["id"]}
+
+
+def unmerge_trip(parent_id: int) -> dict:
+    """Split a merged group back into its original trips — clears merged_into_id on every child.
+    All rows were untouched, so they reappear exactly as before."""
+    db = _conn_rw()
+    cur = db.execute("UPDATE trips SET merged_into_id=NULL WHERE merged_into_id=?", (parent_id,))
+    db.commit()
+    return {"ok": True, "restored": cur.rowcount}
+
+
+def preview_merge(parent_id: int, child_id: int) -> Optional[dict]:
+    """Group stats the merge WOULD produce (for the confirm dialog), without committing."""
+    db = _get()
+    a = db.execute("SELECT * FROM trips WHERE id=?", (parent_id,)).fetchone()
+    b = db.execute("SELECT * FROM trips WHERE id=?", (child_id,)).fetchone()
+    if not a or not b:
+        return None
+    a, b = dict(a), dict(b)
+    if (a.get("started_at") or "") > (b.get("started_at") or ""):
+        a, b = b, a
+    kids = _children_by_parent(db)
+    children = kids.get(a["id"], []) + [b] + kids.get(b["id"], [])
+    g = _trip_group_stats(a, children)
+    drive = g.get("duration_min") or 0
+    elapsed = _gap_minutes(g.get("started_at"), g.get("ended_at"))
+    g["stop_min"] = round(max(elapsed - drive, 0)) if elapsed is not None else None
+    g["started_at"] = _local_iso(g.get("started_at"))
+    g["ended_at"] = _local_iso(g.get("ended_at"))
+    return g
+
+
+def get_merge_preview_route(a_id: int, b_id: int, max_points: int = 120) -> list[dict]:
+    """Downsampled union GPS track of the two trips' groups — for the merge-preview thumbnail."""
+    db = _get()
+    ids = list(dict.fromkeys(_segment_ids(db, a_id) + _segment_ids(db, b_id)))
+    ph = ",".join("?" * len(ids))
+    rows = db.execute(
+        f"SELECT latitude, longitude FROM trip_positions WHERE trip_id IN ({ph}) "
+        "AND latitude IS NOT NULL AND longitude IS NOT NULL ORDER BY recorded_at, id", ids).fetchall()
+    pts = [dict(r) for r in rows]
+    if len(pts) <= max_points:
+        return pts
+    step = len(pts) / max_points
+    out = [pts[int(i * step)] for i in range(max_points)]
+    out[-1] = pts[-1]
+    return out
+
+
 def get_trips(limit: int = 500) -> list[dict]:
     db = _get()
+    kids = _children_by_parent(db)
     rows = db.execute(
         """SELECT * FROM trips
-           WHERE ended_at IS NOT NULL
+           WHERE ended_at IS NOT NULL AND merged_into_id IS NULL
            ORDER BY started_at DESC
            LIMIT ?""",
         (limit,),
     ).fetchall()
-    return [dict(r) for r in rows]
+    return [_trip_group_stats(dict(r), kids.get(r["id"], [])) for r in rows]
 
 
 def get_trips_grouped() -> list[dict]:
@@ -789,7 +962,7 @@ def get_trips_summary() -> dict:
     display them. avg_eff is a weighted mean (an inherently fractional ratio)."""
     db = _get()
     r = db.execute(
-        """SELECT COUNT(*)                                   AS n,
+        """SELECT SUM(CASE WHEN merged_into_id IS NULL THEN 1 ELSE 0 END) AS n,
                   COALESCE(SUM(distance_km), 0)              AS km,
                   COALESCE(SUM(regen_kwh), 0)                AS regen,
                   SUM(distance_km * efficiency_kwh_100km)    AS eff_wsum,
@@ -807,14 +980,25 @@ def get_trips_summary() -> dict:
 
 def get_trip_detail(trip_id: int) -> Optional[dict]:
     db = _get()
-    trip = db.execute("SELECT * FROM trips WHERE id = ?", (trip_id,)).fetchone()
-    if not trip:
+    row = db.execute("SELECT * FROM trips WHERE id = ?", (trip_id,)).fetchone()
+    if not row:
         return None
+    # A merged child resolves to (and shows) its parent group.
+    parent_id = row["merged_into_id"] or row["id"]
+    trip = db.execute("SELECT * FROM trips WHERE id = ?", (parent_id,)).fetchone()
+    children = _children_by_parent(db).get(parent_id, [])
+    seg_ids = _segment_ids(db, parent_id)
+    ph = ",".join("?" * len(seg_ids))
     positions = db.execute(
-        "SELECT recorded_at, latitude, longitude, speed_kmh, soc FROM trip_positions WHERE trip_id = ? ORDER BY id",
-        (trip_id,),
+        "SELECT recorded_at, latitude, longitude, speed_kmh, soc FROM trip_positions "
+        f"WHERE trip_id IN ({ph}) ORDER BY recorded_at, id",
+        seg_ids,
     ).fetchall()
-    trip_d = dict(trip)
+    trip_d = _trip_group_stats(dict(trip), children)
+    if trip_d.get("is_merged"):
+        elapsed = _gap_minutes(trip_d.get("started_at"), trip_d.get("ended_at"))
+        trip_d["stop_min"] = (round(max(elapsed - (trip_d.get("duration_min") or 0), 0))
+                              if elapsed is not None else None)
     trip_d["started_at"] = _local_iso(trip_d.get("started_at"))
     trip_d["ended_at"] = _local_iso(trip_d.get("ended_at"))
 
@@ -858,11 +1042,13 @@ def get_trip_route(trip_id: int, max_points: int = 80) -> list[dict]:
     """Lat/lon track for a single trip, downsampled to at most ``max_points``
     points — used to draw the lightweight route thumbnail in the trips list."""
     db = _get()
+    ids = _segment_ids(db, trip_id)
+    ph = ",".join("?" * len(ids))
     rows = db.execute(
         "SELECT latitude, longitude FROM trip_positions "
-        "WHERE trip_id = ? AND latitude IS NOT NULL AND longitude IS NOT NULL "
-        "ORDER BY id",
-        (trip_id,),
+        f"WHERE trip_id IN ({ph}) AND latitude IS NOT NULL AND longitude IS NOT NULL "
+        "ORDER BY recorded_at, id",
+        ids,
     ).fetchall()
     pts = [dict(r) for r in rows]
     if len(pts) <= max_points:
@@ -1394,7 +1580,7 @@ def get_battery_health(min_soc_delta: float = 12.0) -> dict:
     }
 
 
-def get_vampire_drain(min_hours: float = 1.0, min_drop_pct: float = 0.5,
+def get_vampire_drain(min_hours: float = 1.0, min_drop_pct: float = 0.2,
                       lookback_days: int = 90, limit: int = 60) -> dict:
     """Vampire drain = SoC lost while the car is PARKED and NOT charging. Scans the per-poll
     `positions` log, groups consecutive parked-idle samples (charging=0, not moving) into windows

@@ -76,7 +76,8 @@ CREATE TABLE IF NOT EXISTS trips (
     end_odometer_km      REAL,
     regen_kwh            REAL DEFAULT 0,
     duration_min         REAL,
-    efficiency_kwh_100km REAL
+    efficiency_kwh_100km REAL,
+    merged_into_id       INTEGER DEFAULT NULL
 );
 
 CREATE TABLE IF NOT EXISTS trip_positions (
@@ -204,6 +205,10 @@ class Database:
             self._conn.execute("ALTER TABLE charges ADD COLUMN ac_energy_kwh REAL")
         if "wallbox_energy_start_kwh" not in ccols:
             self._conn.execute("ALTER TABLE charges ADD COLUMN wallbox_energy_start_kwh REAL")
+        # migration: manual trip-merge link — a child trip points to the parent it was merged into
+        tcols = {r[1] for r in self._conn.execute("PRAGMA table_info(trips)").fetchall()}
+        if "merged_into_id" not in tcols:
+            self._conn.execute("ALTER TABLE trips ADD COLUMN merged_into_id INTEGER DEFAULT NULL")
         self._conn.commit()
         self._repair_odometer_trips()
         self.migrate_secrets()

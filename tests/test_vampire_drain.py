@@ -63,7 +63,7 @@ def test_short_tiny_and_charging_are_excluded(monkeypatch):
     _setup(monkeypatch, [
         P("00:00", 80), P("00:30", 79),                     # 30 min < 1h → excluded
         P("10:00", 60, charging=1), P("12:00", 70, charging=1),  # charging → not a park
-        P("20:00", 50), P("23:00", 49.7),                   # 0.3% drop < 0.5 → jitter, excluded
+        P("20:00", 50), P("23:00", 49.9),                   # 0.1% drop < 0.2 → jitter, excluded
     ])
     out = db_reader.get_vampire_drain(lookback_days=BIG)
     assert out["count"] == 0 and out["typical_pct_per_day"] is None

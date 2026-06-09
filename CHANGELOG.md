@@ -3,6 +3,30 @@
 All notable changes to LeapMotor Mate are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.13.0] — 2026-06-09
+
+### Added
+- **🔗 Manual trip merge.** A journey that a short, non-charging stop split into two (or more) separate
+  trips can now be joined back into one. On the Trips page, the **🔗 Merge** toggle draws a connector
+  between every pair of adjacent trips that can be joined; a **gap slider** (5–90 min, default 30) widens
+  or narrows which pairs qualify, live. A pair is offered only when the second trip starts within the gap
+  **and** at no higher SoC than the first one ended — a SoC rise means you charged in between, so those
+  (e.g. the legs of a long road trip) are never merged. Clicking a connector shows a preview (combined
+  route + distance, energy and *driving-only* duration) before you confirm. It's **fully reversible and
+  non-destructive**: a merged trip carries a 🔗 badge and an **Unmerge** button, and splitting it restores
+  the originals exactly. Distance/efficiency are recomputed over the whole trip; the stop time is excluded
+  from the duration (and shown separately).
+- **🔄 Refresh button.** A manual "Refresh" at the top of the sidebar pulls the car's current state from
+  the Leapmotor cloud right away instead of waiting for the next poll. Mate still reads **passively** (it
+  never wakes the car or drains the battery), so this just skips the wait when the car is already awake; a
+  sleeping car keeps its last reported state until it next wakes. The README now spells out that Mate
+  isn't real-time — it polls about every 30 s while parked and 10 s while driving.
+
+### Changed
+- **Stationary discharge (vampire drain) now catches slow-draining cars.** The detection threshold dropped
+  from 0.5 % to **0.2 %** of SoC per parked period, so cars that lose little while parked — and shorter
+  stops — now show up too, instead of being filtered out as sensor noise.
+
 ## [1.12.0] — 2026-06-09
 
 ### Changed

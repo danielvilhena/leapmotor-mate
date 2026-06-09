@@ -13,12 +13,30 @@
     <p class="text-slate-400 text-sm mt-1">{{ total }} {{ t('recorded_trips') }}</p>
   </div>
   {% if total %}
-  <a href="api/export/trips.csv" download
-     class="shrink-0 inline-flex items-center gap-2 rounded-lg border border-slate-600 bg-slate-800/60 px-3 py-2 text-sm font-medium text-slate-200 hover:bg-slate-700 hover:border-brand/50 transition-all">
-    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M5,20H19V18H5M19,9H15V3H9V9H5L12,16L19,9Z"/></svg>
-    {{ t('export_csv') }}
-  </a>
+  <div class="shrink-0 flex items-center gap-2">
+    <button type="button" id="merge-toggle"
+            class="inline-flex items-center gap-2 rounded-lg border border-slate-600 bg-slate-800/60 px-3 py-2 text-sm font-medium text-slate-200 hover:bg-slate-700 hover:border-yellow-500/50 transition-all">
+      🔗 {{ t('merge_mode') }}
+    </button>
+    <a href="api/export/trips.csv" download
+       class="inline-flex items-center gap-2 rounded-lg border border-slate-600 bg-slate-800/60 px-3 py-2 text-sm font-medium text-slate-200 hover:bg-slate-700 hover:border-brand/50 transition-all">
+      <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M5,20H19V18H5M19,9H15V3H9V9H5L12,16L19,9Z"/></svg>
+      {{ t('export_csv') }}
+    </a>
+  </div>
   {% endif %}
+</div>
+
+<!-- Merge-mode bar (revealed by the 🔗 toggle). The connectors below are filtered live by this slider. -->
+<div id="merge-bar" style="display:none"
+     class="items-center gap-x-4 gap-y-2 flex-wrap mb-5 rounded-lg border border-yellow-500/30 bg-yellow-400/5 px-4 py-3">
+  <span class="text-sm font-medium text-yellow-400 inline-flex items-center gap-1">🔗 {{ t('merge_mode') }}</span>
+  <span class="text-xs text-slate-400 flex-1 min-w-[160px]">{{ t('merge_help') }}</span>
+  <label class="text-xs text-slate-300 inline-flex items-center gap-2 whitespace-nowrap">
+    {{ t('merge_max_gap') }}: <output id="merge-gap-out" class="text-yellow-400 font-semibold">{{ merge_gap_default }}</output> min
+    <input id="merge-gap" type="range" min="{{ merge_gap_min }}" max="{{ merge_gap_max }}" step="5"
+           value="{{ merge_gap_default }}" class="accent-yellow-400 w-36 align-middle">
+  </label>
 </div>
 
 {% if summary and summary.count %}
@@ -144,8 +162,9 @@
                     <span class="text-slate-500 font-normal text-xs ml-1">
                       → {{ trip.ended_at[11:16] if trip.ended_at else '' }}
                     </span>
+                    {% if trip.is_merged %}<span style="font-size:10px" class="text-yellow-400" title="{{ trip.merged_count }} {{ t('merge_segments') }}">🔗</span>{% endif %}
                   </div>
-                  <div class="text-slate-500 text-xs">{{ "%.0f"|format(trip.duration_min or 0) }} min</div>
+                  <div class="text-slate-500 text-xs">{{ "%.0f"|format(trip.duration_min or 0) }} min{% if trip.is_merged %} · {{ t('driving_only') }}{% endif %}</div>
                 </div>
 
                 <!-- SOC mini gauge -->
@@ -170,6 +189,26 @@
                 </div>
 
               </a>
+              {% if trip.is_merged %}
+              <div class="merge-sep" style="display:none;padding:0 0 4px 56px">
+                <button type="button"
+                        class="inline-flex items-center gap-1 rounded-md border border-slate-600 text-slate-300 px-2 py-0.5 text-[11px] font-medium hover:border-red-500 hover:text-red-400"
+                        hx-post="api/trips/unmerge?parent={{ trip.id }}" hx-swap="none">↩️ {{ t('unmerge_btn') }}</button>
+              </div>
+              {% endif %}
+              {% set nxt = day.trips[loop.index0 + 1] if not loop.last else none %}
+              {% if nxt and merge_pairs.get(trip.id) and merge_pairs[trip.id].a_id == nxt.id %}
+              {% set mp = merge_pairs[trip.id] %}
+              <div class="merge-connector" data-gap="{{ mp.gap }}" style="display:none;padding:0 0 2px 56px">
+                <button type="button"
+                        class="inline-flex items-center gap-1.5 rounded-md border border-yellow-500/50 bg-yellow-400/5 text-yellow-400 px-2.5 py-1 text-[11px] font-semibold hover:bg-yellow-400/15"
+                        hx-get="api/trips/merge-preview?a={{ mp.a_id }}&b={{ trip.id }}&gap={{ merge_gap_max }}"
+                        hx-target="#merge-modal-body" hx-swap="innerHTML"
+                        onclick="document.getElementById('merge-modal').style.display='flex'">
+                  🔗 {{ t('merge_join') }} <span class="font-normal opacity-70">· {{ t('merge_stop') }} {{ mp.gap }}′</span>
+                </button>
+              </div>
+              {% endif %}
               {% endfor %}
               </div>
 
@@ -237,5 +276,43 @@ if (HIGHLIGHT) {
     requestAnimationFrame(() => row.scrollIntoView({ behavior: 'smooth', block: 'center' }));
   }
 }
+</script>
+
+<!-- Merge preview modal (filled by a connector click) -->
+<div id="merge-modal" style="display:none;position:fixed;inset:0;z-index:2000;background:rgba(2,6,23,.72);align-items:center;justify-content:center;padding:16px"
+     onclick="if(event.target===this)this.style.display='none'">
+  <div id="merge-modal-body" style="max-width:440px;width:100%"></div>
+</div>
+
+<script>
+// Merge mode: the 🔗 toggle reveals the in-tree connectors between joinable adjacent trips; the
+// gap slider filters them live (a connector shows only while its stop ≤ the slider). No round-trips.
+(function () {
+  const btn = document.getElementById('merge-toggle');
+  const bar = document.getElementById('merge-bar');
+  const slider = document.getElementById('merge-gap');
+  const out = document.getElementById('merge-gap-out');
+  let on = false;
+  function apply() {
+    const g = slider ? +slider.value : 30;
+    if (out) out.textContent = g;
+    document.querySelectorAll('.merge-connector').forEach(c => {
+      c.style.display = (on && (+c.dataset.gap) <= g) ? 'flex' : 'none';
+    });
+    document.querySelectorAll('.merge-sep').forEach(s => { s.style.display = on ? 'block' : 'none'; });
+  }
+  btn && btn.addEventListener('click', () => {
+    on = !on;
+    btn.classList.toggle('border-yellow-500', on);
+    btn.classList.toggle('text-yellow-400', on);
+    btn.classList.toggle('bg-yellow-400/10', on);
+    if (bar) bar.style.display = on ? 'flex' : 'none';
+    if (on) {  // open every day so the connectors are visible
+      document.querySelectorAll('#trips-tree details').forEach(d => d.open = true);
+    }
+    apply();
+  });
+  slider && slider.addEventListener('input', apply);
+})();
 </script>
 {% endblock %}

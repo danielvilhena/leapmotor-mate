@@ -21,7 +21,7 @@ Supported models: **B10 · C10 · T03** (European spec).
 ## Features
 
 - **Overview** — live status, battery, range, **READY state**, location map, vehicle picture.
-- **Trips** — automatic trip detection with route map, distance, energy, efficiency and regen. Each trip also shows its **total kWh consumed** and its **cost** (energy × the price per kWh of the last charge before the trip, in your currency). You can **🆕 delete a trip** (with confirmation) to drop bad data.
+- **Trips** — automatic trip detection with route map, distance, energy, efficiency and regen. Each trip also shows its **total kWh consumed** and its **cost** (energy × the price per kWh of the last charge before the trip, in your currency). You can **delete a trip** (with confirmation) to drop bad data, or **🆕 merge trips** that a short, non-charging stop split apart — pick the joinable pairs with a gap slider, preview the combined route, and it's fully reversible (Unmerge any time).
 - **Charges** — charge sessions with AC/DC detection, energy added, power and a distribution chart.
 - **Charge prices** — flat 24h pricing or **time-of-use bands**: set prices per time window, per **day of the week** and per charge type, and each session is costed correctly (energy split across the bands it spans by the real power curve).
 - **🆕 One-touch vehicle preparation** — a dedicated **Prepare car** page mirroring the official app's *"prepare the vehicle with one tap"*: bundle **A/C** (cool / heat / ventilation / defrost / auto + temperature), **front-seat heating / ventilation**, **steering-wheel & mirror heating**, and run it **now** (immediate) or on a **schedule** (time + weekdays). Scheduled preparations are read from the car, **editable** and removable, and a **Cancel preparation (all off)** button turns everything back off.
@@ -34,7 +34,7 @@ Supported models: **B10 · C10 · T03** (European spec).
 - **Statistics** — driving/AC/other energy split and a 6‑week consumption trend (from the Leapmotor cloud).
 - **Remote control** — lock, windows, trunk, panoramic roof, **climate** (cool / heat / ventilation / defrost, A/C on-off, target temperature), **heated & ventilated seats** (per-seat level), **heated steering wheel & mirrors**, find car, battery preheat, **unlock charge cable**.
 - **Navigation** — search an address and **send the destination straight to the car's built‑in navigation**. Shows the car's current address too. Address lookup is keyless by default (OpenStreetMap) with an optional API key (Geoapify/LocationIQ/TomTom) for better house‑number coverage.
-- **Independent** — polls the Leapmotor cloud directly (configurable 10–30 s). No dependency on the phone app or Home Assistant; polling the cloud does **not** wake or drain the car.
+- **Independent** — polls the Leapmotor cloud directly (configurable 10–30 s). No dependency on the phone app or Home Assistant; polling the cloud does **not** wake or drain the car. It isn't real-time, so a **🆕 Refresh** button (sidebar) pulls the car's latest state on demand.
 - **Multilingual UI** — English · Italiano · Français · Deutsch.
 - **Currency** — pick your display currency from 30 world currencies (€, $, £, CHF, kr, zł…); every cost reformats to it, with the right symbol placement and decimals.
 
@@ -47,11 +47,13 @@ Leapmotor Cloud  ──►  Poller (state machine)  ──►  SQLite  ──►
 
 The data lives in a local SQLite database. Nothing is sent anywhere except to the official Leapmotor cloud.
 
+> ℹ️ **Mate isn't real-time — it polls.** It reads the car's state from the Leapmotor cloud on an interval: about every **30 s while parked** and **10 s while driving** (tunable in Settings). So a change you make in the official app (opening the trunk, changing the charge limit…) shows on Mate within that window, not instantly. Mate reads **passively** and never wakes the car, so it doesn't drain your battery — the official app feels instant because opening it *wakes* the car. Need it sooner? The **🔄 Refresh** button (top of the sidebar) pulls the latest state on demand. If the car is asleep, the cloud serves its last reported state until the car next wakes.
+
 ---
 
 ## Requirements
 
-1. **A Leapmotor account.** ⚠️ **Use a *dedicated* account, not the one on your phone.** The Leapmotor cloud binds a session per device, so a second client can evict your phone (or vice‑versa). Create a separate account, then **share the car with it from the official app**: logged in on the account that *owns* the car, share/authorise the vehicle to the new account with **all permissions** and a **permanent** duration (a temporary share expires and breaks Mate later). **Check it worked:** log into the official Leapmotor app with the *second* account and confirm the car appears there — if it doesn't, the share is missing and Mate will report *“No vehicle found on this account.”*
+1. **A Leapmotor account.** ⚠️ **Use a *dedicated* account, not the one on your phone.** The Leapmotor cloud binds a session per device, so a second client can evict your phone (or vice‑versa). Create a separate account, then **share the car with it from the official app**: logged in on the account that *owns* the car, share/authorise the vehicle to the new account with **all permissions** and a **permanent** duration (a temporary share expires and breaks Mate later). **Check it worked:** **set the *second* account up in the official Leapmotor app on a device** (not just logging into the account on the web) and confirm the car appears there — if it doesn't, the share isn't active yet and Mate will report *“No vehicle found on this account.”*
 2. **The Leapmotor app TLS certificate** (`app.crt` + `app.key`). This is the *same for everyone* (it identifies the Leapmotor app, not you) and is **not** included in this repository. Download the two files from:
 
    👉 **https://github.com/markoceri/leapmotor-certs**
@@ -210,7 +212,7 @@ Modelli supportati: **B10 · C10 · T03** (spec. europea).
 ## Funzionalità
 
 - **Panoramica** — stato live, batteria, autonomia, **stato READY**, mappa posizione, immagine del veicolo.
-- **Viaggi** — rilevamento automatico con mappa del percorso, distanza, energia, efficienza e regen. Ogni viaggio mostra anche i **kWh totali consumati** e il **costo** (energia × prezzo per kWh dell'ultima ricarica prima del viaggio, nella tua valuta). Puoi **🆕 eliminare un viaggio** (con conferma) per togliere dati sbagliati.
+- **Viaggi** — rilevamento automatico con mappa del percorso, distanza, energia, efficienza e regen. Ogni viaggio mostra anche i **kWh totali consumati** e il **costo** (energia × prezzo per kWh dell'ultima ricarica prima del viaggio, nella tua valuta). Puoi **eliminare un viaggio** (con conferma) per togliere dati sbagliati, o **🆕 unire viaggi** separati da una sosta breve senza ricarica — scegli le coppie unibili con uno slider, vedi l'anteprima del percorso combinato, ed è totalmente reversibile (Separa quando vuoi).
 - **Ricariche** — sessioni con rilevamento AC/DC, energia aggiunta, potenza e grafico di distribuzione.
 - **Prezzi di ricarica** — prezzo fisso 24h o **fasce orarie**: prezzi per fascia, per **giorno della settimana** e per tipo di ricarica, e ogni sessione viene calcolata correttamente (energia ripartita tra le fasce attraversate dalla curva di potenza reale).
 - **🆕 Preparazione veicolo con un tocco** — una pagina **Preparazione veicolo** dedicata che rispecchia la *"preparazione del veicolo con un solo tocco"* dell'app ufficiale: combina **A/C** (raffreddamento / riscaldamento / ventilazione / sbrinamento / auto + temperatura), **riscaldamento / ventilazione dei sedili anteriori**, **riscaldamento volante e specchietti**, ed eseguila **subito** (immediata) o su **programmazione** (orario + giorni). Le programmazioni si leggono dall'auto, sono **modificabili** e rimovibili, e un pulsante **Annulla preparazione (spegni tutto)** riporta tutto in off.
@@ -223,7 +225,7 @@ Modelli supportati: **B10 · C10 · T03** (spec. europea).
 - **Statistiche** — ripartizione energia guida/clima/altro e trend consumo a 6 settimane (dal cloud Leapmotor).
 - **Controllo remoto** — blocco, finestrini, bagagliaio, tetto panoramico, **clima** (raffredda / riscalda / ventilazione / sbrinamento, A/C on-off, temperatura), **sedili riscaldati e ventilati** (livello per sedile), **volante e specchietti riscaldati**, trova auto, preriscaldo batteria, **sblocco cavo di ricarica**.
 - **Navigazione** — cerca un indirizzo e **invia la destinazione direttamente al navigatore di bordo dell'auto**. Mostra anche l'indirizzo attuale dell'auto. La ricerca indirizzi funziona senza chiave (OpenStreetMap) con una chiave API opzionale (Geoapify/LocationIQ/TomTom) per una copertura migliore dei civici.
-- **Indipendente** — interroga direttamente il cloud Leapmotor (configurabile 10–30 s). Nessuna dipendenza dall'app o da Home Assistant; interrogare il cloud **non** sveglia né scarica l'auto.
+- **Indipendente** — interroga direttamente il cloud Leapmotor (configurabile 10–30 s). Nessuna dipendenza dall'app o da Home Assistant; interrogare il cloud **non** sveglia né scarica l'auto. Non è in tempo reale, quindi un pulsante **🆕 Aggiorna** (barra laterale) recupera lo stato attuale dell'auto su richiesta.
 - **UI multilingua** — Italiano · English · Français · Deutsch.
 - **Valuta** — scegli la valuta di visualizzazione tra 30 valute mondiali (€, $, £, CHF, kr, zł…); ogni costo si riformatta con simbolo e decimali corretti.
 
@@ -236,9 +238,11 @@ Cloud Leapmotor  ──►  Poller (state machine)  ──►  SQLite  ──►
 
 I dati restano in un database SQLite locale. Nulla viene inviato altrove se non al cloud ufficiale Leapmotor.
 
+> ℹ️ **Mate non è in tempo reale — fa polling.** Legge lo stato dell'auto dal cloud Leapmotor a intervalli: circa ogni **30 s da fermo** e **10 s in marcia** (regolabile nelle Impostazioni). Quindi un cambiamento fatto dall'app ufficiale (apertura baule, modifica del limite di carica…) compare su Mate entro quel lasso, non all'istante. Mate legge **passivamente** e non sveglia mai l'auto, così non scarica la batteria — l'app ufficiale sembra istantanea perché aprirla *sveglia* l'auto. Ti serve prima? Il pulsante **🔄 Aggiorna** (in cima alla barra laterale) recupera lo stato su richiesta. Se l'auto dorme, il cloud restituisce l'ultimo stato noto finché l'auto non si risveglia.
+
 ## Requisiti
 
-1. **Un account Leapmotor.** ⚠️ **Usa un account *dedicato*, non quello del telefono.** Il cloud Leapmotor lega una sessione per dispositivo: un secondo client può sfrattare il telefono (e viceversa). Crea un account separato, poi **condividi l'auto con esso dall'app ufficiale**: dall'account che *possiede* l'auto, condividi/autorizza il veicolo al nuovo account con **tutti i permessi** e durata **permanente** (una condivisione temporanea scade e poi rompe Mate). **Verifica che funzioni:** accedi all'app ufficiale Leapmotor con il *secondo* account e controlla che l'auto compaia — se non c'è, manca la condivisione e Mate dirà *«No vehicle found on this account».*
+1. **Un account Leapmotor.** ⚠️ **Usa un account *dedicato*, non quello del telefono.** Il cloud Leapmotor lega una sessione per dispositivo: un secondo client può sfrattare il telefono (e viceversa). Crea un account separato, poi **condividi l'auto con esso dall'app ufficiale**: dall'account che *possiede* l'auto, condividi/autorizza il veicolo al nuovo account con **tutti i permessi** e durata **permanente** (una condivisione temporanea scade e poi rompe Mate). **Verifica che funzioni:** **configura il *secondo* account nell'app ufficiale Leapmotor su un dispositivo** (non solo accedere all'account via web) e controlla che l'auto compaia — se non c'è, la condivisione non è ancora attiva e Mate dirà *«No vehicle found on this account».*
 2. **Il certificato TLS dell'app Leapmotor** (`app.crt` + `app.key`). È *uguale per tutti* (identifica l'app, non te) e **non** è incluso in questo repository. Scarica i due file da:
 
    👉 **https://github.com/markoceri/leapmotor-certs**

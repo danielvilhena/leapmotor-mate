@@ -21,7 +21,7 @@ import geocode
 import mqtt_check
 import auth
 
-MATE_VERSION = "1.12.0"  # bump together with the git tag + add-on config.yaml at release
+MATE_VERSION = "1.13.0"  # bump together with the git tag + add-on config.yaml at release
 
 log = logging.getLogger("mate.web")
 
@@ -190,10 +190,16 @@ async def trips_page(request: Request, highlight: int = 0):
     grouped = db_reader.get_trips_grouped()
     total   = sum(y["count"] for y in grouped)
     summary = db_reader.get_trips_summary()
+    # All eligible adjacent pairs at the WIDEST gap → drawn as connectors in the tree and filtered
+    # live (client-side) by the gap slider. Keyed by the later trip's id (b_id = the row above a in
+    # the newest-first list); value carries the earlier trip a_id + the actual stop gap in minutes.
+    merge_pairs = {p["b_id"]: {"a_id": p["a_id"], "gap": p["gap_min"]}
+                   for p in db_reader.get_mergeable_pairs(db_reader.TRIP_MERGE_GAP_MAX)}
     return templates.TemplateResponse(request, "trips.html", _ctx(
         page="trips", vehicle=vehicle, grouped=grouped,
-        total=total, highlight=highlight,
-        summary=summary,
+        total=total, highlight=highlight, summary=summary,
+        merge_pairs=merge_pairs, merge_gap_default=db_reader.TRIP_MERGE_GAP_DEFAULT,
+        merge_gap_min=db_reader.TRIP_MERGE_GAP_MIN, merge_gap_max=db_reader.TRIP_MERGE_GAP_MAX,
     ))
 
 
@@ -264,6 +270,39 @@ async def delete_trip(request: Request, trip_id: int):
     db_reader.delete_trip(trip_id)
     base = request.headers.get("x-ingress-path", "")
     return Response(status_code=200, headers={"HX-Redirect": f"{base}/trips"})
+
+
+@app.get("/api/trips/merge-preview", response_class=HTMLResponse)
+async def trips_merge_preview(request: Request, a: int, b: int, gap: int = db_reader.TRIP_MERGE_GAP_DEFAULT):
+    """The combined trip the merge WOULD produce — stats + a route thumbnail — for the confirm step."""
+    g = db_reader.preview_merge(a, b)
+    if not g:
+        return HTMLResponse("")
+    return templates.TemplateResponse(request, "partials/merge_preview.html", _ctx(g=g, a=a, b=b, gap=gap))
+
+
+@app.get("/api/trips/merge-route.svg")
+async def trips_merge_route_svg(a: int, b: int):
+    svg = _route_svg(db_reader.get_merge_preview_route(a, b), w=260, h=120)
+    return Response(content=svg, media_type="image/svg+xml")
+
+
+@app.post("/api/trips/merge", response_class=HTMLResponse)
+async def trips_merge(request: Request, a: int, b: int, gap: int = db_reader.TRIP_MERGE_GAP_DEFAULT):
+    """Merge trip b into a (the earlier becomes parent). Reversible. On success reloads the page so
+    the tree shows the combined trip; on a guard failure returns an inline message."""
+    res = db_reader.merge_trips(a, b, gap)
+    if res.get("ok"):
+        return Response(status_code=200, headers={"HX-Refresh": "true"})
+    t = i18n.get_t(db_reader.get_language())
+    return HTMLResponse(f'<div style="color:#f87171;font-size:13px;padding:6px 0">⚠️ {t("merge_failed")}</div>')
+
+
+@app.post("/api/trips/unmerge", response_class=HTMLResponse)
+async def trips_unmerge(request: Request, parent: int):
+    """Split a merged group back into its original trips (reversible — nothing was lost)."""
+    db_reader.unmerge_trip(parent)
+    return Response(status_code=200, headers={"HX-Refresh": "true"})
 
 
 @app.delete("/api/charges/{charge_id}")
@@ -1232,6 +1271,20 @@ async def status_card(request: Request):
     return templates.TemplateResponse(request, "partials/status_card.html", _ctx(
         status=status, vehicle=vehicle,
     ))
+
+
+@app.post("/api/refresh", response_class=HTMLResponse)
+async def refresh_now(request: Request):
+    """On-demand status pull from the Leapmotor cloud (like kerniger's 'Refresh data' button): fetch
+    the car's current state RIGHT NOW instead of waiting for the next ~30s poll, then re-render the
+    status card. Mate still reads PASSIVELY, so this won't wake a sleeping car — it only skips the
+    wait when the car is already awake (e.g. while charging or just used)."""
+    import asyncio
+    signals = await asyncio.get_event_loop().run_in_executor(None, command_client.get_fresh_signals)
+    if signals:
+        db_reader.save_fresh_signals(signals)
+    # Global button (sidebar) → reload the current page so the fresh state shows wherever the user is.
+    return Response(status_code=200, headers={"HX-Refresh": "true"})
 
 
 # ── Command routes ────────────────────────────────────────────────────────────
