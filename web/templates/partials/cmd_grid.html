@@ -10,6 +10,7 @@
 {% set clim_defrost = status.climate_defrost if status and status.climate_defrost is not none else none %}
 {% set clim_on      = status.climate_on      if status and status.climate_on      is not none else none %}
 {% set clim_vent    = status.climate_venting if status and status.climate_venting  is not none else none %}
+{% set drv = (status and is_driving(status)) | default(false, true) %}{# car moving → drive-locked controls #}
 
 {% macro climate_tile(cmd, label, icon, on) %}
 <div class="rounded-lg border p-3 flex flex-col items-center gap-2 text-center h-full
@@ -72,7 +73,7 @@
 {# Single toggle button for a control tile. Shows the "open" action (btn_open + its
    command) when show_open is true, otherwise the "close" action — keeping the current
    command names. One button only, like the climate tiles. #}
-{% macro toggle_btn(show_open, cmd_open, cmd_close, confirm_open="", confirm_close="") %}
+{% macro toggle_btn(show_open, cmd_open, cmd_close, confirm_open="", confirm_close="", suppress_confirm=false) %}
 {% if show_open %}{% set cmd = cmd_open %}{% set label = t('btn_open') %}{% set confirm = confirm_open %}
 {% else %}{% set cmd = cmd_close %}{% set label = t('btn_close') %}{% set confirm = confirm_close %}{% endif %}
 <button
@@ -80,7 +81,9 @@
   hx-target="#result-{{ cmd }}"
   hx-swap="innerHTML"
   hx-indicator="#spin-{{ cmd }}"
-  {% if confirm %}hx-confirm="{{ confirm }}"{% endif %}
+  {# Skip the "are you sure?" prompt when driving — the command is blocked anyway, so go
+     straight to the "vehicle in motion" notice instead of asking then refusing. #}
+  {% if confirm and not suppress_confirm %}hx-confirm="{{ confirm }}"{% endif %}
   onclick="document.getElementById('result-{{ cmd }}').innerHTML=''"
   class="w-full px-2 py-1.5 rounded-md text-xs font-medium text-white border border-slate-600
          hover:bg-slate-600 hover:border-brand/50 active:scale-95 transition-all cursor-pointer">
@@ -140,7 +143,7 @@
           {% else %}text-red-400 bg-red-400/10 border border-red-400/30{% endif %}">
           {% if locked is none %}{{ t('unknown') }}{% elif locked %}{{ t('locked') }}{% else %}{{ t('unlocked') }}{% endif %}
         </span>
-        <div class="mt-auto w-full">{{ toggle_btn(locked, "unlock", "lock", t('unlock_confirm'), t('lock_confirm')) }}</div>
+        <div class="mt-auto w-full">{{ toggle_btn(locked, "unlock", "lock", t('unlock_confirm'), t('lock_confirm'), drv) }}</div>
       </div>
 
       <!-- Trunk -->
@@ -154,7 +157,7 @@
           {% else %}text-slate-400 bg-slate-700 border border-slate-600{% endif %}">
           {% if trunk is none %}{{ t('unknown') }}{% elif trunk %}{{ t('trunk_open_state') }}{% else %}{{ t('trunk_closed_state') }}{% endif %}
         </span>
-        <div class="mt-auto w-full">{{ toggle_btn(not trunk, "open_trunk", "close_trunk", t('open_trunk_confirm'), "") }}</div>
+        <div class="mt-auto w-full">{{ toggle_btn(not trunk, "open_trunk", "close_trunk", t('open_trunk_confirm'), "", drv) }}</div>
       </div>
 
       <!-- Windows -->
@@ -168,7 +171,7 @@
           {% else %}text-slate-400 bg-slate-700 border border-slate-600{% endif %}">
           {% if wins is none %}{{ t('unknown') }}{% elif wins %}{{ t('wins_open_state') }}{% else %}{{ t('wins_closed_state') }}{% endif %}
         </span>
-        <div class="mt-auto w-full">{{ toggle_btn(not wins, "open_windows", "close_windows", t('open_wins_confirm'), "") }}</div>
+        <div class="mt-auto w-full">{{ toggle_btn(not wins, "open_windows", "close_windows", t('open_wins_confirm'), "", drv) }}</div>
       </div>
 
       <!-- Sunshade -->
@@ -182,7 +185,7 @@
           {% else %}text-slate-400 bg-slate-700 border border-slate-600{% endif %}">
           {% if shade is none %}{{ t('unknown') }}{% elif shade %}{{ t('shade_open_state') }}{% else %}{{ t('shade_closed_state') }}{% endif %}
         </span>
-        <div class="mt-auto w-full">{{ toggle_btn(not shade, "open_sunshade", "close_sunshade", t('open_shade_confirm'), "") }}</div>
+        <div class="mt-auto w-full">{{ toggle_btn(not shade, "open_sunshade", "close_sunshade", t('open_shade_confirm'), "", drv) }}</div>
       </div>
 
     </div>
