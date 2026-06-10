@@ -3,6 +3,43 @@
 All notable changes to LeapMotor Mate are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.15.0] — 2026-06-10
+
+### Added
+- **🔋 Battery card on the Charges page.** Charge percentage and range now live right where you watch a
+  charge happen — no more flipping back to Overview. The card sits between the live-charging panel and the
+  charge limit, refreshes every 30 s while you watch, and its battery bar carries a small **marker at your
+  charge-limit position**, so you can see at a glance how far the charge will go. (Overview keeps its own
+  card, nothing moved away.)
+- **🔄 OTA-update indicator (Overview).** Mate now checks the car's message inbox for a pending vehicle
+  software update and shows it on the Overview card — so you know an OTA is waiting without opening the
+  official app.
+- **⬆️ Mate self-update badge.** Mate checks GitHub (every 6 h, in the background) for a newer release and
+  shows a small badge next to the version number when one is available — handy for standalone-Docker users
+  who don't get Home Assistant's update prompts.
+
+### Changed
+- **🔌 The "Unlock cable" button moved to the Charges page** (inside the Charge-limit card, with a short
+  description). It's a charging action, so it now lives with the other charging controls instead of the
+  Commands page. Same command, same confirmation prompt — and the Home Assistant / MQTT button is unchanged.
+
+### Fixed
+- **🌍 West-of-Greenwich cars were plotted in the sea (#30).** The cloud reports the GPS longitude in two
+  signals — one **without its sign**, which is the one Mate read: fine for most of mainland Europe (east of
+  Greenwich), but a UK car at 1.9°W was mapped at 1.9°E, in the North Sea. Mate now reads the **signed**
+  coordinate pair (with the old ones as fallback). Thanks @BatterBits for capturing the raw signals that
+  cracked it — positions recorded before this fix keep the old sign; the map is correct from the first poll
+  after updating.
+- **⚡ Charge energy was over-stated ~15% on charges ending at 100% — the "107% efficiency".** The car's BMS
+  *snaps* the displayed battery % to 100 with zero energy actually delivered in the very moment charging
+  stops (a top-of-charge recalibration), inflating the ΔSoC-based energy estimate — which became visible as
+  an impossible ">100% efficiency" next to the measured wallbox figure. Verified against the integrated
+  charging-power telemetry (the true AC→DC efficiency is ~90%): Mate now anchors the energy of 100%-ending
+  charges to the last battery % seen *while still charging*, a **one-time automatic repair** recomputes the
+  affected historical charges on first start after updating (costs billed on the wallbox counter are
+  untouched; DC-estimated costs are rescaled at your original price), and an impossible efficiency is never
+  displayed again. Mid-range charges were verified byte-identical before/after — they were always correct.
+
 ## [1.14.0] — 2026-06-09
 
 ### Added
