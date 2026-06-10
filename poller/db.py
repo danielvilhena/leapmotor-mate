@@ -215,6 +215,7 @@ class Database:
             self._conn.execute("ALTER TABLE trips ADD COLUMN merged_into_id INTEGER DEFAULT NULL")
         self._conn.commit()
         self._repair_odometer_trips()
+        self._repair_snap_to_full_charges()
         self.migrate_secrets()
         self._check_decryption()
         log.info("Database ready: %s", path)
@@ -266,6 +267,48 @@ class Database:
         if fixed or deleted or cleared:
             log.info("Trip odometer repair: %d recomputed from GPS, %d dropped (<0.5 km), %d kept (no GPS, distance cleared)",
                      fixed, deleted, cleared)
+
+    def _repair_snap_to_full_charges(self) -> None:
+        """One-time repair for charges finalized before the snap-to-full fix. On charges
+        that end at 100% the BMS snaps the displayed SoC to 100.0 with zero energy
+        delivered in the very poll where charging stops (top-of-charge recalibration),
+        so energy_added_kwh (ΔSoC × capacity) over-stated by ~15% and the Charges page
+        showed an impossible >100% efficiency next to the wallbox AC figure. Recompute
+        those charges from the last SoC sampled while still charging. Charges whose cost
+        was billed on the DC estimate (no wallbox AC) get the cost rescaled at the SAME
+        original €/kWh; wallbox-billed (HOME + ac_energy_kwh) costs are untouched.
+        Reconstructed charges and charges without surviving position samples are kept
+        as they are (nothing better is available for them)."""
+        if self.get_setting("charges_soc_snap_repair_v1") == "1":
+            return
+        rows = self._conn.execute(
+            """SELECT * FROM charges
+               WHERE ended_at IS NOT NULL AND end_soc >= 100.0
+                 AND start_soc IS NOT NULL AND COALESCE(reconstructed, 0) = 0"""
+        ).fetchall()
+        fixed = 0
+        for c in rows:
+            last = self._last_charging_soc(c["vehicle_id"], c["started_at"], c["ended_at"])
+            if last is None or last >= c["end_soc"]:
+                continue
+            old_e = c["energy_added_kwh"]
+            new_e = round(max((last - c["start_soc"]) / 100.0 * self.get_battery_capacity(), 0), 3)
+            if old_e is None or abs(new_e - old_e) < 0.001:
+                continue
+            new_cost = c["cost"]
+            billed_on_ac = bool(c["ac_energy_kwh"]) and c["location_type"] == "HOME"
+            if not billed_on_ac and c["cost"] and old_e > 0:
+                new_cost = round(c["cost"] / old_e * new_e, 2)
+            self._conn.execute("UPDATE charges SET energy_added_kwh=?, cost=? WHERE id=?",
+                               (new_e, new_cost, c["id"]))
+            log.info("Charge #%d: snap-to-full repair — %.3f→%.3f kWh%s",
+                     c["id"], old_e, new_e,
+                     "" if new_cost == c["cost"] else f" | cost {c['cost']}→{new_cost}")
+            fixed += 1
+        self._conn.commit()
+        self.set_setting("charges_soc_snap_repair_v1", "1")
+        if fixed:
+            log.info("Snap-to-full charge repair: %d charge(s) recomputed", fixed)
 
     # ── Settings ─────────────────────────────────────────────────────────────
 
@@ -583,11 +626,36 @@ class Database:
             (reading, round(accum, 3), charge_id))
         self._conn.commit()
 
+    def _last_charging_soc(self, vehicle_id: int, started_at: str, ended_at: str | None = None):
+        """Last SoC sampled while charging=1 within the charge window, or None.
+        The B10 BMS snaps the displayed SoC to 100.0 in the very poll where charging
+        flips off — top-of-charge recalibration that adds ~0.9% SoC with zero energy
+        delivered — so the post-stop SoC over-states ΔSoC-based energy by ~15% on
+        100%-ending charges (the "107% efficiency" artifact). Mid-charge samples are
+        immune: their last charging SoC equals the end SoC.
+        The window MUST be bounded on both sides: without the upper bound a recompute
+        of an old charge would pick up charging samples from LATER charges."""
+        row = self._conn.execute(
+            "SELECT soc FROM positions WHERE vehicle_id=? AND charging=1 AND soc IS NOT NULL"
+            " AND recorded_at>=? AND recorded_at<=? ORDER BY recorded_at DESC LIMIT 1",
+            (vehicle_id, started_at, ended_at or _now_iso())).fetchone()
+        return row["soc"] if row else None
+
     def finalize_charge(self, charge_id: int, data, max_power_kw: float = 0.0,
                         price_per_kwh: float = 0.0) -> None:
         charge = self._conn.execute("SELECT * FROM charges WHERE id = ?", (charge_id,)).fetchone()
         start_soc    = charge["start_soc"]
-        energy_added = max((data.soc - start_soc) / 100.0 * self.get_battery_capacity(), 0)
+        # Energy from ΔSoC × capacity. ONLY on 100%-ending charges, anchor the ΔSoC to the
+        # last SoC seen while still charging (see _last_charging_soc): the snap-to-full is a
+        # top-of-charge phenomenon, while on mid-SoC charges the final tick (e.g. 94.9→95.0
+        # in the poll where charging stops) is real energy that must stay counted.
+        # end_soc itself stays data.soc — users should still see the charge reached 100%.
+        soc_for_energy = data.soc
+        if data.soc >= 100.0:
+            last = self._last_charging_soc(charge["vehicle_id"], charge["started_at"])
+            if last is not None:
+                soc_for_energy = last
+        energy_added = max((soc_for_energy - start_soc) / 100.0 * self.get_battery_capacity(), 0)
         charge_type  = "DC" if max_power_kw > 11 else "AC"
         cost         = round(energy_added * price_per_kwh, 2) if price_per_kwh else None
 

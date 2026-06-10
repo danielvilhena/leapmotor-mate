@@ -43,7 +43,7 @@
 
 {# Momentary-action tile: a vertical tile (icon-on-top / label / button / result) matching the
    climate & vehicle tiles. No on/off state — a single action button (btn_label). For Find Car /
-   Preheat / Unlock cable. `icon` is pre-rendered SVG (passed from the call site so it can use the
+   Preheat. `icon` is pre-rendered SVG (passed from the call site so it can use the
    imported `ico` namespace). #}
 {% macro action_tile(cmd, icon, label, btn_label, confirm="") %}
 <div class="rounded-lg border border-slate-700 bg-slate-800/40 p-3 flex flex-col items-center gap-2 text-center h-full">
@@ -286,10 +286,9 @@
       <span class="text-amber-400">{{ ico.mdi('lightning-bolt') }}</span>
       <span class="font-semibold text-white">{{ t('quick_actions') }}</span>
     </div>
-    <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
+    <div class="grid grid-cols-2 gap-2">
       {{ action_tile("find_car",        ico.mdi('bullhorn'),      t('find_car'),           t('btn_find')) }}
       {{ action_tile("battery_preheat", ico.mdi('radiator'),      t('btn_preheat'),        t('btn_on')) }}
-      {{ action_tile("unlock_charger",  ico.mdi('ev-plug-type2'), t('btn_unlock_charger'), t('btn_unlock_cable'), t('unlock_charger_confirm')) }}
     </div>
     <div class="mt-3 flex flex-wrap items-center gap-2">
       <span id="badge-plug" class="text-sm font-bold px-3 py-1 rounded-full whitespace-nowrap inline-flex items-center gap-1

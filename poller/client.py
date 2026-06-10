@@ -205,6 +205,7 @@ _SIGNAL_TO_NAMED = {
     "1480": "parkingBrakeState", "6048": "speedLimit", "6047": "speedLimitUnit",
     "12054": "speedLimitActive",
     "3725": "latitude", "3724": "longitude",
+    "3": "latitudeSigned", "2": "longitudeSigned",
     "1938": "acSwitch", "2183": "acSetting", "2184": "acSettingRight", "1349": "interiorTemp",
     "1943": "recirculationMode", "1945": "windshieldDefrost", "1946": "rearWindowHeating",
     "3713": "climateMode", "2669": "rapidCooling", "2681": "rapidHeating",
@@ -353,8 +354,11 @@ def _parse_signal(vin: str, sig: dict) -> VehicleData:
         vehicle_state=vehicle_state,
         charging_status=1 if _is_charging(sig) else 0,
         charge_power_kw=_charge_power_kw(sig),
-        latitude=float(sig.get("3725") or sig.get("2190") or 0),
-        longitude=float(sig.get("3724") or sig.get("2191") or 0),
+        # Signals 2/3 carry the SIGNED coordinates; 3724/3725 (and 2190/2191) are unsigned —
+        # west-of-Greenwich cars lost the longitude sign there (GitHub #30: Lichfield B10
+        # reports 2=-1.915912 but 3724=+1.915912; on east-of-Greenwich cars 2 == 3724).
+        latitude=float(sig.get("3") or sig.get("3725") or sig.get("2190") or 0),
+        longitude=float(sig.get("2") or sig.get("3724") or sig.get("2191") or 0),
         outside_temp=None,   # no ambient-temp signal exists (2101 = driverSeatVentilation)
         inside_temp=float(sig.get("1349") or 0),
         climate_target_temp=float(sig.get("2183") or 0),

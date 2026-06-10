@@ -693,9 +693,8 @@ def battery_preheat():   return _session.execute(lambda api, vin: api.battery_pr
 def battery_preheat_off():return _session.execute(lambda api, vin: api.battery_preheat_off(vin))
 def open_sunshade():     return _session.execute(lambda api, vin: api.open_sunshade(vin))
 def close_sunshade():    return _session.execute(lambda api, vin: api.close_sunshade(vin))
-# Charge-port cable unlock (right 192). Exposed on the battery card (promised on mate#19).
-# NB: a 2026-Q2 staging note flagged this as "accepted but not actuated" on the B10 (same as
-# the old A/C-off) — re-verify on-car before any release; pull the button if it's a no-op.
+# Charge-port cable unlock (right 192; promised on mate#19). Exposed on the Charges page
+# (charge-limit card) and over MQTT. Confirmed actuating on a real B10 (2026-06-08).
 def unlock_charger():    return _session.execute(lambda api, vin: api.unlock_charger(vin))
 # Staged but NOT exposed in any UI: live testing showed the B10 ACCEPTS these (cloud returns
 # OK) but does NOT actuate them — so they'd be misleading "Done" buttons. Kept ready so they

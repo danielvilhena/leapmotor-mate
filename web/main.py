@@ -1314,6 +1314,12 @@ async def charging_live(request: Request):
     return templates.TemplateResponse(request, "partials/charging_live.html", _ctx(status=status))
 
 
+@app.get("/api/battery-card", response_class=HTMLResponse)
+async def battery_card(request: Request):
+    status = db_reader.get_latest_status()
+    return templates.TemplateResponse(request, "partials/battery_card.html", _ctx(status=status))
+
+
 @app.get("/api/status-card", response_class=HTMLResponse)
 async def status_card(request: Request):
     status = db_reader.get_latest_status()
@@ -1425,13 +1431,10 @@ _COMMANDS = {
     "battery_preheat":   command_client.battery_preheat,
     "open_sunshade":     command_client.open_sunshade,
     "close_sunshade":    command_client.close_sunshade,
-    # Staged for 0.3.1 but NOT surfaced in any UI button — the B10 accepts these yet
-    # doesn't actuate them (like A/C off). Kept wired so they can be exposed instantly
-    # if a future leapmotor-api / vehicle update makes them work on the B10.
-    "battery_preheat_off": command_client.battery_preheat_off,
+    # Surfaced on the Charges page (charge-limit card) + MQTT; B10-confirmed actuating.
     "unlock_charger":    command_client.unlock_charger,
-    "sentry_on":         command_client.sentry_on,
-    "sentry_off":        command_client.sentry_off,
+    # Surfaced as comfort toggles (Commands page) + MQTT buttons; work on the B10 via
+    # the kerniger payloads (since 1.11.4).
     "steering_heat_on":  command_client.steering_heat_on,
     "steering_heat_off": command_client.steering_heat_off,
     "mirror_heat_on":    command_client.mirror_heat_on,
@@ -1440,6 +1443,12 @@ _COMMANDS = {
     "seat_heat_driver_off": command_client.seat_heat_driver_off,
     "seat_vent_driver_on":  command_client.seat_vent_driver_on,
     "seat_vent_driver_off": command_client.seat_vent_driver_off,
+    # Staged but NOT surfaced in any UI — the B10 accepts these yet doesn't actuate
+    # them (like the old A/C-off). Kept wired so they can be exposed instantly if a
+    # future leapmotor-api / vehicle update makes them work.
+    "battery_preheat_off": command_client.battery_preheat_off,
+    "sentry_on":         command_client.sentry_on,
+    "sentry_off":        command_client.sentry_off,
 }
 
 @app.get("/api/cmd-grid", response_class=HTMLResponse)

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import 'partials/_icons.html' as ico %}
 {% block autorefresh %}0{% endblock %}{# own reload-on-charge-end + live panel poll #}
 {% block title %}Charges — LeapMotor Mate{% endblock %}
 
@@ -25,8 +26,8 @@
 </div>
 {% endif %}
 
-<!-- Charging status + limit panel -->
-<div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+<!-- Charging status + battery + limit panel -->
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
 
   <!-- Live charging status -->
   <div id="charging-live-panel" class="card"
@@ -34,6 +35,14 @@
        hx-trigger="every 30s"
        hx-swap="innerHTML">
     {% include "partials/charging_live.html" %}
+  </div>
+
+  <!-- Battery snapshot (SoC + range) -->
+  <div id="battery-card-panel" class="card"
+       hx-get="api/battery-card"
+       hx-trigger="every 30s"
+       hx-swap="innerHTML">
+    {% include "partials/battery_card.html" %}
   </div>
 
   <!-- Charge limit -->
@@ -49,7 +58,7 @@
     <form hx-post="api/charge-limit"
           hx-target="#cl-result"
           hx-swap="innerHTML"
-          hx-on::after-request="if(event.detail.successful){document.getElementById('cl-badge').textContent=document.getElementById('cl-input').value+'%';}"
+          hx-on::after-request="if(event.detail.successful){document.getElementById('cl-badge').textContent=document.getElementById('cl-input').value+'%';window._clLimit=parseInt(document.getElementById('cl-input').value);placeBatLimitMarker();}"
           class="flex gap-2 items-center flex-wrap">
       <input id="cl-input" type="number" name="percent" min="50" max="100" step="5" value="80"
              class="w-20 px-2 py-1.5 rounded-lg text-sm text-white border border-slate-600 bg-slate-800 focus:outline-none focus:border-brand">
@@ -61,19 +70,46 @@
       </button>
       <span id="cl-result" class="text-xs self-center min-w-[60px]"></span>
     </form>
+    {# Charge-port cable release — a charging action, so it lives here rather than on the Commands page #}
+    <div class="mt-4 pt-3 border-t border-slate-700/60 flex items-center gap-3 flex-wrap">
+      <span class="text-slate-300 shrink-0">{{ ico.mdi('ev-plug-type2', 'w-6 h-6') }}</span>
+      <div class="flex-1 min-w-0">
+        <div class="text-sm font-medium text-slate-200">{{ t('btn_unlock_charger') }}</div>
+        <div class="text-xs text-slate-500">{{ t('unlock_charger_hint') }}</div>
+      </div>
+      <button hx-post="api/command/unlock_charger"
+              hx-target="#uc-result" hx-swap="innerHTML" hx-indicator="#uc-spin"
+              hx-confirm="{{ t('unlock_charger_confirm') }}"
+              onclick="document.getElementById('uc-result').innerHTML=''"
+              class="px-4 py-2 rounded-lg text-sm font-medium text-white border border-slate-600
+                     hover:bg-slate-600 active:scale-95 transition-all cursor-pointer">
+        {{ t('btn_unlock_cable') }}
+      </button>
+      <span id="uc-spin" class="htmx-indicator text-brand text-xs">⏳</span>
+      <span id="uc-result" class="text-xs min-w-[40px]"></span>
+    </div>
   </div>
 
 </div>
 
 <script>
-// Fetch current charge limit on page load and update badge + input
+// Fetch current charge limit on page load and update badge + input + battery-bar marker.
+// The marker lives inside the polled battery card, so it must be re-placed after every swap.
+function placeBatLimitMarker() {
+  var m = document.getElementById('bat-limit-marker');
+  if (m && window._clLimit) { m.style.left = 'calc(' + window._clLimit + '% - 1px)'; m.style.display = 'block'; }
+}
 fetch('api/charge-plan').then(r => r.json()).then(d => {
   var p = d.charge_limit_percent;
   if (p) {
     document.getElementById('cl-badge').textContent = p + '%';
     document.getElementById('cl-input').value = p;
+    window._clLimit = p; placeBatLimitMarker();
   }
 }).catch(() => {});
+document.body.addEventListener('htmx:afterSwap', function (e) {
+  if (e.target && e.target.id === 'battery-card-panel') placeBatLimitMarker();
+});
 </script>
 
 <!-- AC vs DC distribution (donut) -->
@@ -336,7 +372,11 @@ fetch('api/charge-plan').then(r => r.json()).then(d => {
                   </div>
                   {% if show_wb %}
                   <div style="font-size:10px;color:#94a3b8;margin-top:3px" title="{{ t('wallbox_billed_help') }}">
-                    🔋 {{ "%.1f"|format(c.energy_added_kwh or 0) }} kWh {{ t('energy_in_battery') }} (DC){% if c.energy_added_kwh %} · {{ t('efficiency') }} {{ "%.0f"|format(100 * (c.energy_added_kwh or 0) / c.ac_energy_kwh) }}%{% endif %}
+                    {# Efficiency >100% is physically impossible — it means the ΔSoC-based DC figure is
+                       inflated (BMS snap-to-full on 100%-ending charges recorded before the fix), so
+                       hide the % rather than show nonsense. #}
+                    {% set _eff = (100 * c.energy_added_kwh / c.ac_energy_kwh) if c.energy_added_kwh else 0 %}
+                    🔋 {{ "%.1f"|format(c.energy_added_kwh or 0) }} kWh {{ t('energy_in_battery') }} (DC){% if c.energy_added_kwh and _eff <= 100 %} · {{ t('efficiency') }} {{ "%.0f"|format(_eff) }}%{% endif %}
                   </div>
                   {% endif %}
                 </div>
