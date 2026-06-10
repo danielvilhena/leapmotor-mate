@@ -3,6 +3,30 @@
 All notable changes to LeapMotor Mate are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.3] — 2026-06-10
+
+### Added
+- **🔘 “Door Lock Toggle” — a switch you can put on one button (#38).** Launcher widgets (like Samsung’s
+  Home Assistant widget) force a *fixed* action on lock-type entities, so the Door Lock entity couldn’t
+  work as a single lock/unlock button. There’s now also a **switch** entity (ON = locked): widgets *can*
+  toggle a switch, so one tap locks, the next unlocks. The lock entity stays for dashboards. *(Validated
+  end-to-end on a real MQTT broker.)*
+
+### Fixed
+- **🅿️ A few-metres manoeuvre is no longer logged as a “1 km” trip.** The odometer reads in whole km, so a
+  short driveway shuffle that happened to cross a km boundary was recorded as a 1.0 km trip (a real case:
+  24 m logged as 1 km). On that ambiguous reading Mate now cross-checks the GPS track and drops the phantom
+  hop; a **one-time repair** corrects such historical trips to their real distance (nothing is deleted).
+- **✋ Closing asks for confirmation too.** Boot, windows and roof shade asked “are you sure?” only when
+  *opening*; closing fired immediately — but a remote close can pinch a hand (or just be an accidental
+  tap). Both directions now confirm when parked; while driving you still go straight to the “vehicle in
+  motion” notice.
+- **📅 Dates in your language.** The recent-trips list and the trip page title now show “10 giu 2026” (or
+  “10 Jun 2026”, “10 juin 2026”…) instead of the raw “2026-06-10”.
+- **📱 No more giant wrapped text on phones.** The efficiency figure (“20 kWh/100km”) rendered whole at
+  headline size, wrapping mid-value on the trip page and overflowing the Trips summary tile; it now shows
+  a big number with a small unit, like every other stat. The trip-page date also stays on one line.
+
 ## [1.16.2] — 2026-06-10
 
 ### Fixed

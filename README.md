@@ -51,7 +51,7 @@ LeapMotor Mate is free and open-source, developed in my spare time. If it's usef
 - **🆕 Editable battery capacity** — pre-filled per model (usable/net kWh); edit it if yours differs, or click **“use measured”** to adopt the value Mate worked out from your own charges. Changing it never rewrites past charges.
 - **🆕 Advanced settings** — a collapsible card to tune the edge cases: missed-charge detection threshold, vampire-drain noise floor, and the AC/DC power threshold (for 22 kW AC wallboxes). Sane defaults, one-tap reset.
 - **🆕 Recover missed charges** — scan your history for charges that happened while the car was asleep before automatic detection existed; previews what it finds before adding anything.
-- **🆕 Single Home Assistant lock toggle** — one MQTT *lock* entity that shows the state and locks/unlocks in a single tap (great as a phone front-screen button), alongside the existing buttons.
+- **🆕 Single Home Assistant lock toggle** — an MQTT *lock* entity for dashboards **plus a “Door Lock Toggle” switch** for launcher widgets that can't toggle locks (e.g. Samsung's): one tap locks, the next unlocks — perfect as a phone front-screen button. The classic buttons stay too.
 
 ## How it works
 
@@ -264,7 +264,7 @@ LeapMotor Mate è gratuito e open-source, sviluppato nel tempo libero. Se ti è 
 - **🆕 Capacità batteria modificabile** — precompilata per modello (kWh netti/utilizzabili); modificala se la tua è diversa, o clicca **“usa misurata”** per adottare il valore che Mate ha calcolato dalle tue ricariche. Cambiarla non riscrive mai le ricariche passate.
 - **🆕 Impostazioni avanzate** — una scheda richiudibile per regolare i casi particolari: soglia rilevamento ricariche perse, soglia rumore consumo-da-fermo e soglia potenza AC/DC (per wallbox AC da 22 kW). Valori predefiniti sensati, reset con un tocco.
 - **🆕 Recupero ricariche perse** — cerca nella cronologia le ricariche avvenute mentre l'auto dormiva prima che esistesse il rilevamento automatico; mostra cosa trova prima di aggiungere qualcosa.
-- **🆕 Toggle blocco singolo per Home Assistant** — un'unica entità MQTT *lock* che mostra lo stato e blocca/sblocca con un solo tocco (ottimo come bottone singolo sulla home del telefono), accanto ai pulsanti esistenti.
+- **🆕 Toggle blocco singolo per Home Assistant** — un'entità MQTT *lock* per i dashboard **più uno switch “Door Lock Toggle”** per i widget launcher che non sanno toggleare i lock (es. Samsung): un tocco blocca, il successivo sblocca — perfetto come bottone singolo sulla home del telefono. I pulsanti classici restano.
 
 ## Come funziona
 
