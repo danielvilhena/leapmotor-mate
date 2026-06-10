@@ -20,12 +20,24 @@ document.addEventListener('htmx:afterRequest', function(e) {
   var resultId = 'result-' + path.split('/').pop();
   var el = document.getElementById(resultId);
   var slow = el && el.querySelector('[data-slow]');
-  setTimeout(function() {
-    var el = document.getElementById(resultId);
-    if (el && el.innerHTML.includes('✓')) el.innerHTML = '';
-  }, 4000);
-  setTimeout(refreshCmdGrid, slow ? 12000 : 5000);
-  setTimeout(refreshCmdGrid, slow ? 20000 : 15000);
+  if (slow) {
+    // Climate/slow commands show a spinner and have no optimistic overlay — leave it
+    // up; the first refetch lands once the car has had time to reflect the change.
+    setTimeout(refreshCmdGrid, 12000);
+    setTimeout(refreshCmdGrid, 20000);
+  } else {
+    setTimeout(function() {
+      var el = document.getElementById(resultId);
+      if (el && el.innerHTML.includes('✓')) el.innerHTML = '';
+    }, 4000);
+    // Instant flip from the optimistic overlay (written before this response), then
+    // reconcile against the car as the cloud catches up (matches the backend verify
+    // loop's 30s deadline) — GitHub #34.
+    setTimeout(refreshCmdGrid, 800);
+    setTimeout(refreshCmdGrid, 5000);
+    setTimeout(refreshCmdGrid, 15000);
+  }
+  setTimeout(refreshCmdGrid, 31000);
 });
 </script>
 {% endblock %}

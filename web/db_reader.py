@@ -538,6 +538,16 @@ def clear_optimistic_status() -> None:
     _opt_expiry = 0.0
 
 
+def extend_optimistic_status() -> None:
+    """Re-arm the optimistic overlay's TTL while a command is still being verified.
+    The post-command verification can poll the cloud for up to ~30s waiting for the
+    car's state to propagate; without this the overlay would expire mid-wait and the
+    UI would briefly flash the stale pre-command state (GitHub #34)."""
+    global _opt_expiry
+    if _opt_overrides:
+        _opt_expiry = time.time() + _OPT_TTL
+
+
 def write_optimistic_status(overrides: dict) -> None:
     """Copy the latest position row, apply field overrides, insert as new row.
        Also caches overrides in memory so get_latest_status() can re-apply them
@@ -1504,9 +1514,94 @@ def get_battery_capacity_kwh() -> float:
     """Configured (nominal) usable battery capacity, set per-model at first run and
     overridable in Settings. Used as the 100%-SoC reference for the health estimate."""
     try:
-        return float(get_setting("battery_capacity_kwh", "67.1"))
+        return float(get_setting("battery_capacity_kwh", "65.0"))
     except (TypeError, ValueError):
-        return 67.1
+        return 65.0
+
+
+def scan_missed_charges(threshold: float = 2.0, apply: bool = False) -> list[dict]:
+    """Find charges that happened while the car was asleep/offline BEFORE live
+    reconstruction existed (or while the poller was down) and were never logged — a
+    SoC that ROSE while parked, not covered by any existing charge (GitHub #35, from
+    the #29 follow-up). Returns candidate dicts; with apply=True also inserts them as
+    reconstructed charges (charge_type 'AC', cost NULL until the user confirms the type,
+    exactly like the live reconstruction path).
+
+    Idempotent: an applied candidate's window is then covered by its own charge row, so
+    a re-run's overlap check skips it — running it twice creates no duplicates.
+
+    Guards against false positives (which a one-shot silent migration could not afford,
+    hence this is preview-then-confirm): parked at both ends (charging=0, speed<=1), the
+    odometer UNCHANGED across the whole run (so regen while driving offline can't look
+    like a charge), and no overlap with any existing charge window."""
+    db = _conn_rw() if apply else _get()
+    v = db.execute("SELECT id FROM vehicles LIMIT 1").fetchone()
+    if not v:
+        return []
+    vehicle_id = v["id"]
+    rows = db.execute(
+        "SELECT recorded_at, soc, charging, speed_kmh, odometer_km, latitude, longitude "
+        "FROM positions WHERE vehicle_id=? AND soc IS NOT NULL ORDER BY recorded_at, id",
+        (vehicle_id,)).fetchall()
+    charges = db.execute(
+        "SELECT started_at, ended_at FROM charges WHERE vehicle_id=?", (vehicle_id,)).fetchall()
+    cap = get_battery_capacity_kwh()
+
+    def _parked(r):
+        return (r["charging"] or 0) == 0 and (r["speed_kmh"] or 0) <= 1
+
+    def _odo_same(a, b):
+        oa, ob = a["odometer_km"], b["odometer_km"]
+        return oa is None or ob is None or abs(ob - oa) < 0.5
+
+    def _overlaps(start, end):
+        for c in charges:
+            cs, ce = c["started_at"], (c["ended_at"] or "9999")   # NULL end = open-ended
+            if start <= ce and cs <= end:                          # inclusive interval overlap
+                return True
+        return False
+
+    candidates, i, n = [], 0, len(rows)
+    while i < n - 1:
+        a, b = rows[i], rows[i + 1]
+        if not (b["soc"] - a["soc"] > 0 and _parked(a) and _parked(b) and _odo_same(a, b)):
+            i += 1
+            continue
+        # Extend the run while SoC keeps rising, parked, and the odometer never moves —
+        # so one charge seen across several stale polls becomes ONE candidate, not many.
+        run_start, run_end, j = a, b, i + 1
+        while j < n - 1:
+            c, d = rows[j], rows[j + 1]
+            if d["soc"] - c["soc"] > 0 and _parked(c) and _parked(d) and _odo_same(run_start, d):
+                run_end, j = d, j + 1
+            else:
+                break
+        rise = run_end["soc"] - run_start["soc"]
+        if rise >= threshold and not _overlaps(run_start["recorded_at"], run_end["recorded_at"]):
+            try:
+                dur = round((datetime.fromisoformat(run_end["recorded_at"])
+                             - datetime.fromisoformat(run_start["recorded_at"])).total_seconds() / 60, 1)
+            except (TypeError, ValueError):
+                dur = None
+            candidates.append({
+                "started_at": run_start["recorded_at"], "ended_at": run_end["recorded_at"],
+                "start_soc": run_start["soc"], "end_soc": run_end["soc"],
+                "energy_kwh": round(max(rise / 100.0 * cap, 0), 3), "duration_min": dur,
+                "latitude": run_end["latitude"], "longitude": run_end["longitude"],
+            })
+        i = j + 1
+
+    if apply and candidates:
+        for c in candidates:
+            db.execute(
+                """INSERT INTO charges
+                   (vehicle_id, started_at, ended_at, start_soc, end_soc, energy_added_kwh,
+                    duration_min, latitude, longitude, charge_type, reconstructed)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,1)""",
+                (vehicle_id, c["started_at"], c["ended_at"], c["start_soc"], c["end_soc"],
+                 c["energy_kwh"], c["duration_min"], c["latitude"], c["longitude"], "AC"))
+        db.commit()
+    return candidates
 
 
 def _integrate_charge_energy_kwh(db, start: str, end: str | None) -> float:
@@ -1557,7 +1652,14 @@ def get_battery_health(min_soc_delta: float = 12.0) -> dict:
     single sessions are expected, so the headline SoH is smoothed over the most
     recent points. Charges whose telemetry was pruned (no samples) are skipped."""
     db = _get()
-    nominal = get_battery_capacity_kwh()
+    # SoH is measured-vs-as-new, so the denominator is the ORIGINAL spec capacity, not
+    # the energy-calc capacity the user may have overridden — otherwise adopting a
+    # measured (already-aged) value would reset SoH to ~100% and hide the ageing.
+    # battery_capacity_nominal_kwh is snapshotted the first time the user overrides.
+    try:
+        nominal = float(get_setting("battery_capacity_nominal_kwh", "") or get_battery_capacity_kwh())
+    except (TypeError, ValueError):
+        nominal = get_battery_capacity_kwh()
     rows = db.execute(
         "SELECT id, started_at, ended_at, start_soc, end_soc, charge_type "
         "FROM charges WHERE ended_at IS NOT NULL AND start_soc IS NOT NULL "

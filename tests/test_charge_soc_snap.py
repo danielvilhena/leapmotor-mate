@@ -14,6 +14,7 @@ import db as D
 
 def _setup(tmp_path, start_soc, started_at="2026-06-01T08:00:00+00:00"):
     db = D.Database(str(tmp_path / "t.db"))
+    db.set_battery_capacity(67.1)        # pin the reference so the maths is explicit
     db._conn.execute(
         "INSERT INTO charges (id,vehicle_id,started_at,start_soc) VALUES (1,1,?,?)",
         (started_at, start_soc))

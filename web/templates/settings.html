@@ -78,18 +78,29 @@
     <!-- Battery -->
     <div class="card">
       <h2 class="font-semibold text-white mb-4">{{ t('battery_cap_section') }}</h2>
-      <div class="space-y-3">
-        <div class="flex items-center justify-between">
-          <div>
+      <form hx-post="api/settings/capacity" hx-trigger="change" hx-target="#cap-result" hx-swap="innerHTML">
+        <div class="flex items-start justify-between gap-3">
+          <div class="flex-1 min-w-0">
             <div class="text-sm text-white">{{ t('capacity') }}</div>
             <div class="text-xs text-slate-400">{{ t('capacity_desc') }}</div>
           </div>
-          <div class="flex items-center gap-2">
-            <span class="text-white font-bold">{{ settings.get('battery_capacity_kwh', '67.1') }}</span>
+          <div class="flex items-center gap-2 flex-shrink-0">
+            <input type="number" name="battery_capacity_kwh" min="10" max="200" step="0.1"
+                   value="{{ settings.get('battery_capacity_kwh', '67.1') }}"
+                   class="w-20 px-2 py-1.5 rounded-lg text-sm text-white text-right border border-slate-600 bg-slate-800 focus:outline-none focus:border-brand">
             <span class="text-slate-400 text-sm">kWh</span>
           </div>
         </div>
-      </div>
+        {% if measured_capacity %}
+        <div class="mt-3 flex items-center justify-between gap-2 text-xs">
+          <span class="text-slate-500">{{ t('capacity_measured').format(kwh=measured_capacity) }}</span>
+          <button type="button"
+                  onclick="var f=this.closest('form');f.battery_capacity_kwh.value='{{ measured_capacity }}';htmx.trigger(f,'change')"
+                  class="text-brand hover:underline flex-shrink-0">{{ t('capacity_use_measured') }}</button>
+        </div>
+        {% endif %}
+        <div id="cap-result" class="text-xs mt-2"></div>
+      </form>
     </div>
 
     <!-- Polling cadence -->
@@ -139,6 +150,65 @@
         <div class="flex justify-between text-[10px] text-slate-600 mt-1"><span>0.5 A</span><span>16 A</span></div>
         <div id="cd-result" class="text-xs mt-2"></div>
       </form>
+    </div>
+
+    <!-- Advanced tunables (collapsed by default) -->
+    <div class="card">
+      <details class="group" ontoggle="saveUiState('advanced', this.open)" {% if card_open.advanced %}open{% endif %}>
+        <summary class="cursor-pointer select-none flex items-center gap-2" style="list-style:none">
+          <span class="group-open:rotate-90 text-slate-500" style="transition:transform .2s;display:inline-block">▶</span>
+          <span class="font-semibold text-white">⚙️ {{ t('adv_section') }}</span>
+        </summary>
+        <div class="text-xs text-slate-400 mt-2 mb-4">{{ t('adv_desc') }}</div>
+        <form hx-post="api/settings/advanced" hx-trigger="change" hx-target="#adv-result" hx-swap="innerHTML" class="space-y-5">
+          <div>
+            <div class="flex items-center justify-between mb-1">
+              <span class="text-sm text-white">{{ t('adv_reconstruct_label') }}</span>
+              <span class="font-bold text-brand"><span id="adv-rc-val">{{ settings.get('charge_reconstruct_min_pct', '2.0') }}</span>%</span>
+            </div>
+            <input type="range" name="charge_reconstruct_min_pct" min="1" max="10" step="0.5"
+                   value="{{ settings.get('charge_reconstruct_min_pct', '2.0') }}"
+                   oninput="document.getElementById('adv-rc-val').textContent=this.value"
+                   class="w-full accent-brand cursor-pointer">
+            <div class="flex justify-between text-[10px] text-slate-600 mt-1"><span>1%</span><span>10%</span></div>
+            <div class="text-[11px] text-slate-500 mt-1">{{ t('adv_reconstruct_help') }}</div>
+          </div>
+          <div>
+            <div class="flex items-center justify-between mb-1">
+              <span class="text-sm text-white">{{ t('adv_vampire_label') }}</span>
+              <span class="font-bold text-brand"><span id="adv-vp-val">{{ settings.get('vampire_min_drop_pct', '0.2') }}</span>%</span>
+            </div>
+            <input type="range" name="vampire_min_drop_pct" min="0.1" max="2" step="0.1"
+                   value="{{ settings.get('vampire_min_drop_pct', '0.2') }}"
+                   oninput="document.getElementById('adv-vp-val').textContent=this.value"
+                   class="w-full accent-brand cursor-pointer">
+            <div class="flex justify-between text-[10px] text-slate-600 mt-1"><span>0.1%</span><span>2%</span></div>
+            <div class="text-[11px] text-slate-500 mt-1">{{ t('adv_vampire_help') }}</div>
+          </div>
+          <div>
+            <div class="flex items-center justify-between mb-1">
+              <span class="text-sm text-white">{{ t('adv_dc_label') }}</span>
+              <span class="font-bold text-brand"><span id="adv-dc-val">{{ settings.get('charge_dc_min_kw', '11') }}</span> kW</span>
+            </div>
+            <input type="range" name="charge_dc_min_kw" min="11" max="32" step="1"
+                   value="{{ settings.get('charge_dc_min_kw', '11') }}"
+                   oninput="document.getElementById('adv-dc-val').textContent=this.value"
+                   class="w-full accent-brand cursor-pointer">
+            <div class="flex justify-between text-[10px] text-slate-600 mt-1"><span>11 kW</span><span>32 kW</span></div>
+            <div class="text-[11px] text-slate-500 mt-1">{{ t('adv_dc_help') }}</div>
+          </div>
+          <div class="flex items-center justify-between gap-3 pt-1">
+            <div id="adv-result" class="text-xs"></div>
+            <button type="button"
+                    hx-post="api/settings/advanced" hx-vals='{"reset":"1"}'
+                    hx-target="#adv-result" hx-swap="innerHTML"
+                    hx-on::after-request="if(event.detail.successful)setTimeout(function(){location.reload()},600)"
+                    class="text-xs text-slate-400 hover:text-white border border-slate-600 rounded-lg px-3 py-1.5 flex-shrink-0">
+              {{ t('adv_reset') }}
+            </button>
+          </div>
+        </form>
+      </details>
     </div>
 
   </div>
@@ -494,6 +564,18 @@
       <p class="text-[11px] text-slate-400 mt-3 flex items-start gap-1.5">
         <span>🔒</span><span>{{ t('diag_privacy') }}</span>
       </p>
+
+      <!-- Scan history for charges missed while the car was asleep (#35) -->
+      <div class="mt-4 pt-4 border-t border-slate-700/60">
+        <div class="text-xs font-medium text-slate-300 mb-1">{{ t('missed_scan_label') }}</div>
+        <div class="text-[11px] text-slate-500 mb-2">{{ t('missed_scan_desc') }}</div>
+        <button hx-get="api/diagnostics/missed-charges" hx-target="#missed-result" hx-swap="innerHTML" hx-indicator="#missed-spin"
+                class="border border-slate-600 text-slate-200 text-sm font-medium rounded-lg px-3 py-1.5 hover:border-brand">
+          🔎 {{ t('missed_scan_btn') }}
+        </button>
+        <span id="missed-spin" class="htmx-indicator text-xs text-slate-500 ml-2">…</span>
+        <div id="missed-result"></div>
+      </div>
     </div>
 
   </div>

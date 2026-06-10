@@ -39,9 +39,12 @@ class Recorder:
         self._sm.poll_driving = driving
 
     def set_reconstruct_min_pct(self, pct: float) -> None:
-        """Min SoC rise (%) that counts as a charge missed while the car was asleep (Settings)."""
+        """Min SoC rise (%) that counts as a charge missed while the car was asleep (Settings).
+        Hard floor of 1.0%: below that, parked SoC sensor noise / BMS recalibration jitter
+        would invent phantom charges (the value is also clamped in the settings endpoint, but
+        guard here too in case the DB was hand-edited)."""
         if pct and pct > 0:
-            self._reconstruct_min_pct = pct
+            self._reconstruct_min_pct = max(1.0, pct)
 
     def _resume_or_close(self, data: VehicleData) -> None:
         """At startup, reconcile sessions left open by a previous run (poller/HA

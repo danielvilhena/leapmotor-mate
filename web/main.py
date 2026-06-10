@@ -381,7 +381,8 @@ async def statistics(request: Request):
 async def battery_page(request: Request):
     vehicle, _ = db_reader.get_vehicle()
     health = db_reader.get_battery_health()
-    vampire = db_reader.get_vampire_drain()
+    vampire = db_reader.get_vampire_drain(
+        min_drop_pct=float(db_reader.get_setting("vampire_min_drop_pct", "0.2") or 0.2))
     return templates.TemplateResponse(request, "battery.html", _ctx(
         page="battery", vehicle=vehicle, health=health, vampire=vampire,
     ))
@@ -641,6 +642,9 @@ async def settings_page(request: Request):
                 "geocoder_provider": db_reader.get_setting("geocoder_provider", ""),
                 "geocoder_key_set": bool(db_reader.get_setting("geocoder_key", "")),
                 "positions_retention_days": db_reader.get_setting("positions_retention_days", "0"),
+                "charge_reconstruct_min_pct": db_reader.get_setting("charge_reconstruct_min_pct", "2.0"),
+                "vampire_min_drop_pct": db_reader.get_setting("vampire_min_drop_pct", "0.2"),
+                "charge_dc_min_kw": db_reader.get_setting("charge_dc_min_kw", "11"),
                 "db_size_mb": round(db_reader.get_db_size_bytes() / 1048576, 1)}
     # Per-card open/collapsed state — saved in the DB (shared across devices), with
     # the enable flag as the first-time default until the user toggles the chevron.
@@ -648,6 +652,7 @@ async def settings_page(request: Request):
         "abrp": _card_open("abrp", settings["abrp_enabled"] == "1"),
         "mqtt": _card_open("mqtt", settings["mqtt_enabled"] == "1"),
         "wallbox": _card_open("wallbox", True),
+        "advanced": _card_open("advanced", False),   # collapsed by default
     }
     return templates.TemplateResponse(request, "settings.html", _ctx(
         page="settings", vehicle=vehicle, settings=settings, card_open=card_open,
@@ -659,6 +664,7 @@ async def settings_page(request: Request):
         currencies=db_reader.CURRENCIES,
         currency_code=db_reader.get_currency_code(),
         diag=diagnostics.build_system_info(MATE_VERSION),
+        measured_capacity=db_reader.get_battery_health().get("latest_capacity_kwh"),
     ))
 
 
@@ -1412,6 +1418,50 @@ async def diagnostics_bundle(parts: str = "info,poller,web"):
                     headers={"Content-Disposition": "attachment; filename=leapmotor-mate-diagnostics.txt"})
 
 
+def _missed_charges_preview_html(t, cands: list[dict]) -> str:
+    """Render the missed-charge scan result: a list of what WOULD be added + a confirm
+    button, or a 'nothing found' note. Dates shown in local time."""
+    import html as _html
+    if not cands:
+        return f'<div class="text-xs text-slate-400 mt-2">{_html.escape(t("missed_none"))}</div>'
+    rows = []
+    for c in cands:
+        day = db_reader._local_iso(c["started_at"])[:16].replace("T", " ")
+        rows.append(
+            f'<li class="flex items-center justify-between gap-2 py-1 border-b border-slate-800">'
+            f'<span class="text-slate-300">{_html.escape(day)}</span>'
+            f'<span class="text-slate-400">{c["start_soc"]:.0f}% → {c["end_soc"]:.0f}% '
+            f'· <span class="text-brand">{c["energy_kwh"]:.1f} kWh</span></span></li>')
+    btn = (f'<button hx-post="api/diagnostics/missed-charges" hx-target="#missed-result" hx-swap="innerHTML" '
+           f'hx-on::after-request="if(event.detail.successful)setTimeout(function(){{location.reload()}},800)" '
+           f'class="mt-3 bg-brand text-white text-sm font-semibold rounded-lg px-4 py-2">'
+           f'{_html.escape(t("missed_add").format(n=len(cands)))}</button>')
+    return (f'<div class="mt-2 text-xs"><div class="text-slate-400 mb-1">{_html.escape(t("missed_found").format(n=len(cands)))}</div>'
+            f'<ul class="space-y-0.5">{"".join(rows)}</ul>{btn}</div>')
+
+
+@app.get("/api/diagnostics/missed-charges", response_class=HTMLResponse)
+async def missed_charges_preview(request: Request):
+    """Dry-run scan for charges that happened while the car was asleep before live
+    reconstruction existed (GitHub #35). Shows what WOULD be added — nothing is written."""
+    import asyncio
+    t = i18n.get_t(db_reader.get_language())
+    cands = await asyncio.get_event_loop().run_in_executor(
+        None, lambda: db_reader.scan_missed_charges(apply=False))
+    return HTMLResponse(_missed_charges_preview_html(t, cands))
+
+
+@app.post("/api/diagnostics/missed-charges", response_class=HTMLResponse)
+async def missed_charges_apply(request: Request):
+    """Apply the missed-charge scan — insert the candidates as reconstructed charges.
+    Idempotent (re-running creates no duplicates)."""
+    import asyncio
+    t = i18n.get_t(db_reader.get_language())
+    created = await asyncio.get_event_loop().run_in_executor(
+        None, lambda: db_reader.scan_missed_charges(apply=True))
+    return HTMLResponse(f'<span style="color:#22c55e">✓ {t("missed_added").format(n=len(created))}</span>')
+
+
 # ── Command routes ────────────────────────────────────────────────────────────
 
 _COMMANDS = {
@@ -1528,6 +1578,56 @@ async def charge_detect_settings(request: Request):
         return HTMLResponse('<span style="color:#ef4444">Invalid value</span>', status_code=400)
     db_reader.set_setting("charge_detect_min_a", str(amps))
     return HTMLResponse(f'<span style="color:#22c55e">✓ {amps:g} A</span>')
+
+
+# Defaults + safe ranges for the Advanced tunables. The reconstruction floor is
+# clamped to >=1.0 on purpose: below that, normal SoC sensor noise / BMS recalibration
+# while parked would invent phantom charges.
+_ADVANCED_DEFAULTS = {
+    "charge_reconstruct_min_pct": (2.0, 1.0, 10.0),
+    "vampire_min_drop_pct":       (0.2, 0.1, 2.0),
+    "charge_dc_min_kw":           (11.0, 11.0, 32.0),
+}
+
+
+@app.post("/api/settings/advanced", response_class=HTMLResponse)
+async def advanced_settings(request: Request):
+    """Save the Advanced tunables (reconstruction floor, vampire-drain noise floor,
+    AC/DC power threshold). The poller re-reads them live on its next cycle; the
+    vampire + AC/DC values are read at compute/finalize time. A `reset` field restores
+    every default."""
+    form = await request.form()
+    t = i18n.get_t(db_reader.get_language())
+    if form.get("reset"):
+        for key, (default, _lo, _hi) in _ADVANCED_DEFAULTS.items():
+            db_reader.set_setting(key, str(default))
+        return HTMLResponse(f'<span style="color:#22c55e">{t("adv_reset_done")}</span>')
+    try:
+        for key, (default, lo, hi) in _ADVANCED_DEFAULTS.items():
+            if key in form:
+                val = max(lo, min(float(form.get(key, default)), hi))
+                db_reader.set_setting(key, str(val))
+    except (ValueError, TypeError):
+        return HTMLResponse('<span style="color:#ef4444">Invalid value</span>', status_code=400)
+    return HTMLResponse(f'<span style="color:#22c55e">{t("adv_saved")}</span>')
+
+
+@app.post("/api/settings/capacity", response_class=HTMLResponse)
+async def capacity_settings(request: Request):
+    """Override the usable battery capacity used for energy calculations (#35). The
+    first override snapshots the current value as the SoH reference so the health page
+    keeps measuring against the as-new spec, not the new (possibly aged) figure."""
+    form = await request.form()
+    t = i18n.get_t(db_reader.get_language())
+    try:
+        kwh = max(10.0, min(float(form.get("battery_capacity_kwh", 0)), 200.0))
+    except (ValueError, TypeError):
+        return HTMLResponse('<span style="color:#ef4444">Invalid value</span>', status_code=400)
+    if not db_reader.get_setting("battery_capacity_nominal_kwh", ""):
+        db_reader.set_setting("battery_capacity_nominal_kwh",
+                              db_reader.get_setting("battery_capacity_kwh", str(kwh)))
+    db_reader.set_setting("battery_capacity_kwh", str(kwh))
+    return HTMLResponse(f'<span style="color:#22c55e">✓ {kwh:g} kWh</span>')
 
 
 _BOOST_DEFAULT_S = 300   # 5 min — covers the "got in the car → started driving" window
@@ -1876,22 +1976,52 @@ _FIELD_CHECK = {
 _SLOW_COMMANDS = {"open_sunshade", "close_sunshade", "open_trunk", "close_trunk"}
 
 
-def _post_command_refresh(optimistic: dict, delay: int = 3):
-    """Fetch fresh status after a command.
-    If API confirms the expected state: write real data.
-    If API does NOT confirm: clear the optimistic overlay so the UI shows the real state.
-    """
-    time.sleep(delay)
-    signals = command_client.get_fresh_signals()
-    if not signals:
-        return
-    for field, expected in optimistic.items():
+# Monotonic counter bumped for every accepted command. A post-command verification
+# captures the epoch it was started for and stands down if a newer command supersedes
+# it — so command #1's eventual timeout can never clear command #2's optimistic overlay
+# (GitHub #34).
+_command_epoch = 0
+
+
+def _command_confirmed(expected: dict, signals: dict) -> bool:
+    """True when the live signals match every expected field (empty expected → True)."""
+    for field, want in expected.items():
         checker = _FIELD_CHECK.get(field)
-        if checker and bool(checker(signals)) != bool(expected):
-            db_reader.clear_optimistic_status()
-            db_reader.save_fresh_signals(signals)
+        if checker and bool(checker(signals)) != bool(want):
+            return False
+    return True
+
+
+def _post_command_refresh(expected: dict, epoch: int, delay: int = 3, deadline_s: int = 30):
+    """Verify a command against the car, polling until it confirms or we give up.
+
+    The Leapmotor cloud often hasn't ingested the new state a few seconds after a
+    command (it reflects what the car last uploaded, not what we just asked for), so a
+    single early sample would wrongly "un-confirm" a command that actually worked — and,
+    worse, persist that stale sample as the newest row, poisoning every later refetch
+    until the cloud catches up. That was the real cause of GitHub #34 (tiles staying
+    stale, 2nd/3rd tap "fixing" it). Instead we keep the optimistic overlay alive and
+    retry until the cloud agrees, only persisting a sample once it confirms — or, on
+    timeout, accept reality (the command most likely didn't take).
+    """
+    start = time.time()
+    time.sleep(delay)
+    while True:
+        if _command_epoch != epoch:          # a newer command owns the state now
             return
-    db_reader.save_fresh_signals(signals)
+        signals = command_client.get_fresh_signals()
+        if signals and _command_confirmed(expected, signals):
+            db_reader.save_fresh_signals(signals)     # truth matches the expectation
+            return
+        if time.time() - start >= deadline_s:
+            # Gave up waiting: show reality rather than a stuck optimistic overlay.
+            if _command_epoch == epoch:
+                db_reader.clear_optimistic_status()
+                if signals:
+                    db_reader.save_fresh_signals(signals)
+            return
+        db_reader.extend_optimistic_status()  # keep the overlay alive across the wait
+        time.sleep(4)
 
 
 _CMD_COOLDOWN_S = 10     # match the HA integration's remote-action cooldown
@@ -1915,20 +2045,26 @@ async def run_command(name: str, background_tasks: BackgroundTasks):
         label = _wait_labels.get(db_reader.get_language(), "Wait")
         return HTMLResponse(f'<span style="color:#fbbf24">⏳ {label} {wait}s</span>')
     _last_command_at = time.time()
+    global _command_epoch
+    _command_epoch += 1
+    epoch = _command_epoch
 
     # Climate: decide direction from the real state. The master A/C tile that's on →
     # ac_off (ac_switch operate=off — real full-off, drives 1938→0, B10-confirmed);
     # a mode tile that's on → ac_switch toggle (stops that mode); a tile that's off →
-    # its own command. No optimistic overlay.
+    # its own command. No optimistic overlay, but we DO verify the real signal flips.
     overrides = dict(_OPTIMISTIC.get(name) or {})
+    expected = dict(overrides)                  # what the post-command check waits for
     field = _CLIMATE_TILES.get(name)
     if field:
         cur = db_reader.get_latest_status() or {}
-        if cur.get(field):                      # currently on → turn off
+        turning_off = bool(cur.get(field))
+        if turning_off:                         # currently on → turn off
             # Master A/C tile → real full-off (ac_switch operate=off, drives 1938→0, B10-confirmed).
             # Mode tiles (cool/heat/defrost) keep the ac_switch toggle (stops the active mode).
             fn = command_client.ac_off if name == "ac_on" else command_client.ac_on
-        overrides = {}                          # never fake climate state
+        expected = {field: (not turning_off)}   # verify the tile actually flipped
+        overrides = {}                          # never fake climate state in the DB
 
     import asyncio
     ok, msg = await asyncio.get_event_loop().run_in_executor(None, fn)
@@ -1941,7 +2077,7 @@ async def run_command(name: str, background_tasks: BackgroundTasks):
         # Climate commands take several seconds to reflect in signals → show the
         # spinner and refresh from real signals after a delay (like slow commands).
         slow = name in _SLOW_COMMANDS or field is not None
-        background_tasks.add_task(_post_command_refresh, overrides or {}, 12 if slow else 3)
+        background_tasks.add_task(_post_command_refresh, expected, epoch, 12 if slow else 3)
         if slow:
             return HTMLResponse('<span data-slow="1" style="color:#60a5fa;display:inline-flex;align-items:center;gap:4px"><svg style="animation:spin 1s linear infinite;width:14px;height:14px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg></span><style>@keyframes spin{to{transform:rotate(360deg)}}</style>')
         return HTMLResponse('<span style="color:#22c55e">✓ Done</span>')
@@ -1952,17 +2088,28 @@ async def run_command(name: str, background_tasks: BackgroundTasks):
 # T03: single EU variant → auto-set (no user selection needed)
 # C10/B10: two EU variants → selector shown
 
+# Per-variant USABLE (net) capacity, kWh — the energy between the BMS's protective
+# limits, not the gross pack. Sourced from EV Database / manufacturer sheets (cross-checked):
+#   T03   gross 37.3 → usable 36.0          C10 RWD gross 72.0 → usable 69.9
+#   B10 Pro     56.2 → 55.0                 C10 AWD gross 84.0 → usable 81.9
+#   B10 Pro Max 67.1 → 65.0 (2.1 kWh / 3.1% buffer, confirmed by 2 sources)
+# These are the DEFAULTS for new setups; existing installs keep whatever they configured
+# (no silent migration of a calibrated value). NB on the B10 Pro Max: the car's DISPLAYED
+# SoC 0–100% is calibrated close to the GROSS 67.1 — a real-car ∫V·I measurement matched
+# ΔSoC×67.1 within ~1% on mid-SoC charges — so a B10 owner may see energy run ~3% low on
+# the usable default; the Settings "use measured" button (from the SoH estimator) lets them
+# self-correct toward the value their own car actually uses.
 _EU_BATTERY_MAP: dict[str, list[dict]] = {
     "T03": [
-        {"v": "37.3", "label": "37.3 kWh"},
+        {"v": "36.0", "label": "36.0 kWh usable"},
     ],
     "C10": [
-        {"v": "69.9", "label": "69.9 kWh — RWD"},
-        {"v": "81.9", "label": "81.9 kWh — AWD"},
+        {"v": "69.9", "label": "69.9 kWh usable — RWD"},
+        {"v": "81.9", "label": "81.9 kWh usable — AWD"},
     ],
     "B10": [
-        {"v": "56.2", "label": "56.2 kWh — Pro · 361 km WLTP"},
-        {"v": "67.1", "label": "67.1 kWh — Pro Max · 434 km WLTP"},
+        {"v": "55.0", "label": "55.0 kWh usable — Pro · 361 km WLTP"},
+        {"v": "65.0", "label": "65.0 kWh usable — Pro Max · 434 km WLTP"},
     ],
 }
 
@@ -2051,7 +2198,7 @@ async def setup_submit(request: Request):
     user     = (form.get("user", "") or "").strip()
     pwd      = (form.get("password", "") or "").strip()
     pin      = (form.get("pin", "") or "").strip()
-    battery  = (form.get("battery", "67.1") or "67.1").strip()
+    battery  = (form.get("battery", "65.0") or "65.0").strip()
     lang     = form.get("language", "en")
     car_type = (form.get("car_type", "") or "").strip().upper()
     vin      = (form.get("vin", "") or "").strip()
@@ -2071,7 +2218,7 @@ async def setup_submit(request: Request):
     try:
         battery_kwh = float(battery)
     except ValueError:
-        battery_kwh = 67.1
+        battery_kwh = 65.0
 
     db_reader.set_setting("leapmotor_user", user)
     db_reader.set_secret("leapmotor_pass", pwd)

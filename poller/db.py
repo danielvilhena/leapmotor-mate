@@ -11,12 +11,14 @@ import crypto
 
 log = logging.getLogger(__name__)
 
+# USABLE (net) capacity, kWh — matches web/main.py _EU_BATTERY_MAP. Used as the
+# first-run fallback if the setup wizard didn't set a per-variant value.
 BATTERY_CAPACITY_DEFAULTS: dict[str, float] = {
-    "T03": 37.3,   # EU only variant
-    "B10": 67.1,   # Pro Max 434 km WLTP (EU)
-    "C10": 69.9,   # RWD (EU)
+    "T03": 36.0,   # EU only variant (gross 37.3)
+    "B10": 65.0,   # Pro Max 434 km WLTP (EU; gross 67.1, 3.1% buffer)
+    "C10": 69.9,   # RWD (EU; gross 72.0)
 }
-BATTERY_CAPACITY_FALLBACK = 67.1
+BATTERY_CAPACITY_FALLBACK = 65.0
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS settings (
@@ -656,7 +658,14 @@ class Database:
             if last is not None:
                 soc_for_energy = last
         energy_added = max((soc_for_energy - start_soc) / 100.0 * self.get_battery_capacity(), 0)
-        charge_type  = "DC" if max_power_kw > 11 else "AC"
+        # Above this power the session is DC fast-charging. Default 11 kW (3-phase AC ceiling
+        # for most home wallboxes); a 22 kW AC owner can raise it in Advanced settings so their
+        # AC sessions aren't misread as DC.
+        try:
+            dc_min_kw = float(self.get_setting("charge_dc_min_kw", "11") or 11)
+        except (TypeError, ValueError):
+            dc_min_kw = 11.0
+        charge_type  = "DC" if max_power_kw > dc_min_kw else "AC"
         cost         = round(energy_added * price_per_kwh, 2) if price_per_kwh else None
 
         # ac_energy_kwh is NOT touched here — it's the running wallbox-counter sum built up over the
