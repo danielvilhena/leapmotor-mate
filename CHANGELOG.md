@@ -12,6 +12,12 @@ This project adheres to [Semantic Versioning](https://semver.org/).
   toggle a switch, so one tap locks, the next unlocks. The lock entity stays for dashboards. *(Validated
   end-to-end on a real MQTT broker.)*
 
+### Removed
+- **The separate Lock / Unlock buttons in Home Assistant** — fully redundant now that the Door Lock entity
+  (state + both actions) and the Door Lock Toggle switch exist; they disappear automatically on update. If
+  you had them on a dashboard, swap in **Door Lock**. Automations that publish the raw `lock` / `unlock`
+  MQTT commands keep working unchanged.
+
 ### Fixed
 - **🅿️ A few-metres manoeuvre is no longer logged as a “1 km” trip.** The odometer reads in whole km, so a
   short driveway shuffle that happened to cross a km boundary was recorded as a 1.0 km trip (a real case:

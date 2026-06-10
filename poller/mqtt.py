@@ -285,7 +285,9 @@ class MqttService:
         })
 
         for key, name, icon in [
-            ("lock", "Lock", "mdi:lock"), ("unlock", "Unlock", "mdi:lock-open"),
+            # NB: no Lock/Unlock buttons here — superseded by the Door Lock lock entity
+            # + Door Lock Toggle switch above (their retained configs are cleared below);
+            # the raw "lock"/"unlock" command payloads STAY accepted for existing automations.
             ("open_trunk", "Open Trunk", "mdi:car-back"), ("close_trunk", "Close Trunk", "mdi:car-back"),
             ("find_car", "Find Car", "mdi:car-search"),
             ("unlock_charger", "Unlock Charge Cable", "mdi:ev-plug-type2"),
@@ -324,6 +326,11 @@ class MqttService:
         # its retained discovery config so it disappears from existing installs. The
         # read-only "Climate" binary_sensor (climate_on) still shows the live A/C state.
         self.client.publish(f"{_DISC}/switch/{device_id}/climate/config", "", retain=True)
+        # Likewise the separate Lock/Unlock momentary buttons: fully redundant since the
+        # Door Lock entity (state + both actions) and the Door Lock Toggle switch exist.
+        # Clearing the retained configs makes HA drop them on existing installs too.
+        self.client.publish(f"{_DISC}/button/{device_id}/lock/config", "", retain=True)
+        self.client.publish(f"{_DISC}/button/{device_id}/unlock/config", "", retain=True)
         cfg("device_tracker", "location", {"name": "Location",
                                            "json_attributes_topic": f"{prefix}/{vin}/location",
                                            "state_topic": f"{prefix}/{vin}/location",

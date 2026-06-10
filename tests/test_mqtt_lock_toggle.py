@@ -130,3 +130,16 @@ def test_dispatch_lock_toggle_on_locks(tmp_path):
 def test_dispatch_lock_toggle_off_unlocks(tmp_path):
     calls, pubs = _dispatch_cmd("lock_toggle", "OFF", tmp_path)
     assert calls == [("unlock", "VIN1")] and ("VIN1", "locked", False) in pubs
+
+
+# ── the redundant Lock/Unlock buttons are retired (superseded by lock + switch) ──
+
+def test_lock_unlock_buttons_retired():
+    svc = _service()
+    svc.publish_discovery(types.SimpleNamespace(vin="VINTEST"))
+    pub = svc.client.published
+    base = "homeassistant/button/leapmotor_mate_vintest"
+    # retained configs CLEARED (empty payload) so HA drops them on existing installs
+    assert pub[f"{base}/lock/config"] == "" and pub[f"{base}/unlock/config"] == ""
+    # other buttons untouched
+    assert pub[f"{base}/open_trunk/config"] != ""
