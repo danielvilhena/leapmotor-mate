@@ -96,3 +96,39 @@ def test_no_signals_does_not_crash_or_save(monkeypatch):
     main._post_command_refresh({"is_locked": 1}, epoch=3, delay=3, deadline_s=30)
     assert calls["save"] == []                                 # nothing to save
     assert calls["clear"] == 1                                 # overlay dropped at deadline
+
+
+# ── sunshade locked while driving (the car refuses it in motion) ─────────────────
+
+_T = lambda k: k   # identity translator → returns the i18n key
+
+
+def test_drive_locked_controls_blocked_while_driving():
+    moving = {"gear": "D", "speed_kmh": 117}
+    assert main._blocked_while_driving("open_sunshade", moving, _T) == "sunshade_moving"
+    assert main._blocked_while_driving("close_sunshade", moving, _T) == "sunshade_moving"
+    assert main._blocked_while_driving("open_trunk", moving, _T) == "trunk_moving"
+    assert main._blocked_while_driving("close_trunk", moving, _T) == "trunk_moving"
+    assert main._blocked_while_driving("open_windows", moving, _T) == "windows_moving"
+    assert main._blocked_while_driving("close_windows", moving, _T) == "windows_moving"
+    assert main._blocked_while_driving("lock", moving, _T) == "lock_moving"
+    assert main._blocked_while_driving("unlock", moving, _T) == "lock_moving"
+
+
+def test_drive_locked_controls_allowed_while_parked():
+    parked = {"gear": "P", "speed_kmh": 0}
+    for cmd in ("open_sunshade", "open_trunk", "close_windows", "lock", "unlock"):
+        assert main._blocked_while_driving(cmd, parked, _T) is None
+
+
+def test_speed_alone_counts_as_driving():
+    # gear may lag in Park; speed > 1 still means moving.
+    assert main._blocked_while_driving("open_sunshade", {"gear": "P", "speed_kmh": 30}, _T) == "sunshade_moving"
+
+
+def test_climate_and_comfort_not_blocked_while_driving():
+    # Climate/comfort work in motion — they must NOT be intercepted.
+    moving = {"gear": "D", "speed_kmh": 117}
+    for cmd in ("ac_on", "quick_cool", "quick_heat", "windshield_defrost", "find_car",
+                "battery_preheat", "steering_heat_on"):
+        assert main._blocked_while_driving(cmd, moving, _T) is None

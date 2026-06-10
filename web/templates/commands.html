@@ -19,6 +19,13 @@ document.addEventListener('htmx:afterRequest', function(e) {
   if (!e.detail.successful || !path.startsWith('api/command/')) return;
   var resultId = 'result-' + path.split('/').pop();
   var el = document.getElementById(resultId);
+  if (el && el.querySelector('[data-warn]')) {
+    // The command was refused before sending (e.g. sunshade while driving). Nothing
+    // changed on the car, so don't refetch the grid — that would wipe the notice.
+    // Leave it up to be read, then clear it.
+    setTimeout(function () { var n = document.getElementById(resultId); if (n) n.innerHTML = ''; }, 6000);
+    return;
+  }
   var slow = el && el.querySelector('[data-slow]');
   if (slow) {
     // Climate/slow commands show a spinner and have no optimistic overlay — leave it

@@ -116,6 +116,15 @@
       <span class="text-slate-300">{{ ico.mdi('car') }}</span>
       <span class="font-semibold text-white">{{ t('vehicle_section') }}</span>
     </div>
+    {# Every control in this card (lock / trunk / windows / sunshade) is locked out by the
+       car while moving — so flag it up front while driving. Climate & comfort cards are
+       separate and unaffected. Pressing anyway still shows the per-control notice. #}
+    {% if status and is_driving(status) %}
+    <div class="mb-3 flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium"
+         style="background:#f59e0b14;border:1px solid #f59e0b44;color:#fbbf24">
+      <span>🚗</span><span>{{ t('vehicle_driving_locked') }}</span>
+    </div>
+    {% endif %}
     <div class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-2 gap-2">
 
       <!-- Lock -->

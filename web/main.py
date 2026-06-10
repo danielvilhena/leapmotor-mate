@@ -146,7 +146,8 @@ def _ctx(**kwargs):
             "update": update_check.get_update_status(MATE_VERSION),
             "wallbox_enabled": db_reader.get_setting("wallbox_enabled", "0") == "1",
             "currency": db_reader.get_currency(), "auth_enabled": auth.enabled(),
-            "soc_color": _soc_color, "state_label": state_label, "state_color": _state_color}
+            "soc_color": _soc_color, "state_label": state_label, "state_color": _state_color,
+            "is_driving": _driving}
 
 
 # ── Routes ───────────────────────────────────────────────────────────────────
@@ -2024,6 +2025,27 @@ def _post_command_refresh(expected: dict, epoch: int, delay: int = 3, deadline_s
         time.sleep(4)
 
 
+# Commands the car refuses while in motion (the official app shows the same notice) —
+# mapped to the i18n key for the per-control warning. These are locked out at speed for
+# safety; firing them just bounces off the car, and their signals are unreliable while
+# moving — so we intercept the press and show the warning instead of sending it. Climate
+# and comfort controls are NOT here: they work fine while driving.
+_DRIVE_LOCKED = {
+    "open_sunshade": "sunshade_moving", "close_sunshade": "sunshade_moving",
+    "open_trunk":    "trunk_moving",    "close_trunk":    "trunk_moving",
+    "open_windows":  "windows_moving",  "close_windows":  "windows_moving",
+    "lock":          "lock_moving",     "unlock":         "lock_moving",
+}
+
+
+def _blocked_while_driving(name: str, status: dict, t) -> "str | None":
+    """Warning text if this command can't run because the car is moving, else None."""
+    key = _DRIVE_LOCKED.get(name)
+    if key and _driving(status or {}):
+        return t(key)
+    return None
+
+
 _CMD_COOLDOWN_S = 10     # match the HA integration's remote-action cooldown
 _last_command_at = 0.0
 
@@ -2033,6 +2055,15 @@ async def run_command(name: str, background_tasks: BackgroundTasks):
     fn = _COMMANDS.get(name)
     if not fn:
         return HTMLResponse('<span style="color:#ef4444">Unknown command</span>', status_code=400)
+
+    # The car locks some controls (sunshade, trunk, windows, lock) while moving —
+    # intercept the press and show the same notice the official app does, instead of
+    # bouncing it off the car. data-warn tells the Commands page to leave the message
+    # up (no grid refetch).
+    warn = _blocked_while_driving(name, db_reader.get_latest_status() or {},
+                                  i18n.get_t(db_reader.get_language()))
+    if warn:
+        return HTMLResponse(f'<span data-warn="1" style="color:#fbbf24">⚠️ {warn}</span>')
 
     # Remote-action cooldown (like the HA integration's 10s): don't fire commands too
     # close together — the previous one may still be completing on the car.
