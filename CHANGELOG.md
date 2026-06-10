@@ -3,6 +3,14 @@
 All notable changes to LeapMotor Mate are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.4] — 2026-06-10
+
+### Fixed
+- **The “Delete trip” button actually deletes now.** It had never worked since it shipped (v1.13.0): its
+  relative URL resolved against the app root, so the request went to a route that doesn’t exist and the
+  button silently did nothing. If you've ever pressed it and the trip stubbornly stayed — that was this.
+  Verified end-to-end, standalone and behind Home Assistant ingress.
+
 ## [1.16.3] — 2026-06-10
 
 ### Added
