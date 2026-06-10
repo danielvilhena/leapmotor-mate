@@ -24,7 +24,7 @@
     <div class="flex items-baseline gap-1">
       {% if totals.avg_efficiency %}
       <span class="stat-value {% if totals.avg_efficiency < 18 %}text-green-400{% elif totals.avg_efficiency < 22 %}text-yellow-400{% else %}text-red-400{% endif %}">
-        {{ totals.avg_efficiency | eff }}
+        {{ eff_val(totals.avg_efficiency)|nice }}<span class="text-base font-normal text-slate-400"> {{ eff_unit() }}</span>
       </span>
       {% else %}
       <span class="stat-value text-slate-500">—</span>
