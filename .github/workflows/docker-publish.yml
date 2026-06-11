@@ -1,9 +1,10 @@
-# Build & publish a ready-to-run Docker image to the GitHub Container Registry (GHCR), so
-# standalone-Docker users can `docker pull ghcr.io/protossblaster/leapmotor-mate` instead of
-# cloning + building from source. GHCR needs NO Docker Hub account and NO extra secrets — it
-# authenticates with the built-in GITHUB_TOKEN. The Home-Assistant add-on path is unaffected
-# (it builds its own images via the add-on repo); this is purely the standalone convenience.
-name: Publish Docker image (GHCR)
+# Build & publish a ready-to-run Docker image to the GitHub Container Registry (GHCR) and to
+# Docker Hub, so standalone-Docker users can `docker pull` instead of cloning + building from
+# source. GHCR needs NO extra secrets (built-in GITHUB_TOKEN); Docker Hub needs the
+# DOCKERHUB_USERNAME + DOCKERHUB_TOKEN repo secrets — when they are absent (e.g. forks) the
+# Docker Hub steps are skipped and the workflow publishes to GHCR only. The Home-Assistant
+# add-on path is unaffected (it pulls the GHCR image); this is purely standalone convenience.
+name: Publish Docker image (GHCR + Docker Hub)
 
 on:
   push:
@@ -14,6 +15,9 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
+  # Hoisted to env because the `secrets` context is not available in step-level `if`.
+  # Empty when the secret is unset (forks / pre-setup) → the Docker Hub steps no-op.
+  DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
 
 jobs:
   build-and-push:
@@ -38,11 +42,22 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Log in to Docker Hub
+        if: ${{ env.DOCKERHUB_USERNAME != '' }}
+        uses: docker/login-action@v3
+        with:
+          username: ${{ env.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
       - name: Image metadata (tags + labels)
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          # Same tags for both registries; the Docker Hub image is enabled only when the
+          # secrets exist, so forks (and this repo, pre-setup) still publish to GHCR alone.
+          images: |
+            name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+            name=docker.io/${{ env.DOCKERHUB_USERNAME }}/leapmotor-mate,enable=${{ env.DOCKERHUB_USERNAME != '' }}
           # `latest` on the default branch; the version on a vX.Y.Z tag; always a short SHA.
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
