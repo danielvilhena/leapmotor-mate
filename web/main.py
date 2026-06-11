@@ -22,7 +22,7 @@ import mqtt_check
 import auth
 import update_check
 
-MATE_VERSION = "1.16.8"  # bump together with the git tag + add-on config.yaml at release
+MATE_VERSION = "1.16.9"  # bump together with the git tag + add-on config.yaml at release
 
 import diagnostics
 
@@ -657,15 +657,19 @@ async def settings_page(request: Request):
                 "charge_dc_min_kw": db_reader.get_setting("charge_dc_min_kw", "11"),
                 "db_size_mb": round(db_reader.get_db_size_bytes() / 1048576, 1)}
     # Per-card open/collapsed state for the settings accordion — saved in the DB (shared
-    # across devices). Every card starts collapsed so the page stays compact; the user's
-    # chevron toggles are remembered per card (see _UI_CARD_KEYS / save_ui_state).
-    card_open = {k: _card_open(k, False) for k in _UI_CARD_KEYS}
+    # across devices). Cards start collapsed so the page stays compact, EXCEPT 'vehicle': it's
+    # tiny (model + VIN + the Logout/change-account button) and keeping it open makes the logout
+    # discoverable without hunting. The user's chevron toggles are remembered per card.
+    card_open = {k: _card_open(k, k == "vehicle") for k in _UI_CARD_KEYS}
     return templates.TemplateResponse(request, "settings.html", _ctx(
         page="settings", vehicle=vehicle, settings=settings, card_open=card_open,
         charge_types=db_reader.CHARGE_TYPES,
         ha_url=db_reader.get_setting("ha_url", ""),
         ha_has_token=bool(db_reader.get_setting("ha_token", "")),
         ha_supervisor=bool(os.environ.get("SUPERVISOR_TOKEN")),
+        # Dev/env-var mode skips the wizard, so the credentials live in the environment,
+        # not the DB — the Logout button (which clears DB creds) wouldn't apply there.
+        env_login=bool(os.environ.get("LEAPMOTOR_USER")),
         wb_keywords=db_reader.get_setting("wb_keywords", ""),
         currencies=db_reader.CURRENCIES,
         currency_code=db_reader.get_currency_code(),
@@ -776,11 +780,17 @@ async def wallbox_entities(request: Request, show_all: int = 0):
         # Keep only mappable domains (sensor/number) so the dropdowns stay usable.
         entities = [e for e in all_entities
                     if e["entity_id"].split(".", 1)[0] in ("sensor", "number", "input_number")]
+        # Advanced mode is the manual escape hatch → no per-role unit narrowing.
+        role_entities = {role: entities for role in ha_client.WB_ROLES}
     else:
-        # Offer only the wallbox device's own sensors in the dropdowns (not every HA entity).
+        # Offer only the wallbox device's own sensors in the dropdowns (not every HA entity)…
         entities = ha_client.filter_device_entities(all_entities, mapping)
+        # …and, per role, only the sensors whose unit fits (kW for power, kWh for energy, …) so a
+        # wrong-unit pick can't corrupt the stored data. The saved choice is always kept visible.
+        role_entities = {role: ha_client.entities_for_role(role, entities, mapping.get(role))
+                         for role in ha_client.WB_ROLES}
     return templates.TemplateResponse(request, "partials/wallbox_entities.html", _ctx(
-        entities=entities, mapping=mapping, roles=ha_client.WB_ROLES, show_all=advanced,
+        role_entities=role_entities, mapping=mapping, roles=ha_client.WB_ROLES, show_all=advanced,
     ))
 
 
@@ -1247,6 +1257,23 @@ async def save_ui_state(request: Request):
         db_reader.set_setting(f"ui_{key}_open",
                               "1" if form.get("open") in ("1", "on", "true") else "0")
     return Response(status_code=204)
+
+
+@app.post("/api/account/logout")
+async def account_logout(request: Request):
+    """Sign out of the Leapmotor account so a different one can be linked, WITHOUT touching
+    any data: trips, charges, positions and the shared app certificate are all left intact.
+    Only the stored login is cleared and the setup wizard re-opened. The poller notices the
+    credential change and restarts itself to re-authenticate as the new account (run.sh →
+    container restart); history is keyed by VIN, so the same car's records carry over."""
+    db_reader.set_setting("leapmotor_user", "")
+    db_reader.set_secret("leapmotor_pass", "")
+    db_reader.set_secret("leapmotor_pin", "")
+    db_reader.set_setting("setup_complete", "0")
+    command_client._session._reset()          # drop the web command session too
+    resp = Response(status_code=204)
+    resp.headers["HX-Redirect"] = request.headers.get("x-ingress-path", "") + "/setup"
+    return resp
 
 
 def _status_dot(color: str, label: str) -> HTMLResponse:

@@ -23,7 +23,11 @@
 
     const map = L.map('map', { preferCanvas: true }).fitBounds(L.latLngBounds(allPts).pad(0.05));
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '© OpenStreetMap'
+      attribution: '© OpenStreetMap',
+      // OSM blocks tiles that arrive without a Referer; some Firefox setups (strict tracking
+      // protection / private mode / hardened forks) drop it cross-origin, so send the page
+      // origin explicitly to keep the tiles loading.
+      referrerPolicy: 'origin'
     }).addTo(map);
 
     // Each trip as its own connected polyline — never joined across trips. A white

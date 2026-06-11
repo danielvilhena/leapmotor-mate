@@ -128,6 +128,8 @@ The first launch walks you through two steps:
 
 That's it — the poller starts and data begins to appear.
 
+To switch to a **different Leapmotor account** later, use **Settings → Vehicle → Log out**: it clears only the stored login and re‑opens this wizard (your app certificate stays). All your trips and charges are kept — they're tied to the car's VIN, so the same car carries straight over.
+
 ## Configuration
 
 Everything is configured from the web UI (**Settings**), no YAML needed:
@@ -162,20 +164,20 @@ Enable it in **Settings → Wallbox present**, then connect to Home Assistant. H
 - **As a Home Assistant add‑on** — *nothing to configure.* Mate reaches HA through the internal Supervisor API automatically, regardless of how HA is exposed externally (HTTP, HTTPS, Nabu Casa). You'll just see a green **connection status** dot.
 - **As standalone Docker** — enter your HA URL (e.g. `http://192.168.1.10:8123`) and a **Long‑Lived Access Token** (HA → your profile → *Security* → *Long‑Lived Access Tokens* → *Create Token*). Local HTTPS, even with a self‑signed certificate, works.
 
-Then expand **Entity mapping** and assign the wallbox sensors (power, energy, status, max current, charging speed, max available power). Mate pre‑selects them automatically and only lists your wallbox device's own entities, so you don't have to scroll through every Home Assistant sensor.
+Then expand **Entity mapping** and assign the wallbox sensors. Mate pre‑selects them automatically and only lists your wallbox device's own entities. Each field's label shows the expected **unit**, and the dropdown offers **only sensors of that unit** for the two that feed the maths — **Charging power** lists only kW, **Session energy** only kWh — so you can't accidentally map a kWh meter as power (which would corrupt the stored power and cost figures). The **Show all entities** toggle lifts this for non‑standard setups, and a sensor you already mapped is never hidden.
 
 **What each setting means** — all optional (Mate auto‑detects them; override one only if auto‑mapping picks the wrong entity, e.g. foreign‑language names):
 
 | Setting | What it is |
 | --- | --- |
-| **Power** | The power the wallbox is delivering **right now** (AC). Drives the live "charging" indicator and the **AC** side of the AC‑vs‑DC comparison. W is auto‑converted to kW. |
+| **Charging power (kW)** | The power the wallbox is delivering **right now** (AC). Drives the live "charging" indicator and the **AC** side of the AC‑vs‑DC comparison. W is auto‑converted to kW. |
 | **Status** | The wallbox's own state text from Home Assistant (e.g. *Charging / Connected / Idle / Error*). |
-| **Session energy** | Energy delivered in the session (kWh; Wh auto‑converted). This is the **AC kWh** Mate bills home charges on (you pay the wallbox AC, conversion losses included) and uses for the efficiency figure. |
-| **Power control** | The **only writable** setting (a `number` entity): sets the wallbox **max charging current** (A) from the Wallbox page. Your own HA load‑balancing automations may override what you set. |
-| **Charging speed** | Your wallbox's own "charging speed" reading, if it exposes one (shown live). |
-| **Max available power** | The maximum power currently available to the wallbox (e.g. after dynamic load balancing or a tariff cap), if exposed. |
+| **Session energy (kWh)** | Energy delivered in the session (kWh; Wh auto‑converted). This is the **AC kWh** Mate bills home charges on (you pay the wallbox AC, conversion losses included) and uses for the efficiency figure. |
+| **Max charging current (A)** | The **only writable** setting (a `number` entity): sets the wallbox **max charging current** in **amps** from the Wallbox page. Your own HA load‑balancing automations may override what you set. |
+| **Charging speed (km/h)** | Your wallbox's own "charging speed" reading, if it exposes one (shown live). |
+| **Max available (kW or A)** | The maximum currently available to the wallbox (e.g. after dynamic load balancing or a tariff cap), if exposed — in **kW or A** depending on the wallbox (V2C/Pulsar report it in amps). Shown as‑is with its own unit. |
 
-Only **Power control** writes to the wallbox; everything else is read‑only.
+Only **Max charging current** writes to the wallbox; everything else is read‑only.
 
 What you get on the new **Wallbox** page:
 - a **live panel** (power, status, session energy, charging speed, max available power) plus the session cost (reused from your home charges);

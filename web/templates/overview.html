@@ -29,7 +29,9 @@
     <script>
       const map = L.map('map').setView([{{ status.latitude }}, {{ status.longitude }}], 15);
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '© OpenStreetMap'
+        attribution: '© OpenStreetMap',
+        // OSM blocks tiles with no Referer; send the page origin so they load in privacy-strict Firefox.
+        referrerPolicy: 'origin'
       }).addTo(map);
       const icon = L.divIcon({
         html: '<div style="background:#14b8a6;width:14px;height:14px;border-radius:50%;border:3px solid white;box-shadow:0 0 6px rgba(0,0,0,0.5)"></div>',

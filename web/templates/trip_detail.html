@@ -104,7 +104,9 @@
       const latlngs = coords.map(p => [p.latitude, p.longitude]);
       const map = L.map('map').fitBounds(L.latLngBounds(latlngs).pad(0.15));
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '© OpenStreetMap'
+        attribution: '© OpenStreetMap',
+        // OSM blocks tiles with no Referer; send the page origin so they load in privacy-strict Firefox.
+        referrerPolicy: 'origin'
       }).addTo(map);
 
       // Route: single red with white outline for visibility

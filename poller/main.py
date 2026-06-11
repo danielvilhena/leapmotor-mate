@@ -279,6 +279,7 @@ def main():
             time.sleep(5)
         log.info("Setup complete — starting poller")
     cfg = load_config(db)
+    _startup_login = (cfg["username"], cfg["password"], cfg["pin"])
     _u = cfg["username"]
     _masked = (_u[:3] + "***" + _u[_u.find("@"):]) if "@" in _u else (_u[:3] + "***")
     device_id = db.get_or_create_device_id()
@@ -334,6 +335,16 @@ def main():
 
     while True:
         try:
+            # Account switched in Settings (Logout → new setup): once a *different* complete
+            # login is saved, exit so run.sh restarts the container and re-authenticates as the
+            # new account. The logged-out window (cleared creds, setup_complete=0) is skipped by
+            # the is_setup_complete() guard. History is keyed by VIN — the same car carries over.
+            if db.is_setup_complete():
+                _login_now = load_config(db)
+                if (_login_now["username"], _login_now["password"], _login_now["pin"]) != _startup_login:
+                    log.info("Leapmotor account changed in Settings — restarting poller to re-authenticate")
+                    os._exit(0)
+
             # Apply user-tunable poll cadence + charge-detection floor (Settings) live, each cycle
             try:
                 recorder.set_poll_intervals(

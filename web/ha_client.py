@@ -208,6 +208,37 @@ def _score(entity: dict, domains, keywords, dclass) -> int:
     return s
 
 
+# Units a role's sensor may carry. The picker offers only matching entities so a kWh energy
+# sensor can't be mapped to the kW power role, or vice-versa — the one swap that corrupts the
+# stored power/cost data the DB derives. Lower-cased for a case-insensitive match.
+# ONLY `power` and `energy` are narrowed, on purpose: they are the DB-critical pair AND the one
+# confusable by unit (kW vs kWh). The other roles are deliberately left unfiltered because their
+# unit varies by wallbox and a filter would hide a real sensor — e.g. `max_power` (dynamic-load
+# limit) is reported in **A** by V2C/Pulsar (not kW), `max_current` is the A control, `speed` is
+# km/h, `status` is text — and none of them feed the energy/cost maths.
+_ROLE_UNITS = {
+    "power":  {"w", "kw"},
+    "energy": {"wh", "kwh", "mwh"},
+}
+
+
+def entities_for_role(role: str, entities: list[dict], selected_eid: str | None = None) -> list[dict]:
+    """Subset of `entities` offerable for `role` in normal mode: only those whose unit (or the
+    role's device_class) fits, so the unit can't be mismatched by hand. The currently-mapped
+    entity is always kept so an existing choice is never hidden, and unit-less roles return
+    everything. Advanced 'Show all' mode bypasses this entirely (caller passes the full list)."""
+    units = _ROLE_UNITS.get(role)
+    if not units:
+        return entities
+    dclass = _ROLE_HINTS[role][2]
+    out = []
+    for e in entities:
+        unit = (e.get("unit") or "").strip().lower()
+        if unit in units or (dclass and e.get("device_class") == dclass) or e["entity_id"] == selected_eid:
+            out.append(e)
+    return out
+
+
 def auto_map(entities: list[dict]) -> dict:
     """Best-guess role→entity_id from a discovered entity list."""
     mapping = {}

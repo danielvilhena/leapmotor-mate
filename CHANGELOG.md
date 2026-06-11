@@ -3,6 +3,33 @@
 All notable changes to LeapMotor Mate are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.9] — 2026-06-11
+
+### Added
+- **🔓 Log out / change Leapmotor account.** A new **Log out** button in *Settings → Vehicle* clears
+  only the stored login and re‑opens the setup wizard so you can link a **different Leapmotor
+  account** — without losing anything. Your trips, charges and positions are kept (they're tied to
+  the car's VIN, so the same car carries straight over) and the shared app certificate is untouched.
+  The poller re‑authenticates as the new account automatically. (Asks for confirmation first.)
+
+### Changed
+- **🗺️ Map tiles now load in privacy‑strict Firefox.** OpenStreetMap blocks tiles that arrive without
+  a `Referer`, which some Firefox setups (strict tracking protection, private windows, hardened forks
+  like LibreWolf/Mullvad) strip — so the map showed "Access blocked" tiles. The tile layers now send
+  the page origin explicitly (`referrerPolicy`), fixing it on every map (Map, Overview, Trip detail,
+  Navigation). Chrome was unaffected and stays the same.
+- **🎛️ Wallbox sensor picker can't be mis‑mapped by unit.** Each role's dropdown now offers **only
+  sensors of the right unit** for the two that feed the calculations — **Charging power** lists only
+  kW, **Session energy** only kWh — so a kWh meter can no longer be mapped as power (or vice‑versa),
+  which used to silently corrupt the stored power and cost data. A choice you already saved is never
+  hidden, the other roles (whose unit varies by wallbox) stay unfiltered, and **Show all entities**
+  bypasses it for non‑standard setups.
+- **🏷️ Precise wallbox field names with units.** Every mapping field now states its unit — *Charging
+  power (kW)*, *Session energy (kWh)*, *Charging speed (km/h)* — and the mislabeled current control is
+  fixed from "Wallbox power control" to **Max charging current (A)** (it sets amps, not power). *Max
+  available* is clarified as **kW or A** since V2C/Pulsar report it in amps. EN/IT/FR/DE.
+- The *Vehicle* settings card now opens by default so the new Log out button is easy to find.
+
 ## [1.16.8] — 2026-06-11
 
 ### Changed

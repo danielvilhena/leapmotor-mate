@@ -23,7 +23,7 @@
               class="w-full px-2.5 py-1.5 rounded-lg bg-slate-800 border border-slate-600 text-white
                      text-xs focus:outline-none focus:border-brand cursor-pointer">
         <option value="">{{ t('wb_none') }}</option>
-        {% for e in entities %}
+        {% for e in role_entities[role] %}
         <option value="{{ e.entity_id }}" {% if mapping.get(role) == e.entity_id %}selected{% endif %}
                 title="{{ e.name }}{% if e.unit %} ({{ e.unit }}){% endif %} · {{ e.entity_id }}">
           {{ e.name }}{% if e.unit %} ({{ e.unit }}){% endif %}

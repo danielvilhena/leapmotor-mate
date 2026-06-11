@@ -56,7 +56,8 @@
                     {{ status.longitude if status and status.longitude else 9.19 }}];
   const navMap = L.map('navmap').setView(navStart, 14);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-              { attribution: '© OpenStreetMap' }).addTo(navMap);
+              // OSM blocks tiles with no Referer; send the page origin so they load in privacy-strict Firefox.
+              { attribution: '© OpenStreetMap', referrerPolicy: 'origin' }).addTo(navMap);
 
   {% if status and status.latitude and status.longitude %}
   L.marker(navStart).addTo(navMap).bindPopup('🚗');
