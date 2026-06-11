@@ -257,7 +257,13 @@ def filter_device_entities(entities: list[dict], mapping: dict) -> list[dict]:
     """Keep only entities belonging to the same device as the mapped roles, so the
     picker offers the wallbox's own sensors — not every power/energy entity in HA.
     Device is inferred as the longest common id-prefix of the mapped entities."""
-    ids = [v for v in mapping.values() if v]
+    # Anchor on the CORE roles (power + energy): auto-map identifies these most reliably, so a
+    # noisier role that fell back to an unrelated entity — e.g. a max-current `number` from a
+    # household device — can't collapse the common prefix and silently disable the whole filter
+    # (which flooded the picker with every home power sensor on a V2C). Fall back to all mapped
+    # roles, then to no filtering.
+    ids = [mapping.get(r) for r in ("power", "energy") if mapping.get(r)] or \
+          [v for v in mapping.values() if v]
     if not ids:
         return entities
 

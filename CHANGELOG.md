@@ -3,6 +3,16 @@
 All notable changes to LeapMotor Mate are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.11] — 2026-06-11
+
+### Fixed
+- **🎛️ Wallbox picker no longer floods with home power sensors.** On a charger surrounded by lots
+  of home‑energy sensors (e.g. a V2C/Trydan with whole‑home monitoring), the role dropdowns could
+  list *every* `power` entity in the house. The device filter now anchors on the **power + energy**
+  roles (the ones auto‑detection nails reliably), so a secondary role that mapped off‑device — e.g. a
+  max‑current control falling back to a household `number` — can no longer collapse the narrowing;
+  each dropdown again shows only the wallbox's own sensors. *(Reported on Telegram.)*
+
 ## [1.16.10] — 2026-06-11
 
 ### Changed

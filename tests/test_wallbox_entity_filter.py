@@ -53,3 +53,19 @@ def test_saved_choice_is_never_hidden():
 def test_device_class_power_without_unit_is_offered():
     odd = _e("sensor.odd_power", "", "power")    # typed power but no unit_of_measurement
     assert _ids("power", entities=[odd]) == ["sensor.odd_power"]
+
+
+def test_device_filter_survives_a_stray_noncore_mapping():
+    """A non-core role that auto-mapped off-device (e.g. max-current → a household number) must NOT
+    collapse the device filter and flood the picker with every home power sensor (the V2C report)."""
+    ents = [_e("sensor.evse_v2c_trydan_local_potenza_di_carica", "kW", "power"),
+            _e("sensor.evse_v2c_trydan_local_energia_di_carica", "kWh", "energy"),
+            _e("sensor.lavatrice_potenza", "W", "power"),       # household noise
+            _e("number.presa_smart_corrente", "A")]             # the stray max-current pick
+    mapping = {"power":  "sensor.evse_v2c_trydan_local_potenza_di_carica",
+               "energy": "sensor.evse_v2c_trydan_local_energia_di_carica",
+               "max_current": "number.presa_smart_corrente"}   # off the wallbox device
+    out = [e["entity_id"] for e in H.filter_device_entities(ents, mapping)]
+    assert "sensor.evse_v2c_trydan_local_potenza_di_carica" in out
+    assert "sensor.lavatrice_potenza" not in out               # household power dropped
+    assert "number.presa_smart_corrente" not in out            # the stray pick dropped too
