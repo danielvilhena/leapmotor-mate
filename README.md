@@ -104,6 +104,8 @@ docker run -d --name leapmotor-mate \
   ghcr.io/protossblaster/leapmotor-mate:latest
 ```
 
+The same image is also on [Docker Hub](https://hub.docker.com/r/protossblaster/leapmotor-mate) — use `protossblaster/leapmotor-mate:latest` interchangeably.
+
 To update later: `docker pull ghcr.io/protossblaster/leapmotor-mate:latest` then recreate the container (or use [Watchtower](https://containrrr.dev/watchtower/) for automatic updates).
 
 **Or build from source:**
@@ -314,6 +316,8 @@ docker run -d --name leapmotor-mate \
   -v "$(pwd)/data:/data" \
   ghcr.io/protossblaster/leapmotor-mate:latest
 ```
+
+La stessa immagine è anche su [Docker Hub](https://hub.docker.com/r/protossblaster/leapmotor-mate) — puoi usare `protossblaster/leapmotor-mate:latest` in modo equivalente.
 
 Per aggiornare in seguito: `docker pull ghcr.io/protossblaster/leapmotor-mate:latest` e ricrea il container (oppure usa [Watchtower](https://containrrr.dev/watchtower/) per gli aggiornamenti automatici).
 
