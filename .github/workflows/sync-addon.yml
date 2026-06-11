@@ -61,7 +61,9 @@ jobs:
         env:
           VERSION: ${{ steps.ver.outputs.version }}
         run: |
-          img="ghcr.io/${{ github.repository_owner }}/leapmotor-mate:${VERSION}"
+          # GHCR image paths are lowercase; github.repository_owner keeps the original case.
+          owner=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          img="ghcr.io/${owner}/leapmotor-mate:${VERSION}"
           echo "Waiting for ${img} …"
           for i in $(seq 1 60); do
             if docker manifest inspect "$img" >/dev/null 2>&1; then
