@@ -35,8 +35,13 @@ def test_home_billed_on_wallbox_meter_else_battery(monkeypatch):
     assert round(r["cost"], 2) == 2.00
 
 
-def _charge_total(database, start, readings):
+def _charge_total(database, start, readings, hours_ago=5.0):
+    from datetime import datetime, timedelta, timezone
     cid = database.create_charge(1, types.SimpleNamespace(soc=20, latitude=1.0, longitude=2.0))
+    # Backdate the start so the synthetic counter rises are physically plausible: the per-poll guard
+    # caps a single step at the wallbox's power × elapsed time (see _wb_energy_ceiling, GitHub #46).
+    past = (datetime.now(timezone.utc) - timedelta(hours=hours_ago)).isoformat()
+    database._conn.execute("UPDATE charges SET started_at=? WHERE id=?", (past, cid))
     database.set_charge_wallbox_start(cid, start)
     for v in readings:
         database.accumulate_wallbox_energy(cid, v)

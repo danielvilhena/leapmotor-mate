@@ -20,6 +20,21 @@ BATTERY_CAPACITY_DEFAULTS: dict[str, float] = {
 }
 BATTERY_CAPACITY_FALLBACK = 65.0
 
+# Physical ceiling for wallbox session energy (GitHub #46). A HOME wallbox can't deliver more
+# energy than its power × time. We cap at a generous 22 kW (3-phase 32 A, the realistic home-AC
+# ceiling) so legit charging NEVER trips it, times elapsed hours, plus headroom. A counter that
+# reports a LIFETIME TOTAL (hundreds–thousands of kWh) as a single step — e.g. the entity reads 0
+# at plug-in then snaps back to its cumulative value — lands far above this and is rejected.
+_WB_MAX_KW = 22.0
+_WB_MARGIN = 1.5
+_WB_FLOOR_KWH = 1.0
+
+
+def _wb_energy_ceiling(max_power_kw: Optional[float], hours: Optional[float]) -> float:
+    """Max plausible wallbox energy for a session of `hours` at peak `max_power_kw`."""
+    kw = max(max_power_kw or 0.0, _WB_MAX_KW)
+    return kw * max(hours or 0.0, 0.0) * _WB_MARGIN + _WB_FLOOR_KWH
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS settings (
     key   TEXT PRIMARY KEY,
@@ -247,6 +262,7 @@ class Database:
         self._repair_quantized_trip_distance()
         self._repair_snap_to_full_charges()
         self._drop_phantom_charges()
+        self._repair_bogus_wallbox_energy()
         self.migrate_secrets()
         self._check_decryption()
         log.info("Database ready: %s", path)
@@ -390,6 +406,39 @@ class Database:
         self._conn.commit()
         if n:
             log.info("Phantom-charge cleanup: dropped %d empty charge(s) (no SoC, no wallbox energy)", n)
+
+    def _repair_bogus_wallbox_energy(self) -> None:
+        """One-time cleanup mirroring the live finalize_charge guard (GitHub #46): fix charges whose
+        stored wallbox energy (ac_energy_kwh) is physically impossible — a counter that reported a
+        lifetime TOTAL as the session delta (e.g. tens of thousands of kWh for a 15-minute charge),
+        inflating both the energy shown and the cost. Null the bad AC figure so the charge bills on
+        the DC (SoC) energy, and rescale a cost that was billed on that AC figure to the SAME €/kWh.
+        Only touches rows that clear the (generous) physical ceiling, so a real charge is never hit."""
+        if self.get_setting("charges_wb_energy_repair_v1") == "1":
+            return
+        rows = self._conn.execute(
+            "SELECT * FROM charges WHERE ended_at IS NOT NULL AND ac_energy_kwh IS NOT NULL "
+            "AND ac_energy_kwh > 0").fetchall()
+        fixed = 0
+        for c in rows:
+            ac = c["ac_energy_kwh"]
+            if ac <= _wb_energy_ceiling(c["max_power_kw"], (c["duration_min"] or 0) / 60):
+                continue
+            dc = c["energy_added_kwh"] or 0
+            new_cost = c["cost"]
+            # The cost was billed on the bogus AC energy → rescale onto the DC energy at the same
+            # effective €/kWh (mirrors _repair_snap_to_full_charges). Untyped/zero-cost rows are left.
+            if c["cost"] and ac > 0:
+                new_cost = round(c["cost"] / ac * dc, 2)
+            self._conn.execute("UPDATE charges SET ac_energy_kwh=NULL, cost=? WHERE id=?",
+                               (new_cost, c["id"]))
+            log.info("Charge #%d: bogus wallbox energy %.1f kWh dropped → DC billing%s",
+                     c["id"], ac, "" if new_cost == c["cost"] else f" | cost {c['cost']}→{new_cost}")
+            fixed += 1
+        self._conn.commit()
+        self.set_setting("charges_wb_energy_repair_v1", "1")
+        if fixed:
+            log.info("Wallbox-energy repair: %d charge(s) fixed (implausible counter)", fixed)
 
     # ── Settings ─────────────────────────────────────────────────────────────
 
@@ -679,13 +728,30 @@ class Database:
         resets relative to our polls. wallbox_energy_start_kwh holds the last reading seen (the running
         baseline), persisted so the sum survives a poller restart mid-charge."""
         row = self._conn.execute(
-            "SELECT wallbox_energy_start_kwh AS last, ac_energy_kwh AS accum FROM charges WHERE id=?",
+            "SELECT wallbox_energy_start_kwh AS last, ac_energy_kwh AS accum, "
+            "started_at, max_power_kw FROM charges WHERE id=?",
             (charge_id,)).fetchone()
         if row is None:
             return
         last, accum = row["last"], (row["accum"] or 0.0)
         if last is not None and reading >= last:
-            accum += reading - last
+            rise = reading - last
+            # Physical guard (GitHub #46): a single step that exceeds what the wallbox could deliver
+            # since the charge started is not energy — it's the counter jumping to a lifetime total
+            # (e.g. it read ~0 at plug-in). Skip that step but still advance the baseline, so the
+            # real per-poll rises AFTER it are counted normally (the session self-corrects).
+            elapsed_h = 0.0
+            if row["started_at"]:
+                try:
+                    elapsed_h = (datetime.now(timezone.utc)
+                                 - datetime.fromisoformat(row["started_at"])).total_seconds() / 3600
+                except (TypeError, ValueError):
+                    elapsed_h = 0.0
+            if rise <= _wb_energy_ceiling(row["max_power_kw"], elapsed_h):
+                accum += rise
+            else:
+                log.warning("Charge #%d: ignoring implausible wallbox step +%.1f kWh "
+                            "(counter glitch / lifetime total)", charge_id, rise)
         self._conn.execute(
             "UPDATE charges SET wallbox_energy_start_kwh=?, ac_energy_kwh=? WHERE id=?",
             (reading, round(accum, 3), charge_id))
@@ -761,6 +827,14 @@ class Database:
             ),
         )
         self._conn.commit()
+        # Backstop for the per-poll guard (GitHub #46): if the final wallbox total is still
+        # physically impossible for this session, the counter was unreliable — drop it so the
+        # charge bills on the DC (SoC) energy instead of an absurd AC figure.
+        if ac_kwh is not None and ac_kwh > _wb_energy_ceiling(max_power_kw, duration_min / 60):
+            self._conn.execute("UPDATE charges SET ac_energy_kwh=NULL WHERE id=?", (charge_id,))
+            self._conn.commit()
+            log.warning("Charge #%d: dropped implausible wallbox energy %.1f kWh (kept DC billing)",
+                        charge_id, ac_kwh)
         log.info(
             "Charge #%d ended — SOC %.1f→%.1f%% | +%.1f kWh | %.0f min | %s | peak %.1f kW",
             charge_id, start_soc, data.soc, energy_added, duration_min,

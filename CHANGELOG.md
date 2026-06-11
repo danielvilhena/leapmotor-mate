@@ -3,6 +3,17 @@
 All notable changes to LeapMotor Mate are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.13] — 2026-06-11
+
+### Fixed
+- **🔌 Impossible charge energy & cost fixed.** A wallbox energy counter that reads ~0 when you plug
+  in and then snaps back to its **lifetime total** could log a single charge as tens of thousands of
+  kWh — with a matching three‑figure cost — throwing off your charge totals. Mate now rejects a
+  physically impossible counter jump, keeps counting the **real** energy after it, and a **one‑time
+  cleanup** repairs any such charge already in your history: it drops the bogus wallbox figure and
+  re‑prices the charge on the battery (SoC) energy at the same €/kWh. Genuine charges are never
+  touched (verified on real data). *(GitHub #46.)*
+
 ## [1.16.12] — 2026-06-11
 
 ### Fixed

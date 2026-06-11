@@ -22,7 +22,7 @@ import mqtt_check
 import auth
 import update_check
 
-MATE_VERSION = "1.16.12"  # bump together with the git tag + add-on config.yaml at release
+MATE_VERSION = "1.16.13"  # bump together with the git tag + add-on config.yaml at release
 
 import diagnostics
 
