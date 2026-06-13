@@ -15,6 +15,7 @@ log = logging.getLogger(__name__)
 # first-run fallback if the setup wizard didn't set a per-variant value.
 BATTERY_CAPACITY_DEFAULTS: dict[str, float] = {
     "T03": 36.0,   # EU only variant (gross 37.3)
+    "B05": 65.0,   # Pro Max 482 km WLTP (EU; gross 67.1; shares the B10 pack)
     "B10": 65.0,   # Pro Max 434 km WLTP (EU; gross 67.1, 3.1% buffer)
     "C10": 69.9,   # RWD (EU; gross 72.0)
 }

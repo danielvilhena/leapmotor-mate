@@ -23,7 +23,7 @@ import mqtt_check
 import auth
 import update_check
 
-MATE_VERSION = "1.20.0"  # bump together with the git tag + add-on config.yaml at release
+MATE_VERSION = "1.20.1"  # bump together with the git tag + add-on config.yaml at release
 
 import diagnostics
 
@@ -2294,13 +2294,14 @@ async def run_command(name: str, background_tasks: BackgroundTasks):
 
 # ── Battery options — European models only (verified specs) ──────────────────
 # T03: single EU variant → auto-set (no user selection needed)
-# C10/B10: two EU variants → selector shown
+# C10/B10/B05: two EU variants → selector shown
 
 # Per-variant USABLE (net) capacity, kWh — the energy between the BMS's protective
 # limits, not the gross pack. Sourced from EV Database / manufacturer sheets (cross-checked):
 #   T03   gross 37.3 → usable 36.0          C10 RWD gross 72.0 → usable 69.9
 #   B10 Pro     56.2 → 55.0                 C10 AWD gross 84.0 → usable 81.9
 #   B10 Pro Max 67.1 → 65.0 (2.1 kWh / 3.1% buffer, confirmed by 2 sources)
+#   B05 Pro     56.2 → 55.0   ·  B05 Pro Max 67.1 → 65.0 (shares the B10 pack; WLTP 401 / 482)
 # These are the DEFAULTS for new setups; existing installs keep whatever they configured
 # (no silent migration of a calibrated value). NB on the B10 Pro Max: the car's DISPLAYED
 # SoC 0–100% is calibrated close to the GROSS 67.1 — a real-car ∫V·I measurement matched
@@ -2318,6 +2319,10 @@ _EU_BATTERY_MAP: dict[str, list[dict]] = {
     "B10": [
         {"v": "55.0", "label": "55.0 kWh usable — Pro · 361 km WLTP"},
         {"v": "65.0", "label": "65.0 kWh usable — Pro Max · 434 km WLTP"},
+    ],
+    "B05": [
+        {"v": "55.0", "label": "55.0 kWh usable — Pro · 401 km WLTP"},
+        {"v": "65.0", "label": "65.0 kWh usable — Pro Max · 482 km WLTP"},
     ],
 }
 
