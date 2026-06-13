@@ -70,6 +70,26 @@ def test_non_token_auth_error_falls_back_to_relogin(monkeypatch):
     assert api.closed == 1         # it went through the reset + full re-login path instead
 
 
+def test_vanished_cert_falls_back_to_relogin(monkeypatch):
+    # riri19's case: the account TLS cert temp file disappeared from /tmp, so a command failed with
+    # "Could not find the TLS certificate file". It must re-login (which re-creates the cert) and
+    # retry — not fail outright (and not waste a token refresh, which can't fix a missing cert).
+    api = _FakeAPI()
+    sess = _session_with(monkeypatch, api)
+    n = {"c": 0}
+
+    def action(_api, _vin):
+        n["c"] += 1
+        if n["c"] == 1:
+            raise RuntimeError("Could not find the TLS certificate file, invalid path: "
+                               "/tmp/tmplw5grazr-leapmotor-cert.pem")
+
+    ok, _ = sess.execute(action)
+    assert ok is True
+    assert api.refreshed == 0      # a cert error is not a refreshable token
+    assert api.closed == 1         # reset + full re-login re-creates the cert, retry then succeeds
+
+
 def test_refresh_attempted_once_then_relogin(monkeypatch):
     # token error that persists even after a successful refresh → one refresh, then re-login, then give up
     api = _FakeAPI()

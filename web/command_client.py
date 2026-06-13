@@ -135,7 +135,10 @@ class LeapmotorSession:
 
     def _is_auth_error(self, err: str) -> bool:
         low = err.lower()
-        return any(k in low for k in ("token", "verification", "unauthori", "login"))
+        # "certificate"/"cert" = the account TLS cert temp file vanished from /tmp ("Could not find
+        # the TLS certificate file") — NOT token-refreshable; it must fall through to the full
+        # re-login, which re-creates the cert (mirrors the poller's relogin self-heal).
+        return any(k in low for k in ("token", "verification", "unauthori", "login", "certificate", "cert"))
 
     def _is_token_error(self, err: str) -> bool:
         """A genuine access-token expiry/invalidity — refreshable WITHOUT a full re-login. Narrower
@@ -169,14 +172,19 @@ class LeapmotorSession:
                     return True, "OK"
                 except Exception as e:
                     err = str(e)
-                    log.error("Command error (attempt %d): %s", attempt + 1, err)
+                    # A first failed attempt is usually transient (stale keep-alive or an expired
+                    # token) and recovers on retry — log those at warning/info, and reserve ERROR
+                    # for a command that actually gives up, so the diagnostics aren't alarming.
                     if self._is_connection_error(err):
                         # Stale keep-alive connection — reset and retry immediately
                         self._reset()
                         if attempt >= 1:
+                            log.error("Command failed (connection): %s", err)
                             return False, err
+                        log.warning("Command hit a stale connection (attempt %d) — retrying", attempt + 1)
                         continue
                     if not self._is_auth_error(err):
+                        log.error("Command failed: %s", err)
                         return False, err
                     # Genuine token expiry → refresh the token (keeps the same session) BEFORE any
                     # full re-login. login() evicts the user's official-app session on a shared
@@ -186,15 +194,18 @@ class LeapmotorSession:
                         refreshed = True
                         try:
                             self._api.token_refresh()
-                            log.info("Command auth: token refreshed (no re-login)")
+                            log.info("Command auth: token expired → refreshed (no re-login), retrying")
                             continue
                         except Exception as re_err:  # noqa: BLE001
                             log.warning("token refresh failed (%s) — falling back to re-login", re_err)
                     # Fallback: full re-login (also heals a vanished cert / 'verification' errors)
                     self._reset()
                     if attempt >= 1:
+                        log.error("Command failed (auth): %s", err)
                         return False, err
+                    log.warning("Command auth issue (attempt %d) — re-login then retry", attempt + 1)
                     time.sleep(3)  # avoid rate limit before re-login
+            log.error("Command failed after all retries")
             return False, "Unknown error"
 
     def get_fresh_signals(self) -> dict | None:
