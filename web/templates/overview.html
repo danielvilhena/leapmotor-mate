@@ -3,6 +3,15 @@
 {% block title %}{{ t('nav_overview') }} — LeapMotor Mate{% endblock %}
 
 {% block content %}
+<style>
+  #hero-card .hero-chip{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:500;padding:4px 9px;border-radius:999px;line-height:1}
+  #hero-card .hero-stream{position:relative;width:64px;height:8px;border-radius:999px;background:rgba(20,184,166,.15);overflow:hidden}
+  #hero-card .hero-stream span{position:absolute;top:2px;width:4px;height:4px;border-radius:50%;background:#5eead4;animation:heroFlow 1.2s linear infinite}
+  #hero-card .hero-stream span:nth-child(2){animation-delay:.3s}
+  #hero-card .hero-stream span:nth-child(3){animation-delay:.6s}
+  #hero-card .hero-stream span:nth-child(4){animation-delay:.9s}
+  @keyframes heroFlow{0%{left:-6px;opacity:0}15%{opacity:1}85%{opacity:1}100%{left:64px;opacity:0}}
+</style>
 <div class="mb-6">
   <h1 class="text-2xl font-bold text-white">{{ t('overview_title') }}</h1>
   <p class="text-slate-400 text-sm mt-1">{{ vehicle.car_type if vehicle else 'LeapMotor' }} {{ t('live_status') }}</p>
@@ -19,45 +28,12 @@
     {% include "partials/status_card.html" %}
   </div>
 
-  <!-- Map -->
-  <div class="card md:col-span-1 lg:col-span-1 min-h-64">
-    {% if status and status.latitude and status.longitude %}
-    <div class="stat-label mb-3">{{ t('last_position') }}</div>
-    <div id="map" class="w-full rounded-lg" style="height:280px"></div>
-    <link rel="stylesheet" href="static/vendor/leaflet/leaflet.css"/>
-    <script src="static/vendor/leaflet/leaflet.js"></script>
-    <script>
-      const map = L.map('map').setView([{{ status.latitude }}, {{ status.longitude }}], 15);
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '© OpenStreetMap',
-        // OSM blocks tiles with no Referer; send the page origin so they load in privacy-strict Firefox.
-        referrerPolicy: 'origin'
-      }).addTo(map);
-      const icon = L.divIcon({
-        html: '<div style="background:#14b8a6;width:14px;height:14px;border-radius:50%;border:3px solid white;box-shadow:0 0 6px rgba(0,0,0,0.5)"></div>',
-        iconSize: [14,14], iconAnchor: [7,7]
-      });
-      L.marker([{{ status.latitude }}, {{ status.longitude }}], {icon}).addTo(map)
-        .bindPopup('{{ vehicle.car_type if vehicle else "Leapmotor" }} — {{ status.last_seen }}').openPopup();
-    </script>
-    {% else %}
-    <div class="flex items-center justify-center h-64 text-slate-500">
-      <div class="text-center">
-        <div class="text-4xl mb-2">🗺</div>
-        <div>{{ t('last_position') }}</div>
-      </div>
-    </div>
-    {% endif %}
-  </div>
-
-  <!-- Vehicle picture (hidden if no picture available) -->
-  <div class="card md:col-span-1 lg:col-span-1 flex flex-col min-h-64">
-    <div class="stat-label mb-3">{{ vehicle.car_type if vehicle else t('vehicle') }}</div>
-    <div class="flex-1 flex items-center justify-center">
-      <img src="api/car-picture" alt="{{ vehicle.car_type if vehicle else 'Vehicle' }}"
-           class="max-h-56 w-full object-contain"
-           onerror="this.closest('.card').style.display='none'">
-    </div>
+  <!-- Vehicle hero: image + live status overlaid + quick commands (+ charging animation).
+       Auto-refreshes every 30s so the chips and toggle states stay current. Replaces the old
+       plain picture card; content lives in partials/overview_hero.html. -->
+  <div class="card md:col-span-1 lg:col-span-1 flex flex-col min-h-64"
+       id="hero-card" hx-get="api/overview-hero" hx-trigger="every 30s" hx-swap="innerHTML">
+    {% include "partials/overview_hero.html" %}
   </div>
 
   <!-- Last charge -->
@@ -102,6 +78,37 @@
     </div>
     {% else %}
     <div class="text-center py-6 text-slate-500 text-sm">{{ t('no_charges') }}</div>
+    {% endif %}
+  </div>
+
+  <!-- Map (last known position) -->
+  <div class="card md:col-span-1 lg:col-span-1 min-h-64">
+    {% if status and status.latitude and status.longitude %}
+    <div class="stat-label mb-3">{{ t('last_position') }}</div>
+    <div id="map" class="w-full rounded-lg" style="height:280px"></div>
+    <link rel="stylesheet" href="static/vendor/leaflet/leaflet.css"/>
+    <script src="static/vendor/leaflet/leaflet.js"></script>
+    <script>
+      const map = L.map('map').setView([{{ status.latitude }}, {{ status.longitude }}], 15);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenStreetMap',
+        // OSM blocks tiles with no Referer; send the page origin so they load in privacy-strict Firefox.
+        referrerPolicy: 'origin'
+      }).addTo(map);
+      const icon = L.divIcon({
+        html: '<div style="background:#14b8a6;width:14px;height:14px;border-radius:50%;border:3px solid white;box-shadow:0 0 6px rgba(0,0,0,0.5)"></div>',
+        iconSize: [14,14], iconAnchor: [7,7]
+      });
+      L.marker([{{ status.latitude }}, {{ status.longitude }}], {icon}).addTo(map)
+        .bindPopup('{{ vehicle.car_type if vehicle else "Leapmotor" }} — {{ status.last_seen }}').openPopup();
+    </script>
+    {% else %}
+    <div class="flex items-center justify-center h-64 text-slate-500">
+      <div class="text-center">
+        <div class="text-4xl mb-2">🗺</div>
+        <div>{{ t('last_position') }}</div>
+      </div>
+    </div>
     {% endif %}
   </div>
 

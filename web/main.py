@@ -23,7 +23,7 @@ import mqtt_check
 import auth
 import update_check
 
-MATE_VERSION = "1.19.3"  # bump together with the git tag + add-on config.yaml at release
+MATE_VERSION = "1.20.0"  # bump together with the git tag + add-on config.yaml at release
 
 import diagnostics
 
@@ -738,8 +738,12 @@ async def settings_page(request: Request):
     # tiny (model + VIN + the Logout/change-account button) and keeping it open makes the logout
     # discoverable without hunting. The user's chevron toggles are remembered per card.
     card_open = {k: _card_open(k, k == "vehicle") for k in _UI_CARD_KEYS}
+    # Sections still "new" to THIS user = flagged new AND not yet interacted with.
+    new_sections = {k for k in _NEW_SETTINGS_SECTIONS
+                    if db_reader.get_setting(f"card_seen_{k}", "") != "1"}
     return templates.TemplateResponse(request, "settings.html", _ctx(
         page="settings", vehicle=vehicle, settings=settings, card_open=card_open,
+        new_sections=new_sections,
         charge_types=db_reader.CHARGE_TYPES,
         ha_url=db_reader.get_setting("ha_url", ""),
         ha_has_token=bool(db_reader.get_setting("ha_token", "")),
@@ -1352,6 +1356,12 @@ _UI_CARD_KEYS = {"locale", "vehicle", "battery", "polling", "charge_detect", "ad
                  "abrp", "geocoder", "charger_locator", "wallbox", "mqtt",
                  "database", "export", "diagnostics"}
 
+# Settings sections flagged "new in a recent release": the section shows a NEW badge on its header
+# until the user OPENS it (card_seen_<key>=1, badge never returns — so a new feature isn't missed if
+# buried in the changelog). Maintenance: add a section's key here when you SHIP that new section,
+# then drop it a release or two later. Empty = no section is "new" right now (the mechanism is idle).
+_NEW_SETTINGS_SECTIONS: set[str] = set()
+
 
 def _card_open(key: str, default: bool) -> bool:
     """Open/collapsed state of a settings card: the user's last saved choice if any,
@@ -1368,8 +1378,13 @@ async def save_ui_state(request: Request):
     form = await request.form()
     key = (form.get("key") or "").strip()
     if key in _UI_CARD_KEYS:
-        db_reader.set_setting(f"ui_{key}_open",
-                              "1" if form.get("open") in ("1", "on", "true") else "0")
+        # "Seen" ack: any click inside a NEW-badged section clears its badge for good.
+        if form.get("seen") in ("1", "on", "true"):
+            db_reader.set_setting(f"card_seen_{key}", "1")
+        # The chevron's open/collapsed state (sent on every toggle).
+        if form.get("open") is not None:
+            db_reader.set_setting(f"ui_{key}_open",
+                                  "1" if form.get("open") in ("1", "on", "true") else "0")
     return Response(status_code=204)
 
 
@@ -1481,6 +1496,18 @@ async def status_card(request: Request):
     status = db_reader.get_latest_status()
     vehicle, _ = db_reader.get_vehicle()
     return templates.TemplateResponse(request, "partials/status_card.html", _ctx(
+        status=status, vehicle=vehicle,
+    ))
+
+
+@app.get("/api/overview-hero", response_class=HTMLResponse)
+async def overview_hero(request: Request):
+    """Overview hero card (image + live status chips + quick commands + charging animation).
+    Auto-refreshed every 30s by the #hero-card wrapper so the chips and toggle states stay
+    current; reads the last polled status from the DB (no extra cloud call)."""
+    status = db_reader.get_latest_status()
+    vehicle, _ = db_reader.get_vehicle()
+    return templates.TemplateResponse(request, "partials/overview_hero.html", _ctx(
         status=status, vehicle=vehicle,
     ))
 

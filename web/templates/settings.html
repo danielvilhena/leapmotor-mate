@@ -8,13 +8,14 @@
    {% call %} body runs in the page context, so t()/settings/etc. work inside it; the macro body
    itself relies only on its arguments (Jinja macros don't see the render context).
    Cards are split 5/4/4 across the three columns so the collapsed page stays balanced. #}
-{% macro scard(key, title, open=False, status_url='') %}
+{% macro scard(key, title, open=False, status_url='', new_badge='') %}
 <div class="card">
-  <details class="group" ontoggle="saveUiState('{{ key }}', this.open)"{% if open %} open{% endif %}>
+  <details class="group" ontoggle="saveUiState('{{ key }}', this.open){% if new_badge %}; if(this.open) markNewSeen('{{ key }}'){% endif %}"{% if new_badge %} data-new="1"{% endif %}{% if open and not new_badge %} open{% endif %}>
     <summary class="cursor-pointer select-none flex items-center justify-between gap-2" style="list-style:none">
       <span class="flex items-center gap-2 font-semibold text-white">
         <span class="group-open:rotate-90 text-slate-500" style="transition:transform .2s;display:inline-block">▶</span>
         {{ title }}
+        {% if new_badge %}<span id="newbadge-{{ key }}" class="ml-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-brand/20 text-brand border border-brand/40 uppercase tracking-wide">{{ new_badge }}</span>{% endif %}
       </span>
       {% if status_url %}
       <span hx-get="{{ status_url }}" hx-trigger="load, every 30s" hx-swap="innerHTML">
@@ -257,7 +258,7 @@
     {% endcall %}
 
     <!-- Charging-station labels (📍 on charges — idea: @hubcasale PR #48) -->
-    {% call scard('charger_locator', '⚡ ' + t('charger_locator_section'), card_open.get('charger_locator')) %}
+    {% call scard('charger_locator', '⚡ ' + t('charger_locator_section'), card_open.get('charger_locator'), new_badge=(t('badge_new') if 'charger_locator' in new_sections else '')) %}
       <p class="text-xs text-slate-400 mb-4">{{ t('charger_locator_desc') }}</p>
       <form hx-post="api/settings/charger-locator" hx-trigger="change"
             hx-target="#charger-locator-feedback" hx-swap="innerHTML">
@@ -636,6 +637,23 @@
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: 'key=' + encodeURIComponent(key) + '&open=' + (open ? 1 : 0),
+    });
+  }
+
+  // A section flagged "new" shows a NEW badge on its (collapsed) header until the user OPENS it
+  // — opening the section is the "I'm checking out the new feature" signal. Closing it does NOT
+  // dismiss (so collapsing an unwanted-open section can't kill the badge). Drops the badge and
+  // persists card_seen_<key> so it never shows NEW again. Fires once per page (see ontoggle).
+  const _newSeen = new Set();
+  function markNewSeen(key) {
+    if (_newSeen.has(key)) return;
+    _newSeen.add(key);
+    const b = document.getElementById('newbadge-' + key);
+    if (b) b.remove();
+    fetch('api/settings/ui-state', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'key=' + encodeURIComponent(key) + '&seen=1',
     });
   }
 

@@ -687,6 +687,7 @@ def save_fresh_signals(signals: dict) -> None:
 
     gear_map = {0: "P", 1: "R", 2: "N", 3: "D"}
     windows_open = int(any(sig(k) != 0 for k in ("1693", "1694", "1695", "1696")))
+    windows_open_count = sum(1 for k in ("1693", "1694", "1695", "1696") if sig(k) != 0)
 
     # Plug from signal 1149 (charge connection status), gated by motion. Signal 47
     # (acInputSlowCharge) latches at 1 for ~5 min after an AC charge on the B10 and does
@@ -719,8 +720,9 @@ def save_fresh_signals(signals: dict) -> None:
             is_locked, climate_on, plug_connected,
             climate_cooling, climate_heating, climate_defrost,
             trunk_open, windows_open, sunshade_open,
-            remaining_charge_min, charge_voltage_v, charge_current_a, charge_completed, security_active
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            remaining_charge_min, charge_voltage_v, charge_current_a, charge_completed, security_active,
+            windows_open_count
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
             vehicle_id,
             datetime.now(timezone.utc).isoformat(),
@@ -740,6 +742,7 @@ def save_fresh_signals(signals: dict) -> None:
             sigf("1178") or None,
             int(int(signals.get("3736") or 0) != 0),
             int(int(signals.get("1255") or 0) != 0),
+            windows_open_count,
         ),
     )
     db.commit()
@@ -1084,6 +1087,53 @@ def get_trips_summary() -> dict:
     }
 
 
+def _wac_blend(charges) -> Optional[float]:
+    """Weighted-average-cost blended €/kWh of the battery after a chronological list of PRICED
+    charges (GitHub #53). Pure (no DB) so it's simulation/unit-testable: each item is a dict with
+    start_soc, end_soc, cost, ac_energy_kwh, location_type, energy_added_kwh.
+
+    Model: the battery is ONE reservoir at a blended price; only a charge moves the price,
+    consumption never does → replay the charges, anchoring the mix on each charge's SoC. Capacity
+    CANCELS out (SoC ratios), so this is capacity-free and robust to SoH error. Update per charge:
+
+        p' = (start_soc·p + (end_soc − start_soc)·rate) / end_soc
+
+    where rate = charge cost ÷ its billed energy (_billed_kwh: wallbox AC for HOME, else battery DC —
+    same basis as the per-charge € and the #51 trip-rate fix). Bootstrap: the first priced charge
+    sets p to its own rate (the pre-existing energy is valued at the first thing we can measure).
+    Unconfirmed charges (cost=NULL) are simply ABSENT from this list → carry-forward, i.e. the blend
+    is unchanged across them — Mate's framework rule "no cost until confirmed, HOME excluded"."""
+    p = None
+    for c in charges:
+        ss, es = c.get("start_soc"), c.get("end_soc")
+        if ss is None or es is None or es <= 0 or es <= ss:
+            continue                         # need a real SoC rise to weight the mix
+        basis = _billed_kwh(c)
+        cost = c.get("cost")
+        if cost is None or not basis or basis <= 0:
+            continue                         # unpriced → must not move the blend
+        rate = cost / basis
+        if rate <= 0:
+            continue
+        p = rate if p is None else (ss * p + (es - ss) * rate) / es
+    return p
+
+
+def blended_price_at(vehicle_id: int, ts: str) -> Optional[float]:
+    """Blended €/kWh of the battery (WAC, #53) for `vehicle_id` at instant `ts` — the price in
+    effect for a trip starting then, set by every PRICED charge that ended at/before `ts`. None until
+    the first priced charge (early trips stay uncosted, as today). Recomputed from history each call
+    (no stored state) → self-corrects the moment a charge's cost is assigned/edited."""
+    db = _get()
+    rows = db.execute(
+        "SELECT start_soc, end_soc, cost, ac_energy_kwh, location_type, energy_added_kwh "
+        "FROM charges WHERE vehicle_id = ? AND ended_at IS NOT NULL AND ended_at <= ? "
+        "  AND cost IS NOT NULL AND energy_added_kwh > 0 ORDER BY ended_at",
+        (vehicle_id, ts),
+    ).fetchall()
+    return _wac_blend([dict(r) for r in rows])
+
+
 def get_trip_detail(trip_id: int) -> Optional[dict]:
     db = _get()
     row = db.execute("SELECT * FROM trips WHERE id = ?", (trip_id,)).fetchone()
@@ -1120,32 +1170,19 @@ def get_trip_detail(trip_id: int) -> Optional[dict]:
     eff = trip_d.get("efficiency_kwh_100km")
     dist = trip_d.get("distance_km") or 0
     trip_d["energy_kwh"] = round(eff * dist / 100, 2) if (eff and dist) else None
-    # Cost = trip energy × the €/kWh of the last charge (with a known cost) that ended
-    # before this trip started. Stores the number only — the `money` template filter
-    # formats it with the user's configured currency (multi-currency safe).
+    # Cost = trip energy × the battery's BLENDED €/kWh at the trip's start (weighted-average-cost,
+    # GitHub #53). Replaces the old "rate of the single last charge", which over-billed every trip
+    # after an expensive top-up (a small public charge made all the cheaper home energy bill at the
+    # premium rate). The blend mixes every PRICED charge by the energy it added (blended_price_at /
+    # _wac_blend); unconfirmed charges don't move it (Mate's "no cost until confirmed, HOME excluded").
+    # Stores the number only — the `money` filter applies the currency. Final trip cost → 2 decimals.
     trip_d["cost"] = None
     trip_d["cost_per_kwh"] = None
     if trip_d["energy_kwh"]:
-        rate_row = db.execute(
-            "SELECT cost, energy_added_kwh, ac_energy_kwh, location_type FROM charges "
-            "WHERE ended_at IS NOT NULL AND ended_at <= ? "
-            "  AND cost IS NOT NULL AND energy_added_kwh > 0 "
-            "ORDER BY ended_at DESC LIMIT 1",
-            (trip["started_at"],),
-        ).fetchone()
-        if rate_row:
-            # €/kWh = the charge's cost ÷ the SAME energy that cost was billed on (see
-            # compute_cost): the wallbox AC energy for HOME charges, the battery (DC/SoC)
-            # energy otherwise. Dividing a HOME charge's AC-billed cost by the battery
-            # energy overstated the rate (AC > DC by the charging losses), inflating every
-            # trip's cost on a wallbox install (GitHub #51).
-            ac = rate_row["ac_energy_kwh"]
-            basis = ac if (rate_row["location_type"] == "HOME" and ac and ac > 0) \
-                else rate_row["energy_added_kwh"]
-            if basis and basis > 0:
-                rate = rate_row["cost"] / basis
-                trip_d["cost_per_kwh"] = round(rate, 4)
-                trip_d["cost"] = round(trip_d["energy_kwh"] * rate, 2)
+        rate = blended_price_at(trip["vehicle_id"], trip["started_at"])
+        if rate and rate > 0:
+            trip_d["cost_per_kwh"] = round(rate, 4)
+            trip_d["cost"] = round(trip_d["energy_kwh"] * rate, 2)
 
     return {
         **trip_d,

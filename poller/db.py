@@ -76,7 +76,8 @@ CREATE TABLE IF NOT EXISTS positions (
     plug_connected   INTEGER DEFAULT NULL,
     ready            INTEGER DEFAULT NULL,
     charge_completed INTEGER DEFAULT NULL,
-    security_active  INTEGER DEFAULT NULL
+    security_active  INTEGER DEFAULT NULL,
+    windows_open_count INTEGER DEFAULT NULL
 );
 
 CREATE TABLE IF NOT EXISTS trips (
@@ -249,6 +250,8 @@ class Database:
             self._conn.execute("ALTER TABLE positions ADD COLUMN charge_completed INTEGER DEFAULT NULL")
         if "security_active" not in cols:
             self._conn.execute("ALTER TABLE positions ADD COLUMN security_active INTEGER DEFAULT NULL")
+        if "windows_open_count" not in cols:
+            self._conn.execute("ALTER TABLE positions ADD COLUMN windows_open_count INTEGER DEFAULT NULL")
         # migration: per-charge wallbox AC energy (the "wallbox, to pay" figure) on existing DBs
         ccols = {r[1] for r in self._conn.execute("PRAGMA table_info(charges)").fetchall()}
         if "ac_energy_kwh" not in ccols:
@@ -563,8 +566,9 @@ class Database:
                 range_km, gear, charging, is_locked, climate_on,
                 climate_cooling, climate_heating, climate_defrost,
                 trunk_open, windows_open, sunshade_open, plug_connected,
-                remaining_charge_min, charge_voltage_v, charge_current_a, ready, charge_completed, security_active)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                remaining_charge_min, charge_voltage_v, charge_current_a, ready, charge_completed, security_active,
+                windows_open_count)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 vehicle_id, _now_iso(),
                 data.latitude, data.longitude, data.speed_kmh, data.odometer_km,
@@ -586,6 +590,8 @@ class Database:
                 1 if data.ready else 0,
                 1 if data.charge_completed else 0,
                 1 if data.security_active else 0,
+                sum(1 for w in (data.window_fl_open, data.window_fr_open,
+                                data.window_rl_open, data.window_rr_open) if w),
             ),
         )
         self._conn.commit()
