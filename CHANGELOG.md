@@ -3,6 +3,25 @@
 All notable changes to LeapMotor Mate are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.21.2] — 2026-06-14
+
+### Added
+- **Manual charge cost — enter what you actually paid.** Public charging is a jungle (flat
+  subscriptions, per‑plan Ionity rates, Tesla's monthly fee + time‑of‑use pricing, session/idle fees…)
+  and the bill often isn't a clean €/kWh — so a per‑kWh tariff can't model it. A charge's type selector
+  now has a 5th option, **✎ Manual**: pick it and type the **real total paid**; it **overrides** Mate's
+  table estimate. The effective **€/kWh** (cost ÷ the charge's energy) is shown on the card and feeds
+  the trip cost / weighted‑average‑cost (WAC) **exactly like any priced charge** — so the next trip is
+  priced from what you really paid. A manual cost is **protected**: the auto‑Home confirm and the
+  one‑time energy/cost repairs never overwrite it (the repairs may still refine the *energy*, which only
+  sharpens the manual €/kWh). Accepts a comma decimal (`18,45`).
+- **Effective €/kWh on every charge card** — each session now shows its real rate (cost ÷ energy) under
+  the cost, so you can see at a glance what each charge actually cost per kWh.
+
+> Implements the cost‑precision half of the request in #56. Payment‑method tagging / per‑method spend
+> breakdowns stay **out of scope** for Mate (telemetry‑derived cost is in; payment/billing tracking is
+> not — as decided in #17).
+
 ## [1.21.1] — 2026-06-14
 
 ### Added

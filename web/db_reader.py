@@ -60,6 +60,7 @@ CHARGE_TYPES = {
     "FAST": {"label": "DC",   "icon": "⚡", "color": "#fb923c"},
     "HPC":  {"label": "HPC",  "icon": "🚀", "color": "#e879f9"},
     "FREE": {"label": "FREE", "icon": "🆓", "color": "#a3e635"},
+    "MANUAL": {"label": "Manual", "icon": "✎", "color": "#94a3b8"},
 }
 
 PRICE_KEYS = {
@@ -480,12 +481,19 @@ def compute_cost(charge, config: Optional[dict] = None, ac_kwh: Optional[float] 
     return round(energy * (weighted / total_e), 2)
 
 
-def update_charge_type(charge_id: int, location_type: str) -> dict:
+def update_charge_type(charge_id: int, location_type: str,
+                       manual_cost: Optional[float] = None) -> dict:
     """Set location_type and (re)compute the cost from the pricing config in effect now (flat or
     time-of-use). Frozen afterwards (the 'new charges only' rule). HOME charges are billed on the
     wallbox energy the POLLER measured at charge start/stop (charges.ac_energy_kwh = the counter
     delta — exact, not estimated) when available; otherwise, and for every other type, on the
-    battery (DC/SoC) energy."""
+    battery (DC/SoC) energy.
+
+    `MANUAL` is the user-entered total actually paid (the public-charging jungle — subscriptions,
+    session/idle fees, pay-method rates — can't be modelled by a per-kWh tariff). It OVERRIDES the
+    automatic cost: `manual_cost` is stored verbatim and the automatic costers (auto-confirm and the
+    one-time repairs) leave a MANUAL charge's cost alone. It still feeds the WAC like any priced
+    charge (rate = cost ÷ billed DC energy)."""
     db = _conn_rw()
     row = db.execute("SELECT * FROM charges WHERE id=?", (charge_id,)).fetchone()
     if not row:
@@ -493,9 +501,13 @@ def update_charge_type(charge_id: int, location_type: str) -> dict:
 
     charge = dict(row)
     charge["location_type"] = location_type
-    meter = charge.get("ac_energy_kwh")
-    billed = meter if (location_type == "HOME" and meter and meter > 0) else None
-    cost = compute_cost(charge, ac_kwh=billed)
+    if location_type == "MANUAL":
+        # Keep the existing cost if no amount was supplied (e.g. re-tagging without re-typing it).
+        cost = round(manual_cost, 2) if manual_cost is not None else charge.get("cost")
+    else:
+        meter = charge.get("ac_energy_kwh")
+        billed = meter if (location_type == "HOME" and meter and meter > 0) else None
+        cost = compute_cost(charge, ac_kwh=billed)
 
     db.execute(
         "UPDATE charges SET location_type=?, cost=? WHERE id=?",

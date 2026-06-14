@@ -322,6 +322,26 @@ document.body.addEventListener('htmx:afterSwap', function (e) {
                                   color:#fbbf24;border-bottom:1px solid #334155">{{ t('charge_confirm_q') }}</div>
                       {% endif %}
                       {% for key, info in charge_types.items() %}
+                      {% if key == 'MANUAL' %}
+                      <form hx-post="api/charges/{{ c.id }}/type"
+                            hx-target="#charge-type-{{ c.id }}"
+                            hx-swap="outerHTML"
+                            hx-on::after-request="document.getElementById('ct-menu-{{ c.id }}') && document.getElementById('ct-menu-{{ c.id }}').classList.add('hidden')"
+                            style="margin:0;border-top:1px solid #334155;margin-top:3px;padding-top:4px">
+                        <input type="hidden" name="location_type" value="MANUAL">
+                        <div style="display:flex;align-items:center;gap:6px;padding:5px 10px">
+                          <span style="color:{{ info.color }};font-size:13px">{{ info.icon }}</span>
+                          <input type="number" name="cost" step="0.01" min="0" placeholder="€"
+                                 value="{% if c.location_type == 'MANUAL' and c.cost %}{{ '%.2f'|format(c.cost) }}{% endif %}"
+                                 onclick="event.stopPropagation()"
+                                 style="width:72px;background:#0f172a;border:1px solid #334155;border-radius:6px;color:#fff;padding:4px 6px;font-size:13px">
+                          <button type="submit"
+                                  style="margin-left:auto;background:{{ info.color }}22;color:{{ info.color }};border:1px solid {{ info.color }}55;border-radius:6px;padding:4px 10px;font-size:12px;font-weight:700;cursor:pointer">
+                            {% if c.location_type == 'MANUAL' %}✓{% else %}OK{% endif %}
+                          </button>
+                        </div>
+                      </form>
+                      {% else %}
                       <form hx-post="api/charges/{{ c.id }}/type"
                             hx-target="#charge-type-{{ c.id }}"
                             hx-swap="outerHTML"
@@ -336,6 +356,7 @@ document.body.addEventListener('htmx:afterSwap', function (e) {
                           {% if c.location_type == key %}<span style="margin-left:auto;font-size:10px">✓</span>{% endif %}
                         </button>
                       </form>
+                      {% endif %}
                       {% endfor %}
                     </div>
                   </div>
@@ -391,6 +412,8 @@ document.body.addEventListener('htmx:afterSwap', function (e) {
                   <div class="stat-label" style="font-size:10px">{{ t('cost') }}</div>
                   <div id="cost-{{ c.id }}" style="font-size:16px;font-weight:700" class="{% if c.cost %}text-green-400{% else %}text-slate-600{% endif %}">
                     {% if c.cost %}{{ c.cost | money }}{% else %}—{% endif %}
+                    {% set _billed = (c.ac_energy_kwh if (c.location_type == 'HOME' and c.ac_energy_kwh) else c.energy_added_kwh) or 0 %}
+                    {% if c.cost and _billed > 0 %}<div style="font-size:11px;color:#94a3b8;font-weight:400">{{ (c.cost / _billed) | money }}/kWh</div>{% endif %}
                   </div>
                 </div>
               </div>

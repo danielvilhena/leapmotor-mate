@@ -24,7 +24,7 @@ import mqtt_check
 import auth
 import update_check
 
-MATE_VERSION = "1.21.1"  # bump together with the git tag + add-on config.yaml at release
+MATE_VERSION = "1.21.2"  # bump together with the git tag + add-on config.yaml at release
 
 import diagnostics
 import demo
@@ -1116,13 +1116,24 @@ async def wallbox_set_max_current(request: Request):
 async def set_charge_type(request: Request, charge_id: int):
     form = await request.form()
     location_type = form.get("location_type", "HOME")
-    # The cost is computed in update_charge_type: a HOME charge is billed on the wallbox energy the
-    # poller measured at charge start/stop (the counter delta — exact), if available, else on the
-    # battery (DC/SoC) energy. No power-curve estimation here anymore.
-    charge = db_reader.update_charge_type(charge_id, location_type)
+    # MANUAL = the user types the real total paid; it overrides the automatic cost (the
+    # public-charging jungle can't be modelled by a per-kWh tariff). Everything else is computed in
+    # update_charge_type: a HOME charge is billed on the wallbox energy the poller measured at charge
+    # start/stop (the counter delta — exact), if available, else on the battery (DC/SoC) energy.
+    manual_cost = None
+    if location_type == "MANUAL":
+        try:
+            manual_cost = float(str(form.get("cost", "")).strip().replace(",", "."))
+        except (ValueError, TypeError):
+            manual_cost = None
+    charge = db_reader.update_charge_type(charge_id, location_type, manual_cost=manual_cost)
     t = i18n.get_t(db_reader.get_language())
-    cost_title = t("cost_basis_ac") if (location_type == "HOME" and charge.get("ac_energy_kwh")) \
-        else t("cost_basis_dc")
+    if location_type == "MANUAL":
+        cost_title = t("cost_basis_manual")
+    elif location_type == "HOME" and charge.get("ac_energy_kwh"):
+        cost_title = t("cost_basis_ac")
+    else:
+        cost_title = t("cost_basis_dc")
     return templates.TemplateResponse(request, "partials/charge_type_badge.html", {
         "charge": charge,
         "charge_types": db_reader.CHARGE_TYPES,

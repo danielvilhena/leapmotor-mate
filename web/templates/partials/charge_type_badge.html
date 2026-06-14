@@ -27,6 +27,26 @@
                   color:#fbbf24;border-bottom:1px solid #334155">{{ t('charge_confirm_q') }}</div>
       {% endif %}
       {% for key, info in charge_types.items() %}
+      {% if key == 'MANUAL' %}
+      <form hx-post="api/charges/{{ charge.id }}/type"
+            hx-target="#charge-type-{{ charge.id }}"
+            hx-swap="outerHTML"
+            hx-on::after-request="document.getElementById('ct-menu-{{ charge.id }}') && document.getElementById('ct-menu-{{ charge.id }}').classList.add('hidden')"
+            style="margin:0;border-top:1px solid #334155;margin-top:3px;padding-top:4px">
+        <input type="hidden" name="location_type" value="MANUAL">
+        <div style="display:flex;align-items:center;gap:6px;padding:5px 10px">
+          <span style="color:{{ info.color }};font-size:13px">{{ info.icon }}</span>
+          <input type="number" name="cost" step="0.01" min="0" placeholder="€"
+                 value="{% if charge.location_type == 'MANUAL' and charge.cost %}{{ '%.2f'|format(charge.cost) }}{% endif %}"
+                 onclick="event.stopPropagation()"
+                 style="width:72px;background:#0f172a;border:1px solid #334155;border-radius:6px;color:#fff;padding:4px 6px;font-size:13px">
+          <button type="submit"
+                  style="margin-left:auto;background:{{ info.color }}22;color:{{ info.color }};border:1px solid {{ info.color }}55;border-radius:6px;padding:4px 10px;font-size:12px;font-weight:700;cursor:pointer">
+            {% if charge.location_type == 'MANUAL' %}✓{% else %}OK{% endif %}
+          </button>
+        </div>
+      </form>
+      {% else %}
       <form hx-post="api/charges/{{ charge.id }}/type"
             hx-target="#charge-type-{{ charge.id }}"
             hx-swap="outerHTML"
@@ -41,6 +61,7 @@
           {% if charge.location_type == key %}<span style="margin-left:auto;font-size:10px">✓</span>{% endif %}
         </button>
       </form>
+      {% endif %}
       {% endfor %}
     </div>
   </div>
@@ -50,5 +71,7 @@
      title surfaces whether it was billed on wallbox AC energy or fell back to battery DC. -->
 <div id="cost-{{ charge.id }}" hx-swap-oob="true" style="font-size:16px;font-weight:700"
      class="{% if charge.cost %}text-green-400{% else %}text-slate-600{% endif %}"
-     {% if cost_title %}title="{{ cost_title }}"{% endif %}>{{ charge.cost | money }}</div>
+     {% if cost_title %}title="{{ cost_title }}"{% endif %}>{% if charge.cost %}{{ charge.cost | money }}{% else %}—{% endif %}
+  {% set _billed = (charge.ac_energy_kwh if (charge.location_type == 'HOME' and charge.ac_energy_kwh) else charge.energy_added_kwh) or 0 %}
+  {% if charge.cost and _billed > 0 %}<div style="font-size:11px;color:#94a3b8;font-weight:400">{{ (charge.cost / _billed) | money }}/kWh</div>{% endif %}</div>
 {% endif %}
