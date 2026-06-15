@@ -1590,7 +1590,7 @@ def get_stats_summary() -> dict:
                ROUND(SUM(distance_km * efficiency_kwh_100km) /
                      NULLIF(SUM(CASE WHEN efficiency_kwh_100km IS NOT NULL
                                      THEN distance_km END), 0), 1)           AS avg_efficiency,
-               ROUND(MIN(efficiency_kwh_100km), 1)                           AS best_efficiency,
+               ROUND(MIN(CASE WHEN efficiency_kwh_100km > 0 THEN efficiency_kwh_100km END), 1) AS best_efficiency,
                ROUND(SUM(regen_kwh), 2)                                      AS total_regen_kwh,
                ROUND(AVG(regen_kwh), 2)                                      AS avg_regen_kwh
            FROM trips WHERE ended_at IS NOT NULL"""

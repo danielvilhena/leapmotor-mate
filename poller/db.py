@@ -284,6 +284,7 @@ class Database:
         self._repair_snap_to_full_charges()
         self._drop_phantom_charges()
         self._repair_phantom_zero_soc_charges()
+        self._repair_negative_efficiency()
         self._repair_bogus_wallbox_energy()
         self.migrate_secrets()
         self._check_decryption()
@@ -451,6 +452,22 @@ class Database:
         if nulled or dropped:
             log.info("Zero-SoC phantom repair: nulled %d bogus soc=0 position(s), dropped %d phantom charge(s)",
                      nulled, dropped)
+
+    def _repair_negative_efficiency(self) -> None:
+        """One-time cleanup: some trip rows got a NEGATIVE efficiency_kwh_100km (SoC ROSE over the
+        'trip' — e.g. a trip window mis-bounded across a charge, often from an offline/session gap).
+        A quantize-repair path computed it without the energy>0 guard that finalize_trip uses (now
+        fixed). A negative value made the Statistics 'best efficiency' (a MIN) show nonsense like
+        -39 kWh/100km. Null those so every efficiency stat skips them (NULL is already ignored). Runs once."""
+        if self.get_setting("trips_neg_efficiency_repair_v1") == "1":
+            return
+        n = self._conn.execute(
+            "UPDATE trips SET efficiency_kwh_100km = NULL WHERE efficiency_kwh_100km < 0"
+        ).rowcount
+        self.set_setting("trips_neg_efficiency_repair_v1", "1")
+        self._conn.commit()
+        if n:
+            log.info("Negative-efficiency repair: nulled %d trip(s) with efficiency < 0", n)
 
     def _repair_bogus_wallbox_energy(self) -> None:
         """One-time cleanup mirroring the live finalize_charge guard (GitHub #46): fix charges whose
@@ -944,7 +961,9 @@ class Database:
                 start_soc = trip["start_soc"] or 0
                 end_soc   = float(last_pos["soc"] or start_soc)
                 energy    = (start_soc - end_soc) / 100.0 * self.get_battery_capacity()
-                efficiency = (energy / distance_km * 100) if distance_km > 0.5 else None
+                # Withhold efficiency when net energy is <= 0 (SoC rose over the trip — e.g. a
+                # window mis-bounded across a charge); a negative value poisons the Stats best/avg.
+                efficiency = (energy / distance_km * 100) if (distance_km > 0.5 and energy > 0) else None
 
                 started_at   = datetime.fromisoformat(trip["started_at"])
                 ended_at_iso = last_pos["recorded_at"]

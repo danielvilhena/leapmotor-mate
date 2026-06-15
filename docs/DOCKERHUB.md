@@ -29,6 +29,9 @@ docker run -d --name leapmotor-mate \
 ```
 
 Then open **http://localhost:4000** and follow the setup wizard (Leapmotor account login).
+
+> ⚠️ **Use a Leapmotor account dedicated to Mate only** — not one also signed into the official app, another add-on, Docker or integration. Leapmotor allows ~one session per account, so concurrent clients evict each other's session → the car goes offline → **missing or inconsistent data**.
+
 The database is stored in `./data/` (mounted at `/data` in the container).
 
 To update: `docker pull protossblaster/leapmotor-mate:latest` and recreate the container

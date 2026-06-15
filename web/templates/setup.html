@@ -119,6 +119,8 @@
     </div>
     {% endif %}
 
+    <div id="acct-warn" style="background:#f59e0b18;border:1px solid #f59e0b44;border-radius:10px;padding:10px 14px;color:#fcd34d;font-size:13px;line-height:1.45">⚠️ Use a Leapmotor account dedicated to Mate only. Don't use this account in any other app, add-on, Docker or integration at the same time — they evict each other's session and you'll get missing or inconsistent data.</div>
+
     <!-- Email -->
     <div>
       <label id="lbl-email" class="block text-sm font-medium text-slate-300 mb-1.5">
@@ -208,6 +210,7 @@ const strings = {
   en: {
     title:         "Welcome to LeapMotor Mate",
     subtitle:      "Choose how to get started",
+    acctWarn:      "⚠️ Use a Leapmotor account dedicated to Mate only. Don't use this account in any other app, add-on, Docker or integration at the same time — they evict each other's session and you'll get missing or inconsistent data.",
     email:         "Leapmotor account email",
     emailPh:       "you@example.com",
     password:      "Password",
@@ -245,6 +248,7 @@ const strings = {
   it: {
     title:         "Benvenuto in LeapMotor Mate",
     subtitle:      "Scegli come iniziare",
+    acctWarn:      "⚠️ Usa un account Leapmotor dedicato solo a Mate. Non usare questo account in altre app, add-on, Docker o integrazioni allo stesso tempo — si sfrattano la sessione a vicenda e avrai dati mancanti o incoerenti.",
     email:         "Email account Leapmotor",
     emailPh:       "tu@esempio.com",
     password:      "Password",
@@ -417,6 +421,7 @@ function setLang(lang) {
   document.getElementById('setup-title').textContent     = s.title;
   document.getElementById('setup-subtitle').textContent  = s.subtitle;
   document.getElementById('lbl-email').textContent       = s.email;
+  document.getElementById('acct-warn').textContent       = s.acctWarn;
   document.getElementById('inp-email').placeholder       = s.emailPh;
   document.getElementById('lbl-password').textContent    = s.password;
   document.getElementById('lbl-pin').textContent         = s.pin;
