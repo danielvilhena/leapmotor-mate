@@ -3,6 +3,20 @@
 All notable changes to LeapMotor Mate are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.21.4] — 2026-06-15
+
+### Fixed
+- **No more phantom "charged from 0%" charges (and false "Recover missed charges" results).** Once in a
+  while the car answers a poll without its battery‑% (SoC) field — often a read perturbed by a command
+  you just sent (e.g. changing the charge limit). Mate read that missing value as **0%**, so both the
+  live detection and the **Recover missed charges** scan could invent a charge "from 0% to your current
+  level" (tens of kWh that never happened). Three‑layer fix: a poll with no usable SoC (or SoC 0% while
+  the car still reports range) is now treated as *no live data* and skipped at the source; a
+  reconstructed or scanned charge whose implied power is physically impossible (a full pack "charged" in
+  seconds) is rejected; and a one‑time cleanup removes any phantom charges already recorded plus the
+  bogus 0% data points behind them. Real charges that happened while the car was asleep are still
+  reconstructed as before.
+
 ## [1.21.3] — 2026-06-14
 
 ### Fixed

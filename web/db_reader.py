@@ -1803,6 +1803,9 @@ def get_battery_capacity_kwh() -> float:
         return 65.0
 
 
+_SCAN_MAX_KW = 250.0  # implied charge rate above this → spurious-SoC glitch, not a real charge
+
+
 def scan_missed_charges(threshold: float = 2.0, apply: bool = False) -> list[dict]:
     """Find charges that happened while the car was asleep/offline BEFORE live
     reconstruction existed (or while the poller was down) and were never logged — a
@@ -1861,12 +1864,19 @@ def scan_missed_charges(threshold: float = 2.0, apply: bool = False) -> list[dic
             else:
                 break
         rise = run_end["soc"] - run_start["soc"]
-        if rise >= threshold and not _overlaps(run_start["recorded_at"], run_end["recorded_at"]):
+        if rise >= threshold and run_start["soc"] >= 1.0 and not _overlaps(run_start["recorded_at"], run_end["recorded_at"]):
             try:
                 dur = round((datetime.fromisoformat(run_end["recorded_at"])
                              - datetime.fromisoformat(run_start["recorded_at"])).total_seconds() / 60, 1)
             except (TypeError, ValueError):
                 dur = None
+            # Plausibility: a spurious SoC=0/low reading makes a "charge" of impossible power (a full
+            # pack in seconds). Skip runs whose implied rate exceeds any real charger; keep when the
+            # duration is unknown (start_soc>=1 already filters the zero-start glitch).
+            implied_kw = (rise / 100.0 * cap) / (dur / 60.0) if dur and dur > 0 else None
+            if implied_kw is not None and implied_kw > _SCAN_MAX_KW:
+                i = j + 1
+                continue
             candidates.append({
                 "started_at": run_start["recorded_at"], "ended_at": run_end["recorded_at"],
                 "start_soc": run_start["soc"], "end_soc": run_end["soc"],

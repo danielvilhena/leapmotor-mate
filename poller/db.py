@@ -30,6 +30,12 @@ _WB_MAX_KW = 22.0
 _WB_MARGIN = 1.5
 _WB_FLOOR_KWH = 1.0
 
+# A reconstructed charge whose ΔSoC over its real duration implies a charge power above this is
+# physically impossible (a spurious SoC=0 poll makes a full pack look "charged" in seconds) → it's
+# a glitch, not a charge. Set well above any real charger (incl. DC fast-charge) so a real charge
+# is never rejected.
+_RECONSTRUCT_MAX_KW = 250.0
+
 
 def _wb_energy_ceiling(max_power_kw: Optional[float], hours: Optional[float]) -> float:
     """Max plausible wallbox energy for a session of `hours` at peak `max_power_kw`."""
@@ -277,6 +283,7 @@ class Database:
         self._repair_quantized_trip_distance()
         self._repair_snap_to_full_charges()
         self._drop_phantom_charges()
+        self._repair_phantom_zero_soc_charges()
         self._repair_bogus_wallbox_energy()
         self.migrate_secrets()
         self._check_decryption()
@@ -423,6 +430,27 @@ class Database:
         self._conn.commit()
         if n:
             log.info("Phantom-charge cleanup: dropped %d empty charge(s) (no SoC, no wallbox energy)", n)
+
+    def _repair_phantom_zero_soc_charges(self) -> None:
+        """One-time cleanup for the spurious-SoC=0 bug (now fixed at source in client.get_status): a
+        poll that returned no SoC signal parsed as soc=0.0, got saved as a positions row with soc=0
+        while the car still had range, and made the live reconstruction + the 'recover missed charges'
+        scan invent a phantom 'charged from 0%'. Null the bogus soc=0 rows (so the scan — which filters
+        soc IS NOT NULL — and the SoC charts ignore them) and delete the reconstructed charges that
+        started at ~0% (a real EV charge never starts empty). Runs once."""
+        if self.get_setting("charges_zero_soc_repair_v1") == "1":
+            return
+        nulled = self._conn.execute(
+            "UPDATE positions SET soc=NULL WHERE soc=0 AND COALESCE(range_km, 0) > 5"
+        ).rowcount
+        dropped = self._conn.execute(
+            "DELETE FROM charges WHERE COALESCE(reconstructed, 0)=1 AND COALESCE(start_soc, 0) < 1"
+        ).rowcount
+        self.set_setting("charges_zero_soc_repair_v1", "1")
+        self._conn.commit()
+        if nulled or dropped:
+            log.info("Zero-SoC phantom repair: nulled %d bogus soc=0 position(s), dropped %d phantom charge(s)",
+                     nulled, dropped)
 
     def _repair_bogus_wallbox_energy(self) -> None:
         """One-time cleanup mirroring the live finalize_charge guard (GitHub #46): fix charges whose
@@ -705,7 +733,7 @@ class Database:
         return charge_id
 
     def create_reconstructed_charge(self, vehicle_id: int, start_soc: float,
-                                    started_at: str, data) -> int:
+                                    started_at: str, data) -> Optional[int]:
         """Record a charge that was never seen live — the car was asleep/offline to the cloud
         during it, so no plug/current signal was ever polled and the only trace is a SoC that
         JUMPED up while parked. Insert a COMPLETE, already-closed row from the SoC delta so the
@@ -722,6 +750,18 @@ class Database:
                 .total_seconds() / 60, 1)
         except (TypeError, ValueError):
             duration_min = None
+        # Plausibility guards for the spurious-SoC=0 bug: a real missed/asleep charge never starts
+        # at ~0% (you don't drive an EV to empty), and its energy over its real duration implies a
+        # sane charge power. A glitch SoC=0 makes ΔSoC look like a full charge in seconds → reject
+        # instead of inventing a phantom charge.
+        if start_soc < 1.0:
+            log.info("Reconstructed charge skipped — implausible start SoC %.1f%% (spurious/absent SoC)",
+                     start_soc)
+            return None
+        if duration_min and duration_min > 0 and energy_added / (duration_min / 60.0) > _RECONSTRUCT_MAX_KW:
+            log.info("Reconstructed charge skipped — implausible %.0f kW (%.1f kWh in %.1f min)",
+                     energy_added / (duration_min / 60.0), energy_added, duration_min)
+            return None
         cur = self._conn.execute(
             """INSERT INTO charges
                (vehicle_id, started_at, ended_at, start_soc, end_soc, energy_added_kwh,

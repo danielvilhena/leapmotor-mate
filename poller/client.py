@@ -162,6 +162,16 @@ class LeapmotorMateClient:
             # Surface a clear, transient error instead of a bare KeyError so the poller
             # can back off cleanly and retry.
             raise EmptyStatusError("vehicle status has no live signals (car asleep or not reporting)")
+        # A status whose signal block is present but carries NO usable SoC (both 100003/1204
+        # absent), or a SoC of 0 while the car clearly still has range, is a PARTIAL/glitch read —
+        # often a poll perturbed by a just-issued command (e.g. changing the charge limit). Treat it
+        # as "no live data" (like an asleep poll) so it can't be stored as a spurious soc=0 row that
+        # then seeds a phantom "charged from 0%" reconstruction / "recover missed charges" hit.
+        _soc_raw = sig.get("100003")
+        if _soc_raw is None:
+            _soc_raw = sig.get("1204")
+        if _soc_raw is None or (float(_soc_raw or 0) == 0 and float(sig.get("3260") or 0) > 5):
+            raise EmptyStatusError("vehicle status carries no usable SoC (partial/glitch read)")
         vd = _parse_signal(self._vehicle.vin, sig)
         # The configured charge limit (max-charge SoC) lives in the config block of this SAME raw
         # status — not in the signal dict — so capture it here, free of any extra cloud call, for

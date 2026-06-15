@@ -131,3 +131,52 @@ def test_live_charge_makes_no_reconstructed_duplicate(tmp_path):
     recon = db._conn.execute("SELECT COUNT(*) c FROM charges WHERE reconstructed=1").fetchone()["c"]
     live = db._conn.execute("SELECT COUNT(*) c FROM charges WHERE reconstructed=0").fetchone()["c"]
     assert recon == 0 and live == 1
+
+
+# ── 6. spurious SoC=0 glitch must NOT reconstruct a "charged from 0%" phantom ──
+def test_no_reconstruct_from_spurious_zero(tmp_path):
+    """The Telegram ghost-charge bug: a poll returned no SoC → parsed as soc=0.0; on the next
+    (recovered) poll the 0→70.7% 'jump' must be rejected, not logged as a +47 kWh charge."""
+    db = D.Database(str(tmp_path / "t.db"))
+    db.set_battery_capacity(67.1)
+    vid = db.ensure_vehicle("TESTVIN", "B10")
+    rec = R.Recorder(db, vehicle_id=vid)
+    rec.process(_vd(70.7))          # normal
+    rec.process(_vd(0.0))           # spurious zero (drop → baseline advances to 0)
+    rec.process(_vd(70.7))          # recovery: 0→70.7 jump → MUST be rejected
+    recon = db._conn.execute("SELECT COUNT(*) c FROM charges WHERE reconstructed=1").fetchone()["c"]
+    assert recon == 0
+
+
+def test_create_reconstructed_charge_rejects_zero_start(tmp_path):
+    """A real EV charge never starts at ~0% — a 0% start is the spurious-SoC signature → no row."""
+    db = D.Database(str(tmp_path / "t.db"))
+    db.set_battery_capacity(67.1)
+    vid = db.ensure_vehicle("TESTVIN", "B10")
+    assert db.create_reconstructed_charge(vid, 0.0, "2026-06-09T09:00:00+00:00", _vd(70.7)) is None
+    assert db._conn.execute("SELECT COUNT(*) FROM charges").fetchone()[0] == 0
+
+
+# ── 7. one-time repair cleans phantoms + bogus soc=0 rows already on disk ──────
+def test_repair_drops_phantom_zero_soc_charges(tmp_path):
+    db = D.Database(str(tmp_path / "t.db"))
+    db.ensure_vehicle("TESTVIN", "B10")
+    # A phantom 'charged from 0%' (delete) + a legit reconstructed charge (keep).
+    db._conn.execute("INSERT INTO charges (vehicle_id, started_at, ended_at, start_soc, end_soc,"
+                     " energy_added_kwh, charge_type, reconstructed) VALUES"
+                     " (1,'2026-06-02T09:16:00+00:00','2026-06-02T09:16:20+00:00',0,90,60.4,'AC',1)")
+    db._conn.execute("INSERT INTO charges (vehicle_id, started_at, ended_at, start_soc, end_soc,"
+                     " energy_added_kwh, charge_type, reconstructed) VALUES"
+                     " (1,'2026-06-01T22:00:00+00:00','2026-06-02T06:00:00+00:00',50,80,20.1,'AC',1)")
+    # A bogus soc=0 position with the car clearly not empty (null) + a real one (keep).
+    db._conn.execute("INSERT INTO positions (vehicle_id, recorded_at, soc, range_km, charging, speed_kmh)"
+                     " VALUES (1,'2026-06-02T09:16:10+00:00',0,282,0,0)")
+    db._conn.execute("INSERT INTO positions (vehicle_id, recorded_at, soc, range_km, charging, speed_kmh)"
+                     " VALUES (1,'2026-06-01T22:00:00+00:00',50,200,0,0)")
+    db._conn.execute("DELETE FROM settings WHERE key='charges_zero_soc_repair_v1'")  # __init__ already ran it
+    db._conn.commit()
+    db._repair_phantom_zero_soc_charges()
+    assert [r["start_soc"] for r in
+            db._conn.execute("SELECT start_soc FROM charges ORDER BY start_soc")] == [50.0]
+    assert db._conn.execute("SELECT COUNT(*) FROM positions WHERE soc=0").fetchone()[0] == 0
+    assert db._conn.execute("SELECT COUNT(*) FROM positions WHERE soc=50").fetchone()[0] == 1

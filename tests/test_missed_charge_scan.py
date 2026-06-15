@@ -94,3 +94,22 @@ def test_merges_consecutive_rises_into_one(tmp_path, monkeypatch):
     cands = db_reader.scan_missed_charges(apply=False)
     assert len(cands) == 1
     assert cands[0]["start_soc"] == 50.0 and cands[0]["end_soc"] == 75.0
+
+
+def test_ignores_spurious_zero_soc_start(tmp_path, monkeypatch):
+    """The Telegram ghost-charge bug: a poll that returned no SoC parsed as soc=0.0; the scan must
+    NOT propose a 'charged from 0%' phantom for a 0→full jump between two real readings."""
+    db = _seed(tmp_path, monkeypatch)
+    _pos(db, "2026-06-02T08:32:37+00:00", 70.7)
+    _pos(db, "2026-06-02T08:32:47+00:00", 0.0)      # spurious zero (real SoC ~70%, car had range)
+    _pos(db, "2026-06-02T08:32:58+00:00", 70.7)
+    assert db_reader.scan_missed_charges(apply=False) == []
+
+
+def test_ignores_impossible_charge_rate(tmp_path, monkeypatch):
+    """Even with a non-zero start, a huge SoC jump over seconds implies an impossible charge
+    power (thousands of kW) → it's a sensor glitch, not a charge."""
+    db = _seed(tmp_path, monkeypatch)
+    _pos(db, "2026-06-02T08:00:00+00:00", 5.0)
+    _pos(db, "2026-06-02T08:00:20+00:00", 90.0)     # +85% in 20s
+    assert db_reader.scan_missed_charges(apply=False) == []
