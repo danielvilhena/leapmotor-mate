@@ -1,0 +1,549 @@
+# LeapMotor Mate — Manuel utilisateur
+
+> **Version de Mate :** v1.22.5 · **Langue :** Français (première édition)
+> Ce manuel s'adresse à celles et ceux qui *utilisent* Mate, et non à ceux qui le développent. Il explique
+> comment le configurer depuis le début et ce que fait chaque page. Pour les détails techniques internes, voir `ARCHITECTURE.md`.
+
+---
+
+## Sommaire
+
+1. [Qu'est-ce que Mate (et ce qu'il n'est pas)](#1-quest-ce-que-mate-et-ce-quil-nest-pas)
+2. [Avant de commencer : les prérequis](#2-avant-de-commencer--les-prérequis)
+3. [Installation](#3-installation)
+4. [Premier démarrage : la configuration guidée](#4-premier-démarrage--la-configuration-guidée)
+5. [Découvrir l'interface](#5-découvrir-linterface)
+6. [Les pages, une par une](#6-les-pages-une-par-une)
+   - [Aperçu](#aperçu) · [Trajets](#trajets) · [Carte](#carte) · [Recharges](#recharges)
+   - [Prix de recharge](#prix-de-recharge) · [Statistiques](#statistiques) · [Rapport mensuel](#rapport-mensuel)
+   - [Santé de la batterie](#santé-de-la-batterie) · [Entretien](#entretien) · [Commandes](#commandes)
+   - [Programmation](#programmation) · [Préparer le véhicule](#préparer-le-véhicule)
+   - [Navigation](#navigation) · [Véhicule](#véhicule) · [Wallbox](#wallbox)
+7. [Paramètres](#7-paramètres)
+8. [Les intégrations en détail (Wallbox, ABRP, MQTT)](#8-les-intégrations-en-détail)
+9. [Mode démo](#9-mode-démo)
+10. [Questions fréquentes et résolution des problèmes](#10-questions-fréquentes-et-résolution-des-problèmes)
+11. [Glossaire](#11-glossaire)
+
+---
+
+## 1. Qu'est-ce que Mate (et ce qu'il n'est pas)
+
+**LeapMotor Mate** est une application que vous installez vous-même (auto-hébergée) et qui sert de
+« compagnon » à votre voiture électrique Leapmotor. Elle se connecte au **cloud Leapmotor** (le même
+que celui auquel parle l'application officielle), lit l'état de la voiture et, à partir de ces données,
+reconstitue toute seule :
+
+- vos **trajets** (distance, durée, consommation, récupération au freinage) ;
+- vos **recharges** (énergie, puissance, type, coût) ;
+- les **coûts** et l'**efficacité** dans le temps ;
+- la **santé de la batterie** et les **échéances d'entretien**.
+
+En plus, elle vous permet d'**envoyer des commandes à distance** (verrouillage, climatisation, préparation
+du véhicule, programmations…) et, si vous le souhaitez, d'intégrer les données avec **Home Assistant**
+(via MQTT), avec **A Better Routeplanner (ABRP)** et avec votre **wallbox**.
+
+**Ce que Mate NE fait PAS / limites importantes :**
+
+- **Il ne parle pas directement à la voiture.** Tout passe par le cloud Leapmotor. Quand Mate « interroge »
+  le cloud (polling), il lit le **dernier état connu** : il *ne* réveille *pas* la voiture et *ne* décharge
+  *pas* la batterie. C'est une opération sûre et économique.
+- **Uniquement les voitures 100 % électriques (BEV).** Sont prises en charge les **T03, B05, B10, C10** dans
+  leurs versions électriques. Les versions **REEV** (avec prolongateur d'autonomie à essence) **ne** sont
+  **pas** prises en charge : les calculs d'énergie/consommation/coût utiliseraient la mauvaise capacité de
+  batterie et seraient faussés.
+- **Uniquement le cloud européen (Leapmotor International / Stellantis).** Les comptes enregistrés sur des
+  serveurs d'autres régions (ex. Chine) ne parviennent pas à se connecter. Hors d'Europe, pour le moment,
+  Mate n'est pas utilisable.
+- **Ce n'est pas un outil de comptabilité.** Il estime le coût *à partir de la télémétrie* ; il ne suit pas
+  les moyens de paiement, les factures ou les abonnements des bornes.
+
+---
+
+## 2. Avant de commencer : les prérequis
+
+Pour configurer Mate, il vous faut trois choses :
+
+1. **Un compte Leapmotor dédié à Mate.** ⚠️ **Très important.** Créez (ou réservez) un compte Leapmotor
+   utilisé **uniquement** par Mate. Leapmotor n'autorise que peu de sessions simultanées par compte : si le
+   même compte est aussi connecté dans l'application officielle, dans une autre intégration ou dans une
+   seconde instance de Mate, les clients s'« expulsent » mutuellement la session. Le résultat : une rafale
+   de *« Token non valide »* / des reconnexions répétées, la voiture qui passe **hors ligne** et des
+   **données perdues** (trajets et recharges non enregistrés). C'est la cause numéro un des problèmes
+   signalés. *Solution :* un compte secondaire avec un **mot de passe utilisé uniquement dans Mate**.
+
+2. **Le certificat de l'application Leapmotor** (`app.crt` + `app.key`). C'est un certificat **identique pour
+   tout le monde** (celui de l'application, pas de votre compte), nécessaire pour dialoguer avec le cloud.
+   Il se télécharge depuis un dépôt public — l'assistant vous donne le lien direct
+   ([github.com/markoceri/leapmotor-certs](https://github.com/markoceri/leapmotor-certs)).
+
+3. **L'e-mail, le mot de passe et le code PIN d'opération du compte.** Le **PIN à 4 chiffres** est celui que
+   vous utilisez aussi dans l'application officielle pour autoriser les commandes à distance (verrouillage,
+   climatisation…).
+
+> 💡 Vous voulez juste jeter un coup d'œil sans rien configurer ? Sautez tout et utilisez le
+> **[mode démo](#9-mode-démo)** : Mate démarre avec un mois de données fictives réalistes, sans voiture et
+> sans compte.
+
+---
+
+## 3. Installation
+
+Mate fonctionne de la même manière dans deux environnements (l'interface est identique) :
+
+- **Comme module complémentaire de Home Assistant** — la façon la plus simple si vous avez déjà Home
+  Assistant. On ajoute le dépôt du module complémentaire, on installe « LeapMotor Mate » et on l'ouvre depuis
+  la barre latérale de HA (ingress). Dans ce cas, Mate peut aussi lire votre **wallbox** directement depuis
+  Home Assistant.
+- **Comme conteneur Docker autonome** (par exemple sur un NAS) — via `docker-compose`. Dans ce cas,
+  l'application est accessible depuis le navigateur sur le **port 4000**
+  (`http://ADRESSE-DU-SERVEUR:4000`).
+
+Les instructions d'installation pas à pas (dépôt, compose, etc.) se trouvent dans le **README** du projet et
+sur la page **Docker Hub**. Une fois lancé, le *premier accès* est identique pour les deux et est décrit
+ci-dessous.
+
+> 🔒 **Sauvegarde.** Toutes les données de Mate se trouvent dans un dossier persistant (`/data`) : la base de
+> données, la clé de chiffrement des secrets (`secret.key`) et le certificat. Si vous faites une sauvegarde,
+> **conservez la base de données avec sa `secret.key`** — sans la clé, les mots de passe et jetons enregistrés
+> ne sont plus lisibles. Depuis la page Paramètres, vous pouvez télécharger une sauvegarde de la base de
+> données à tout moment.
+
+---
+
+## 4. Premier démarrage : la configuration guidée
+
+Au premier accès, Mate affiche un **assistant** (procédure guidée). En haut, vous pouvez choisir la langue
+(🇫🇷 Français). Ensuite :
+
+### Étape 0 — Choisissez comment commencer
+
+Deux boutons :
+
+- **▶ Configurer ma voiture** — la configuration proprement dite (voir la suite).
+- **🧪 Essayer la démo** — entre en mode démonstration avec des données fictives. Vous pouvez en sortir quand
+  vous voulez.
+
+### Étape 1 — Certificat de l'application
+
+Mate vous demande le certificat TLS de l'application Leapmotor. Vous avez deux moyens :
+
+- **Téléverser les fichiers** `app.crt` et `app.key` (mode par défaut), ou
+- **Coller le texte PEM** des deux fichiers (bouton *« Coller le texte PEM à la place »*).
+
+Téléchargez-les depuis le lien affiché, chargez-les et appuyez sur **Enregistrer le certificat**. Cette étape
+n'apparaît que si le certificat n'est pas déjà présent dans l'image.
+
+### Étape 2 — Connexion au compte
+
+Saisissez :
+
+- **E-mail du compte Leapmotor**
+- **Mot de passe**
+- **Code PIN d'opération** (4 chiffres)
+
+> ⚠️ Ici, Mate vous rappelle d'utiliser **un compte dédié uniquement à Mate** (voir
+> [prérequis](#2-avant-de-commencer--les-prérequis)).
+
+Appuyez sur **🔍 Détecter ma voiture**. Mate vérifie les identifiants et lit dans le cloud le **modèle et le
+numéro de châssis (VIN)**. Si tout se passe bien, vous voyez une fiche « Voiture détectée » avec
+`Leapmotor <modèle> · VIN ···xxxxxx`.
+
+### Étape 3 — Batterie
+
+Selon le modèle :
+
+- si la version européenne n'a **qu'une seule variante** de batterie, Mate la détecte tout seul (ex. T03 →
+  37,3 kWh) ;
+- s'il y a **plusieurs variantes** (ex. B10 Pro 56,2 kWh / Pro Max 67,1 kWh ; C10 RWD 69,9 / AWD 81,9),
+  choisissez la vôtre ;
+- si la détection échoue, vous pouvez **saisir la capacité à la main** (en kWh).
+
+> La capacité indiquée est celle **utile/nette** (celle qui compte vraiment pour les consommations et les
+> coûts) et peut toujours être corrigée par la suite, depuis Paramètres → Batterie.
+
+### Étape 4 — Connexion
+
+Appuyez sur **Connecter et démarrer**. Mate enregistre la configuration, se connecte et vous amène à
+l'**Aperçu**. À partir de ce moment, le « poller » commence à collecter des données en arrière-plan : les
+premiers trajets et recharges apparaîtront au fur et à mesure que vous roulez et rechargez.
+
+---
+
+## 5. Découvrir l'interface
+
+L'interface se compose de :
+
+- **Menu latéral (barre latérale)** — la liste des pages (voir ci-dessous). Sur petit écran, il s'ouvre avec
+  l'icône ☰.
+- **En-tête** — titre de la page, éventuel **avis de mise à jour** disponible (↑ vX.Y.Z) et le bouton
+  **🔄 Actualiser**.
+- **Bouton Actualiser** — force une lecture immédiate de l'état de la voiture, sans attendre le cycle
+  automatique. Utile après avoir envoyé une commande.
+
+En bas du menu, vous trouvez **⚙️ Paramètres** et **🚪 Déconnexion** (logout).
+
+De nombreuses pages **se mettent à jour toutes seules** environ toutes les 30 secondes ; ainsi les valeurs
+« en direct » (état, recharge en cours…) restent fraîches sans recharger la page.
+
+**La langue, la devise et les unités** se changent depuis *Paramètres → 🌍 Langue et Devise* :
+
+- **Langue :** Italiano, English, Français, Deutsch.
+- **Devise :** pour les coûts (€, £, …).
+- **Unités :** métriques (km, °C) ou impériales UK/US (miles, °F). Les données restent toujours enregistrées
+  en km/°C ; seule change la façon dont elles sont **affichées**.
+
+---
+
+## 6. Les pages, une par une
+
+L'ordre ci-dessous est le même que celui du menu latéral.
+
+### Aperçu
+**(menu : Aperçu)** — La page d'accueil. En haut, il y a une **carte principale** avec l'image de la voiture
+et l'état en direct :
+
+- **pourcentage de charge (SoC)** et autonomie estimée ;
+- **icônes d'état** qui changent de couleur : verrouillage (vert = fermé, ambre = ouvert), coffre (rouge s'il
+  est ouvert), vitres (violet si ouvertes), climatisation, etc. ;
+- **commandes rapides** (verrouiller/déverrouiller, localiser la voiture…), déjà « conscientes » de l'état
+  actuel ;
+- quand la voiture est **en charge**, une **animation** montre le flux d'énergie ainsi qu'une étiquette avec
+  l'estimation du temps « jusqu'à X % » (X = la limite de charge que vous avez définie dans la voiture) ;
+- une étiquette **« Câble branché / Charge terminée »** quand le câble est inséré mais qu'aucune charge active
+  n'est en cours.
+
+Plus bas, vous trouvez des mini-statistiques et un **indicateur de « réactivité voiture »** (une pastille
+🟢/🟡/🔴, ⚪ s'il n'y a pas de données) : il résume à quel point la voiture a répondu aux dernières commandes
+envoyées.
+
+### Trajets
+**(menu : Trajets)** — La liste de vos déplacements, un par conduite. Pour chaque trajet, vous voyez
+**distance, durée, consommation (kWh/100 km), énergie récupérée** au freinage et le **coût** estimé.
+
+- En cliquant sur un trajet, vous ouvrez le **détail**, avec le **tracé GPS** sur la carte et les données de
+  ce trajet précis.
+- Vous pouvez **fusionner** deux trajets coupés par erreur (Fusionner 🔗) ou les **séparer** à nouveau, et
+  **supprimer** un trajet.
+- Les arrêts brefs (feux, embouteillages) **ne** coupent **pas** un trajet : une conduite reste une seule
+  ligne.
+
+### Carte
+**(menu : Carte)** — La position de la voiture sur la carte. Elle affiche la dernière position connue ; si la
+dernière donnée du cloud n'a pas de GPS valide, Mate **conserve la dernière position valide** au lieu de
+faire disparaître la carte.
+
+### Recharges
+**(menu : Recharges)** — La liste des recharges. Pour chacune : **énergie ajoutée (kWh)**, **puissance
+maximale**, **type** et **coût**, avec le **€/kWh effectif** bien en évidence. Le type est classé par une
+étiquette :
+
+- **Domicile** (votre wallbox), **AC** (courant alternatif public), **Rapide/FAST** (DC), **HPC** (recharge
+  ultra-rapide) et **✎ Manuel**.
+- **✎ Manuel** : pour les bornes publiques aux tarifs compliqués (abonnements, frais de session…), vous pouvez
+  **saisir à la main le total réellement payé** ; cette valeur remplace l'estimation automatique.
+- Même les recharges effectuées pendant que la voiture était éteinte/hors ligne sont **reconstruites** à
+  partir du saut de pourcentage de charge.
+
+### Prix de recharge
+**(menu : Prix de recharge)** — Ici, vous définissez **combien vous payez l'énergie**, afin que Mate puisse
+calculer les coûts. Vous pouvez définir un prix **pour chaque type** de recharge (Domicile, AC, Rapide, HPC)
+et choisir entre :
+
+- **Tarif fixe** (un seul €/kWh), ou
+- **Plages horaires (TOU)** — des prix différents selon le jour de la semaine et la plage horaire (ex. F1/F2/F3,
+  nuit moins chère).
+
+Le prix **Domicile** est celui qui alimente les coûts des recharges à domicile et, par ricochet, le coût des
+trajets (calculé sur le prix « moyen » de l'énergie en batterie au moment du trajet).
+
+> Les modifications de prix ne valent **que pour les recharges futures** : les coûts déjà calculés ne changent
+> pas. Avec les plages horaires, vous pouvez aussi choisir *comment* répartir une session entre les plages —
+> *Répartition précise* (sur la courbe de puissance réelle) ou *Heure de début* (toute la session à la plage
+> où elle a démarré).
+
+### Statistiques
+**(menu : Statistiques)** — Vos moyennes et totaux dans le temps : **distance totale** et nombre de trajets,
+**distance moyenne par trajet**, **temps de conduite**, **consommation moyenne** (pondérée sur la distance) et
+**meilleure**, **énergie consommée et rechargée**, **récupération** totale et moyenne, nombre de **sessions de
+recharge**, avec les **tendances** correspondantes (efficacité et récupération dans le temps).
+
+### Rapport mensuel
+**(menu : Rapport mensuel)** — Une synthèse **mois par mois** : combien vous avez roulé, combien d'énergie vous
+avez consommée et rechargée, combien vous avez dépensé. Pratique pour suivre l'évolution.
+
+### Santé de la batterie
+**(menu : Santé batterie)** — Une **estimation de l'état de santé (SoH)** de la batterie, c'est-à-dire combien
+de capacité « réelle » il reste par rapport au neuf. Mate la calcule à partir des données réelles de recharge
+(énergie réellement entrée par rapport au pourcentage gagné), en **excluant** les recharges à froid qui
+fausseraient la mesure, et l'affiche dans le temps et/ou par kilométrage. C'est une **estimation**, pas un
+diagnostic officiel, mais elle s'améliore à mesure que les données s'accumulent.
+
+### Entretien
+**(menu : Entretien)** — Les **échéances d'entretien** de votre voiture, basées sur le **programme officiel de
+votre modèle** (T03, B05, B10, C10). Pour chaque intervention (ex. révision, liquide de frein, filtre
+d'habitacle, pneus…), vous voyez deux barres d'approche : une pour les **kilomètres** et une pour le **temps**,
+car c'est la première échéance atteinte qui compte.
+
+- Vous pouvez **enregistrer une intervention** (« fait aujourd'hui à X km ») directement depuis la page :
+  l'échéance suivante se recalcule.
+- Pour une **voiture neuve** qui n'a pas encore d'historique, vous pouvez définir une **date/un kilométrage de
+  référence** afin que les échéances partent de la livraison (« première révision dans… ») au lieu d'apparaître
+  comme « jamais effectué ».
+- Les distances respectent l'unité choisie (km ou miles).
+
+### Commandes
+**(menu : Commandes)** — Les **commandes à distance**. D'ici, vous pouvez :
+
+- **verrouiller/déverrouiller**, ouvrir le **coffre**, **localiser la voiture** (klaxon/phares) ;
+- gérer la **climatisation** : refroidissement, chauffage, dégivrage, ventilation, **extinction** ;
+- activer le **chauffage des sièges**, du **volant** et des **rétroviseurs** (là où c'est pris en charge) ;
+- gérer la **limite de charge**.
+
+Quand vous envoyez une commande, Mate met aussitôt à jour l'interface de façon « optimiste », puis confirme à
+la lecture suivante. Si le cloud accepte mais que la voiture ne confirme pas en quelques secondes, vous voyez
+un avis **ambre** (« envoyé, ça a peut-être marché ») — ce n'est pas une erreur : souvent la commande aboutit
+quand même (cela dépend de la couverture/de la veille de la voiture).
+
+### Programmation
+**(menu : Programmation)** — Les **programmations** de la voiture :
+
+- **Recharge programmée** (et la **limite de charge**) ;
+- **Climatisation programmée** — 5 préréglages (refroidir / chauffer / ventiler / dégivrer / auto) avec une
+  heure de démarrage future ; vous pouvez les créer, les modifier et les annuler.
+
+### Préparer le véhicule
+**(menu : Préparer le véhicule)** — La fonction « **préparer la voiture en un geste** » : amène l'habitacle à
+la température souhaitée (et les fonctions associées) **tout de suite** ou à une **heure programmée**. Vous
+pouvez aussi tout éteindre.
+
+### Navigation
+**(menu : Navigation)** — *Envoyer une destination au GPS de la voiture* et **trouver les bornes à proximité**.
+La page comporte trois parties :
+
+- **Destination** — saisissez une **adresse** (et, si besoin, la **ville**), appuyez sur **Rechercher** : la
+  destination apparaît sur la carte et avec **🧭 Envoyer à la voiture** vous l'envoyez au GPS de bord. *La
+  recherche par adresse nécessite une clé de géocodage* (voir [Paramètres → Recherche d'adresses](#7-paramètres)).
+- **⚡ Bornes de recharge — « Trouver des bornes »** — recherche les **bornes publiques autour de la voiture**
+  (en utilisant sa position GPS actuelle). Vous pouvez régler :
+  - **Distance max.** — 500 m, 1, 2, **5 km** (par défaut) ou 10 km ;
+  - **Résultats par page** — 25, 50 ou 100 ;
+  - **Réseau / opérateur** (facultatif) — pour filtrer un exploitant précis (ex. Electra, Ionity, Enel X Way,
+    Be Charge, Plenitude, A2A, Atlante, Ewiva, Tesla…).
+
+  Les résultats apparaissent à la fois sous forme de **repères ⚡ sur la carte** et dans une **liste** en
+  dessous, avec **nom, distance** et, là où c'est disponible, la **disponibilité en temps réel** (🟢/🔴
+  « disponibles maintenant », p. ex. sur le réseau public italien). Touchez une borne dans la liste pour la
+  **voir sur la carte**, et d'un clic vous pouvez l'**utiliser comme destination** puis l'envoyer à la voiture.
+  Si rien ne se trouve dans le rayon choisi, Mate élargit et affiche **les plus proches**.
+
+  > La recherche de bornes **ne nécessite pas de clés** (elle utilise des cartes ouvertes + une base de bornes
+  > publiques) ; les clés facultatives dans *Paramètres → ⚡ Bornes de recharge* (OpenChargeMap, TomTom)
+  > l'enrichissent. Il faut toutefois que la voiture ait une **position GPS** connue.
+- **Position actuelle de la voiture** — l'adresse de la voiture et une carte avec son repère 🚗.
+
+### Véhicule
+**(menu : Véhicule)** — La fiche **état complet** de la voiture : tous les capteurs disponibles sur votre
+modèle (charge, autonomie, température intérieure, rapport, portes, vitres, pneus, verrouillages, état de
+charge…). Mate n'affiche **que ce que votre voiture rapporte réellement** (certains modèles n'exposent pas
+certaines données).
+
+### Wallbox
+**(menu : Wallbox)** — Si vous avez connecté une wallbox (voir [Intégrations](#8-les-intégrations-en-détail)),
+vous y voyez ses données **en direct** (puissance, énergie), le **récapitulatif** et la liste des **sessions**,
+et éventuellement les **contrôles** (ex. courant maximal) si votre wallbox les expose via Home Assistant.
+
+---
+
+## 7. Paramètres
+
+**(menu : ⚙️ Paramètres)** — La page est organisée en **fiches en accordéon** : vous en ouvrez une à la fois.
+Elle est divisée en trois colonnes.
+
+**Colonne 1 — Véhicule et conduite**
+
+- **🌍 Langue et Devise** — langue de l'interface, devise des coûts, **unités** (métriques/impériales).
+- **Véhicule** — modèle et VIN de votre voiture. C'est aussi ici que se trouve le bouton **🔓 Se déconnecter**
+  (logout) pour relier un autre compte : il efface *seulement* les identifiants enregistrés, **pas** vos
+  trajets/recharges ni le certificat.
+- **Batterie** — la **capacité** en kWh utilisée pour tous les calculs ; modifiable. Si Mate dispose d'une
+  estimation « mesurée » à partir de vos données, il vous la propose.
+- **Fréquence de relevé** — à quelle fréquence Mate lit l'état du cloud, avec deux curseurs : **Stationné**
+  (10 s–5 min, 30 s par défaut) et **En conduite** (10–60 s, 10 s par défaut). Lire plus souvent ne décharge
+  pas la voiture, mais génère plus de trafic vers le cloud.
+- **Détection de charge** — le **seuil de courant** (en ampères) au-dessus duquel Mate considère qu'une
+  « recharge est en cours ». À n'abaisser que si vous avez des recharges très lentes non détectées.
+
+**Colonne 2 — Intégrations**
+
+- **ABRP** — envoi de la télémétrie à A Better Routeplanner (voir [§8](#8-les-intégrations-en-détail)).
+- **Recherche d'adresses** — le service pour traduire les adresses ↔ coordonnées dans la page Navigation
+  (Geoapify *recommandé*, LocationIQ, TomTom). Nécessite une **clé** gratuite du service choisi.
+- **⚡ Bornes de recharge** — active les **noms des bornes** sur les recharges (📍) et accepte des clés
+  optionnelles (OpenChargeMap, TomTom) pour enrichir la recherche. **Désactivé** par défaut.
+- **Wallbox** — connectez votre wallbox pour les **coûts réels** et les éventuels contrôles (voir
+  [§8](#8-les-intégrations-en-détail)).
+- **MQTT → Home Assistant** — publie les données de la voiture comme entités dans Home Assistant (voir
+  [§8](#8-les-intégrations-en-détail)).
+
+**Colonne 3 — Données et maintenance**
+
+- **Base de données** — taille de la base et **conservation des positions** (rétention) : vous pouvez garder
+  les points GPS « pour toujours » (par défaut) ou supprimer ceux de plus de 6/12/18/24 mois pour économiser
+  de l'espace. *Seules les positions sont élaguées* : les trajets, recharges et courbes de charge restent.
+- **Export / sauvegarde** — téléchargez les **trajets (CSV)**, les **recharges (CSV)** et une **sauvegarde de
+  la base de données**.
+- **🩺 Diagnostic** — une photographie du système (version, modèle, comptages, dernier relevé, intégrations
+  actives), la possibilité de **voir les journaux** (poller/web) et surtout de **télécharger un paquet de
+  diagnostic** en cochant les parties voulues (infos, journal poller, journal web, **signaux bruts**). Le
+  paquet est **déjà nettoyé** des données sensibles : **GPS retiré** et VIN/secrets masqués, donc il est sûr à
+  joindre quand vous demandez de l'aide. Il y a aussi une **analyse des recharges manquées** pendant que la
+  voiture dormait.
+- **⚙️ Avancé** — des paramètres fins pour utilisateurs expérimentés : seuil minimal pour **reconstruire** une
+  recharge manquée, seuil de la **décharge à l'arrêt (vampire drain)**, seuil kW pour distinguer le **DC**, et
+  température minimale pour le calcul de la **santé batterie**. Il y a un bouton pour **réinitialiser les
+  valeurs par défaut**.
+
+> 🆕 Quand une nouvelle fonction arrive, sa fiche peut afficher un badge **Nouveau** tant que vous ne l'avez
+> pas ouverte la première fois.
+
+---
+
+## 8. Les intégrations en détail
+
+Toutes les intégrations sont **facultatives** et **désactivées** par défaut. Elles se configurent depuis les
+**Paramètres**.
+
+### Wallbox (pour les coûts réels de recharge)
+En connectant votre wallbox, Mate utilise l'**énergie réellement délivrée** (côté courant alternatif) pour
+calculer le coût des recharges à domicile, au lieu de l'estimer à partir de la variation de pourcentage.
+
+Mate lit la wallbox **à travers Home Assistant** :
+
+1. Dans *Paramètres → Wallbox*, activez **Wallbox présente**.
+2. **Si vous utilisez le module complémentaire de Home Assistant**, Mate peut atteindre HA tout seul : pas
+   besoin de saisir d'adresse ni de jeton.
+3. **Si vous utilisez Mate en Docker autonome**, saisissez l'**URL de Home Assistant** (ex.
+   `http://192.168.1.10:8123`) et un **jeton d'accès longue durée** de HA, puis appuyez sur **Tester la
+   connexion**.
+4. Avec les **mots-clés**, vous pouvez aider Mate à reconnaître les bonnes entités de votre wallbox (ex.
+   `wallbox, charger, evse, keba, pulsar`). Certaines wallbox connues (ex. V2C Trydan) sont reconnues
+   automatiquement ; les entités « pièges » (solaire/maison) sont exclues.
+5. Ouvrez la liste des entités pour vérifier que Mate a bien accroché les bons capteurs d'**énergie/puissance**.
+6. Option **« domicile automatique »** : assigne automatiquement l'étiquette **Domicile** aux recharges
+   effectuées sur votre wallbox.
+
+### ABRP (A Better Routeplanner)
+Envoie la télémétrie de la voiture à ABRP pour la planification d'itinéraires en temps réel.
+
+1. Dans *Paramètres → ABRP*, activez **Activé**.
+2. Collez votre **jeton** ABRP (vous le trouvez dans les réglages « generic »/télémétrie de votre compte
+   ABRP).
+3. Enregistrez. L'état de l'intégration apparaît dans l'en-tête de la fiche.
+
+### MQTT → Home Assistant
+Publie l'état de la voiture (charge, autonomie, position, portes, état de charge…) sous forme d'**entités dans
+Home Assistant**, avec **auto-discovery**. Vous pouvez aussi **commander** la voiture depuis les entités de HA.
+
+1. Préparez un **broker MQTT** (généralement le module complémentaire *Mosquitto* dans Home Assistant).
+2. Dans *Paramètres → MQTT*, activez **Activé** et renseignez :
+   - **Broker** (ex. `192.168.1.10` ou `core-mosquitto`) et **Port** (par défaut `1883`) ;
+   - **Utilisateur** et **Mot de passe** du broker ;
+   - **Préfixe** des topics (par défaut `leapmotor`) ;
+   - options : **Discovery** (recommandée), **TLS** et **TLS non sécurisé** si vous utilisez des certificats
+     auto-signés.
+3. Appuyez sur **Tester la connexion** pour vérifier la connexion, puis **Enregistrer**. En quelques secondes,
+   les entités apparaissent dans Home Assistant.
+
+> Pour les commandes via MQTT, la voiture exige tout de même le PIN : Mate l'utilise automatiquement avec les
+> identifiants enregistrés.
+
+---
+
+## 9. Mode démo
+
+La **démo** sert à essayer Mate sans voiture et sans compte : elle démarre avec **un mois de données fictives
+mais réalistes**. Vous pouvez l'activer de deux manières :
+
+- depuis l'assistant de premier démarrage, bouton **🧪 Essayer la démo** ;
+- ou en lançant le conteneur avec la variable `MATE_DEMO=1`.
+
+En démo : les données sont ouvertement fictives (badge **DEMO**), les commandes sont **simulées** (aucune
+voiture n'est contactée) et une bannière en haut reste toujours visible avec le bouton pour **quitter**. En
+sortant, Mate revient à la configuration normale.
+
+---
+
+## 10. Questions fréquentes et résolution des problèmes
+
+**La voiture passe souvent « hors ligne » / je vois « Token non valide » en continu.**
+C'est presque toujours parce que le **même compte Leapmotor est utilisé ailleurs** (application officielle, une
+autre intégration, une seconde instance de Mate). Utilisez un **compte dédié uniquement à Mate** et **changez
+son mot de passe** en ne l'utilisant qu'ici (ainsi l'autre client est expulsé et ne revient pas). Voir
+[prérequis](#2-avant-de-commencer--les-prérequis).
+
+**Une commande donne « timeout » / un avis ambre.**
+Ce n'est (généralement) pas un problème de Mate. Les commandes sont en *temps réel* et dépendent de la
+**joignabilité de la voiture** (couverture, veille). Mate réessaie et souvent la commande aboutit quand même.
+L'indicateur **« Réactivité voiture »** dans l'Aperçu vous donne une idée de la situation.
+
+**Il manque des trajets ou des km après une période hors ligne.**
+Quand la voiture était injoignable, certaines données peuvent ne pas avoir été enregistrées. Les recharges
+survenues « pendant le sommeil » sont en général **reconstruites** à partir du saut de charge ; pour les km
+perdus, il n'est pas toujours possible de les récupérer. L'**analyse des recharges manquées** (Paramètres →
+Diagnostic) aide à retrouver les recharges non enregistrées.
+
+**Je vois une recharge étrange / un coût absurde.**
+Mate dispose de protections contre les valeurs impossibles (ex. compteurs de wallbox qui rapportent le total
+cumulé à vie). Si une recharge publique a un tarif compliqué, utilisez le type **✎ Manuel** et saisissez le
+total payé.
+
+**Le graphique de décharge à l'arrêt (vampire drain) est vide.**
+Il faut au moins un **arrêt long** avec une baisse de charge mesurable au cours des derniers jours. Si la
+voiture est toujours en charge ou dort à l'arrêt, il se peut qu'il n'y ait pas assez de matière. Mate capte
+aussi la baisse qui ne se « révèle » qu'au réveil.
+Une autre cause fréquente est le **seuil de la décharge à l'arrêt** dans *Paramètres → Avancé* : si vous l'avez
+relevé au-dessus des baisses réelles de votre voiture, le graphique ne dessine rien. Ramenez-le vers **0,2**
+(ou appuyez sur **Réinitialiser**) et les fenêtres réapparaissent. Depuis la **v1.22.4**, la page vous le dit
+explicitement — elle affiche tout de même la valeur typique et un avis « sous votre seuil » au lieu de sembler
+vide.
+
+**J'ai une Leapmotor REEV (hybride avec prolongateur d'autonomie).**
+Elle n'est pas prise en charge : les calculs d'énergie utiliseraient la capacité de batterie BEV et seraient
+faussés. Mate est **uniquement pour les versions 100 % électriques**.
+
+**Je ne suis pas en Europe.**
+Pour le moment, Mate ne fonctionne qu'avec le cloud Leapmotor **européen**. Les comptes sur des serveurs
+d'autres régions ne parviennent pas à se connecter.
+
+**Comment faire une sauvegarde ?**
+Depuis *Paramètres → Export/sauvegarde*, vous téléchargez la base de données (et les CSV). Conservez la base de
+données **avec sa `secret.key`**.
+
+---
+
+## 11. Glossaire
+
+- **SoC** (*State of Charge*) — pourcentage de charge de la batterie.
+- **SoH** (*State of Health*) — état de santé de la batterie : capacité restante par rapport au neuf.
+- **AC / DC** — courant alternatif (recharge lente, à domicile/bornes AC) / continu (recharge rapide et
+  ultra-rapide).
+- **Domicile / AC / Rapide (FAST) / HPC / Manuel** — les types de recharge que Mate reconnaît ou que vous
+  pouvez assigner ; « HPC » est la recharge à très haute puissance.
+- **TOU** (*Time-of-Use*) — tarif à **plages horaires** (prix différents selon le jour/l'heure).
+- **Régén** — énergie **récupérée** au freinage/au lâcher de l'accélérateur et remise en batterie.
+- **Vampire drain** — la petite **décharge à l'arrêt** de la voiture (systèmes en veille), mesurée par Mate
+  sur les arrêts longs.
+- **Polling** — la lecture périodique de l'état de la voiture depuis le cloud (ne décharge pas la voiture).
+- **Wallbox** — votre station de recharge domestique.
+- **Poller / Web** — les deux composants internes de Mate : le *poller* collecte les données, le *web* affiche
+  l'interface. Pour vous, utilisateur, c'est un détail : ils travaillent ensemble.
+- **VIN** — le numéro de châssis de la voiture ; il identifie de façon unique votre véhicule.
+- **PIN d'opération** — le PIN à 4 chiffres du compte, nécessaire pour autoriser les commandes à distance.
+
+---
+
+> 📌 **Note de maintenance du manuel.** Ce document décrit la version **v1.22.5**. Quand quelque chose de
+> visible par l'utilisateur change (une nouvelle page, une option, un flux), mettez à jour la section
+> correspondante et la ligne de version en haut. Il est conçu comme base pour les traductions (EN/FR/DE) : la
+> structure est volontairement la même que celle de l'interface.
