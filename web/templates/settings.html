@@ -523,9 +523,6 @@
                 class="border border-slate-600 text-slate-200 text-sm font-medium rounded-lg px-3 py-1.5 hover:border-brand">{{ t('diag_poller_log') }}</button>
         <button hx-get="api/diagnostics/logs?which=web" hx-target="#diag-output" hx-swap="innerHTML"
                 class="border border-slate-600 text-slate-200 text-sm font-medium rounded-lg px-3 py-1.5 hover:border-brand">{{ t('diag_web_log') }}</button>
-        <button hx-get="api/diagnostics/signals" hx-target="#diag-output" hx-swap="innerHTML" hx-indicator="#diag-spin"
-                class="border border-slate-600 text-slate-200 text-sm font-medium rounded-lg px-3 py-1.5 hover:border-brand">{{ t('diag_signals') }}</button>
-        <span id="diag-spin" class="htmx-indicator text-xs text-slate-500 self-center">…</span>
       </div>
       <div id="diag-output" class="mb-4"></div>
 
@@ -535,6 +532,7 @@
         <label class="flex items-center gap-1.5 cursor-pointer"><input type="checkbox" class="diag-part accent-brand" value="info" checked> {{ t('diag_part_info') }}</label>
         <label class="flex items-center gap-1.5 cursor-pointer"><input type="checkbox" class="diag-part accent-brand" value="poller" checked> {{ t('diag_poller_log') }}</label>
         <label class="flex items-center gap-1.5 cursor-pointer"><input type="checkbox" class="diag-part accent-brand" value="web" checked> {{ t('diag_web_log') }}</label>
+        <label class="flex items-center gap-1.5 cursor-pointer"><input type="checkbox" class="diag-part accent-brand" value="signals" checked> {{ t('diag_signals') }}</label>
       </div>
       <div class="flex items-center gap-3">
         <button type="button" onclick="diagDownload(this)" data-empty="{{ t('diag_pick_one') }}"

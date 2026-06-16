@@ -7,12 +7,18 @@ us asking them to dig through Docker / Home-Assistant add-on logs by hand.
 
 Everything here is read-only and redacts obvious secrets + the VIN before it leaves the box.
 """
+import json
 import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
 
 import db_reader
+
+# Coordinate signal IDs stripped from the raw-signal dump before it leaves the box, so the
+# bundle can be shared publicly without revealing where the car (home) is. 3724/3725 = lon/lat,
+# 2190/2191 = fallbacks, 2/3 = the signed pair. Everything else in the dict is non-locating.
+_GPS_SIGNAL_IDS = {"2", "3", "2190", "2191", "3724", "3725"}
 
 
 def data_dir() -> Path:
@@ -109,6 +115,19 @@ def build_system_info(version: str) -> dict:
         except (TypeError, ValueError):
             pass
 
+    # Positions date-span — so a "my history vanished" report (e.g. vampire-drain empty, #63) can
+    # be diagnosed at a glance: a span far shorter than expected + a non-zero retention = pruning.
+    span = "—"
+    try:
+        r = db.execute("SELECT MIN(recorded_at) a, MAX(recorded_at) b FROM positions "
+                       "WHERE recorded_at IS NOT NULL").fetchone()
+        if r and r["a"] and r["b"]:
+            days = round((datetime.fromisoformat(r["b"]) - datetime.fromisoformat(r["a"]))
+                         .total_seconds() / 86400, 1)
+            span = f"{r['a'][:10]} → {r['b'][:10]} ({days}d)"
+    except Exception:  # noqa: BLE001
+        pass
+
     return {
         "version": version,
         "model": (vehicle or {}).get("car_type") or "—",
@@ -121,6 +140,8 @@ def build_system_info(version: str) -> dict:
                    "positions": _count("positions")},
         "poll_parked": settings.get("poll_parked", "30"),
         "poll_driving": settings.get("poll_driving", "10"),
+        "retention_days": settings.get("positions_retention_days", "0"),
+        "positions_span": span,
         "features": {
             "mqtt": settings.get("mqtt_enabled") == "1",
             "wallbox": bool(settings.get("ha_url") or os.environ.get("SUPERVISOR_TOKEN")),
@@ -155,13 +176,24 @@ def read_log_tail(which: str, lines: int = 200) -> str:
 
 
 # ── shareable bundle ─────────────────────────────────────────────────────────
-_BUNDLE_PARTS = ("info", "poller", "web")   # user-selectable sections (NO raw signals → no GPS)
+_BUNDLE_PARTS = ("info", "poller", "web", "signals")   # user-selectable sections
 
 
-def build_bundle(version: str, parts=_BUNDLE_PARTS, lines: int = 300) -> str:
+def _signals_section(signals: dict | None, vin: str | None) -> str:
+    """The car's raw signal dict as pretty JSON, with the GPS coordinate ids stripped and the
+    usual secret/VIN redaction applied — so it's safe to drop straight into a shared bundle."""
+    if not signals:
+        return ("(no live signals — car asleep or unreachable; use the car briefly, then download "
+                "again)")
+    clean = {k: v for k, v in signals.items() if k not in _GPS_SIGNAL_IDS}
+    return _redact(json.dumps(clean, indent=2, sort_keys=True), vin)
+
+
+def build_bundle(version: str, parts=_BUNDLE_PARTS, lines: int = 300, signals: dict | None = None) -> str:
     """One redacted text blob to attach to an issue. `parts` selects which sections to include
-    (any of 'info', 'poller', 'web'); a one-line version header is always present. Never includes
-    raw signals (those carry GPS) — that stays a separate, explicit copy-from-screen action."""
+    (any of 'info', 'poller', 'web', 'signals'); a one-line version header is always present. The
+    'signals' section dumps the car's raw signals with GPS coordinates stripped (caller passes a
+    freshly-fetched signal dict) so the whole bundle stays safe to share publicly."""
     want = {p for p in parts if p in _BUNDLE_PARTS} or set(_BUNDLE_PARTS)
     out = [f"===== LeapMotor Mate {version} — diagnostics ====="]
 
@@ -177,6 +209,7 @@ def build_bundle(version: str, parts=_BUNDLE_PARTS, lines: int = 300) -> str:
             f"Rows         : trips={info['counts']['trips']} "
             f"charges={info['counts']['charges']} positions={info['counts']['positions']}",
             f"Poll (s)     : parked={info['poll_parked']} driving={info['poll_driving']}",
+            f"Positions    : span {info['positions_span']} · retention {info['retention_days']}d (0=keep all)",
             f"Features     : mqtt={f['mqtt']} wallbox={f['wallbox']} abrp={f['abrp']} addon={f['addon']}",
             f"Last poll    : {info['last_poll_iso']} (age {info['last_poll_age_min']} min) "
             f"soc={info['last_soc']} gear={info['last_gear']} charging={info['last_charging']}",
@@ -185,5 +218,9 @@ def build_bundle(version: str, parts=_BUNDLE_PARTS, lines: int = 300) -> str:
         out += ["", "----- poller log (recent) -----", read_log_tail("poller", lines)]
     if "web" in want:
         out += ["", "----- web log (recent) -----", read_log_tail("web", lines)]
+    if "signals" in want:
+        vehicle, _ = db_reader.get_vehicle()
+        out += ["", "----- raw signals (GPS removed) -----",
+                _signals_section(signals, (vehicle or {}).get("vin"))]
     out += ["", "===== end ====="]
     return "\n".join(out)

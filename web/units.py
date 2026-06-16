@@ -58,6 +58,15 @@ def dist_val(km, dec=1, system=None):
         return None
     return round(km * _KM_TO_MI, dec) if _imperial(system or get_unit_system()) else round(km, dec)
 
+def dist_to_km(value, system=None):
+    """Inverse of dist_val: a distance the user TYPED in their unit (mi for imperial)
+    → km for storage. DB is always metric, so user-entered odometer/service km must be
+    converted back before saving."""
+    if value is None:
+        return None
+    return value / _KM_TO_MI if _imperial(system or get_unit_system()) else value
+
+
 def speed_val(kmh, dec=0, system=None):
     if kmh is None:
         return None

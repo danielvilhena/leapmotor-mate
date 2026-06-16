@@ -3,6 +3,14 @@
 All notable changes to LeapMotor Mate are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.22.0] — 2026-06-16
+
+### Added
+- **Maintenance page.** A new section that tracks your car's factory service schedule, taken from the official owner's manual for your exact model (T03, B05, B10, C10) — never another model's, so each car shows only its own programme. Mate computes what's **overdue / due soon / up to date** from the live odometer and the time since delivery, with a distance bar and a time bar (whichever comes first wins). For a brand‑new car with no history it shows the **first‑service due** from your delivery date; you log each service (date + km) as it's done and the schedule rolls forward. Distances follow your unit setting (km or miles) and the whole page is translated (EN/IT/FR/DE). *(B05 inherits the validated B10 schedule provisionally until its own manual is published; range‑extender/REEV models are out of scope — Mate is BEV‑only.)*
+
+### Changed
+- **Diagnostics bundle is richer and easier to share.** "Download diagnostics" now also bundles the car's **raw signals** — with your GPS coordinates stripped — so reporting a model‑specific issue no longer needs any copy‑paste: one click attaches everything, and it stays safe to share publicly. The bundle header also shows the **position‑data span and retention setting**, which makes "my history looks empty" reports (e.g. an empty battery‑health or vampire‑drain chart) diagnosable at a glance. The separate on‑screen "raw signals" view — which showed your live GPS — was removed in favour of this redacted download.
+
 ## [1.21.7] — 2026-06-16
 
 ### Fixed

@@ -24,10 +24,11 @@ import mqtt_check
 import auth
 import update_check
 
-MATE_VERSION = "1.21.7"  # bump together with the git tag + add-on config.yaml at release
+MATE_VERSION = "1.22.0"  # bump together with the git tag + add-on config.yaml at release
 
 import diagnostics
 import demo
+import maintenance
 
 _IS_DEMO = demo.is_demo()
 demo.install(command_client, ha_client)   # no-op unless MATE_DEMO is set
@@ -440,6 +441,58 @@ async def battery_page(request: Request):
     return templates.TemplateResponse(request, "battery.html", _ctx(
         page="battery", vehicle=vehicle, health=health, vampire=vampire,
     ))
+
+
+def _maint_ctx(request: Request):
+    """Shared context for the maintenance page + its HTMX partial responses."""
+    from datetime import date
+    vehicle, _ = db_reader.get_vehicle()
+    lang = db_reader.get_language()
+    status = db_reader.get_latest_status() or {}
+    data = maintenance.compute(vehicle, status.get("odometer_km"), lang)
+    return _ctx(page="maintenance", vehicle=vehicle, maint=data,
+                m=maintenance.chrome(lang), today=date.today().isoformat())
+
+
+@app.get("/maintenance", response_class=HTMLResponse)
+async def maintenance_page(request: Request):
+    return templates.TemplateResponse(request, "maintenance.html", _maint_ctx(request))
+
+
+@app.post("/api/maintenance/log", response_class=HTMLResponse)
+async def maintenance_log(request: Request):
+    form = await request.form()
+    vehicle, _ = db_reader.get_vehicle()
+    st = (form.get("service_type") or "").strip()
+    dt = (form.get("date") or "").strip()
+    if vehicle and st and dt:
+        try:
+            # the km field is entered in the user's unit (mi for UK/US) → store as km
+            km = units.dist_to_km(float(form.get("km"))) if (form.get("km") or "") != "" else None
+        except (TypeError, ValueError):
+            km = None
+        maintenance.add_log(vehicle["id"], st, dt, km, (form.get("note") or "").strip())
+    return templates.TemplateResponse(request, "partials/maintenance_content.html", _maint_ctx(request))
+
+
+@app.post("/api/maintenance/unlog", response_class=HTMLResponse)
+async def maintenance_unlog(request: Request):
+    form = await request.form()
+    vehicle, _ = db_reader.get_vehicle()
+    st = (form.get("service_type") or "").strip()
+    if vehicle and st:
+        maintenance.delete_log(vehicle["id"], st)
+    return templates.TemplateResponse(request, "partials/maintenance_content.html", _maint_ctx(request))
+
+
+@app.post("/api/maintenance/baseline", response_class=HTMLResponse)
+async def maintenance_baseline(request: Request):
+    form = await request.form()
+    dt = (form.get("date") or "").strip()
+    if dt:
+        _, bkm, _explicit = maintenance.get_baseline()   # anchor km = earliest odometer Mate saw
+        maintenance.set_baseline(dt, bkm)
+    return templates.TemplateResponse(request, "partials/maintenance_content.html", _maint_ctx(request))
 
 
 @app.get("/map", response_class=HTMLResponse)
@@ -1623,13 +1676,18 @@ async def diagnostics_signals_fragment():
 
 
 @app.get("/api/diagnostics/bundle")
-async def diagnostics_bundle(parts: str = "info,poller,web"):
+async def diagnostics_bundle(parts: str = "info,poller,web,signals"):
     """Redacted snapshot as a downloadable .txt the user can attach to a GitHub issue. `parts`
-    (comma-separated: info, poller, web) selects which sections to include — chosen via the card's
-    checkboxes. No live cloud call and NO GPS — VIN/credentials masked → safe to share publicly.
-    Raw signals (which include location) stay a separate, explicit action."""
+    (comma-separated: info, poller, web, signals) selects which sections to include — chosen via
+    the card's checkboxes. VIN/credentials are masked and the raw signals have their GPS
+    coordinates stripped → the whole bundle is safe to share publicly. When 'signals' is selected
+    we do one live fetch (same as the Refresh button) so the dump reflects the car's current state."""
     sel = [p.strip() for p in parts.split(",") if p.strip()]
-    body = diagnostics.build_bundle(MATE_VERSION, parts=sel)
+    signals = None
+    if "signals" in sel:
+        import asyncio
+        signals = await asyncio.get_event_loop().run_in_executor(None, command_client.get_fresh_signals)
+    body = diagnostics.build_bundle(MATE_VERSION, parts=sel, signals=signals)
     return Response(content=body, media_type="text/plain; charset=utf-8",
                     headers={"Content-Disposition": "attachment; filename=leapmotor-mate-diagnostics.txt"})
 

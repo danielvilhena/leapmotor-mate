@@ -1,0 +1,33 @@
+{
+  "schema": "leapconnect.maintenance.pack/1",
+  "name": "Leapmotor C10 — Factory schedule (validated)",
+  "author": "Mate — validated against the official C10 (BEV, non-REEV) owner's manual (Manuale Utente, pp. 180-183)",
+  "verified": true,
+  "source": "Manuale Utente C10 (BEV/non-REEV, 210 pp), content pp. 180-181 + maintenance matrix pp. 182-183",
+  "version": 1,
+  "description": "Factory maintenance schedule for the Leapmotor C10 (BEV / non-REEV), extracted from its official owner's manual. Base interval 20000 km / 12 months, whichever comes first. The C10 is essentially identical to the B10 EXCEPT tires: replace every 3 years / 50000 km, tread limit 3 mm (B10 is 40000 km / 1.6 mm; T03 is 60000 km / 3 mm). Confirmed identical to B10: brake fluid 2y/40000 km, coolant replacement 4y/40000 km, reducer oil 60000 km, reducer/drivetrain filter 60000 km, A/C cabin filter 1y/20000 km, tire rotation 10000 km (wheel-nut torque 170 +/- 10 N.m), wiper blades yearly, brake pad limit 2 mm friction, brake disc limit 26 mm front / 16 mm rear. This pack matches the C10 intervals previously extracted from the 194-page C10 manual and is now validated against Silvio's own C10 (BEV) manual. NOTE: this is the BEV C10 — the C10 REEV (range-extender) is out of scope (Mate is BEV-only) and would add engine oil/air filter/spark plugs/fuel filter not present here.",
+  "model_compat": ["C10"],
+  "items": [
+    { "service_type": "brake_fluid_replace", "label": "Brake fluid (DOT4) — replacement", "category": "brakes", "interval_km": 40000, "interval_months": 24, "trigger_mode": "or", "priority": "important" },
+    { "service_type": "cabin_filter_replace", "label": "Cabin (A/C) filter — replacement", "category": "climate", "interval_km": 20000, "interval_months": 12, "trigger_mode": "or", "priority": "routine" },
+    { "service_type": "coolant_replace", "label": "Coolant — replacement", "category": "cooling", "interval_km": 40000, "interval_months": 48, "trigger_mode": "or", "priority": "important" },
+    { "service_type": "reducer_oil_replace", "label": "Reducer (gearbox) oil — replacement", "category": "drivetrain", "interval_km": 60000, "trigger_mode": "km", "priority": "important" },
+    { "service_type": "reducer_filter_replace", "label": "Reducer/drivetrain filter — replacement", "category": "drivetrain", "interval_km": 60000, "trigger_mode": "km", "priority": "important" },
+    { "service_type": "tire_replace", "label": "Tires — replacement (or tread < 3 mm)", "category": "tires", "interval_km": 50000, "interval_months": 36, "trigger_mode": "or", "priority": "important" },
+    { "service_type": "tire_rotation", "label": "Tire rotation (wheel-nut torque 170 N·m)", "category": "tires", "interval_km": 10000, "trigger_mode": "km", "priority": "routine" },
+    { "service_type": "wiper_blades_replace", "label": "Wiper blades — replacement", "category": "exterior", "interval_months": 12, "trigger_mode": "time", "priority": "routine" },
+    { "service_type": "brake_fluid_inspect", "label": "Brake fluid level — inspection", "category": "brakes", "interval_km": 20000, "interval_months": 12, "trigger_mode": "or", "priority": "routine" },
+    { "service_type": "brake_pads_inspect", "label": "Brake pads — inspection (replace if friction < 2 mm)", "category": "brakes", "interval_km": 20000, "interval_months": 12, "trigger_mode": "or", "priority": "routine" },
+    { "service_type": "brake_discs_inspect", "label": "Brake discs — inspection (replace if < 26 mm front / 16 mm rear)", "category": "brakes", "interval_km": 20000, "interval_months": 12, "trigger_mode": "or", "priority": "routine" },
+    { "service_type": "brake_hoses_inspect", "label": "Brake hoses & rigid lines — inspection", "category": "brakes", "interval_km": 20000, "interval_months": 12, "trigger_mode": "or", "priority": "routine" },
+    { "service_type": "driveshaft_boot_inspect", "label": "Steering & drive-shaft dust boots — inspection", "category": "drivetrain", "interval_km": 20000, "interval_months": 12, "trigger_mode": "or", "priority": "routine" },
+    { "service_type": "tire_inspect", "label": "Tires — pressure/wear/tread (cold 250/270 kPa empty, 270/270 loaded; tread < 3 mm)", "category": "tires", "interval_km": 20000, "interval_months": 12, "trigger_mode": "or", "priority": "routine" },
+    { "service_type": "coolant_inspect", "label": "Coolant level — inspection", "category": "cooling", "interval_km": 20000, "interval_months": 12, "trigger_mode": "or", "priority": "routine" },
+    { "service_type": "battery_pack_inspect", "label": "HV battery pack — visual, connectors, bolts, parameters (SOC/temp/insulation)", "category": "battery", "interval_km": 20000, "interval_months": 12, "trigger_mode": "or", "priority": "important" },
+    { "service_type": "drive_motor_inspect", "label": "Drive motor, reducer & controller — inspection", "category": "drivetrain", "interval_km": 20000, "interval_months": 12, "trigger_mode": "or", "priority": "routine" },
+    { "service_type": "hvac_system_check", "label": "A/C system — leak & noise check", "category": "climate", "interval_km": 20000, "interval_months": 12, "trigger_mode": "or", "priority": "routine" },
+    { "service_type": "charging_port_inspect", "label": "Charging port (AC & DC) — clean & inspection", "category": "electrical", "interval_km": 20000, "interval_months": 12, "trigger_mode": "or", "priority": "routine" },
+    { "service_type": "lights_horn_check", "label": "Lights, horn, wipers, washers — functional check", "category": "electrical", "interval_km": 20000, "interval_months": 12, "trigger_mode": "or", "priority": "routine" },
+    { "service_type": "software_update_check", "label": "ECU/control software version — check & update", "category": "electrical", "interval_km": 20000, "interval_months": 12, "trigger_mode": "or", "priority": "routine" }
+  ]
+}
