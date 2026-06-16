@@ -65,3 +65,54 @@ def test_reuse_survives_vanished_cert(tmp_path, monkeypatch):
 def test_restore_without_session_returns_false(tmp_path, monkeypatch):
     _setup(tmp_path, monkeypatch)
     assert session_share._restore(_fresh()) is False
+
+
+def test_ensure_account_cert_rematerializes_without_relogin(tmp_path, monkeypatch):
+    # #64: the stable account cert can vanish mid-session (weak-signal/asleep car poll-failing).
+    # ensure_account_cert must re-create it from the saved bytes WITHOUT a full login — just put
+    # the files back, so the next request doesn't fail with "Could not find the TLS certificate".
+    db = _setup(tmp_path, monkeypatch)
+    cert = tmp_path / "tmpY-leapmotor-cert.pem"
+    key = tmp_path / "tmpY-leapmotor-key.pem"
+    cert.write_bytes(b"CERTDATA")
+    key.write_bytes(b"KEYDATA")
+
+    a = _fresh()
+    a.token = "TOK"
+    a.account_cert_file = str(cert)
+    a.account_key_file = str(key)
+    session_share._save(a)                       # stashes bytes + writes stable copies
+
+    blob = json.loads(sqlite3.connect(str(db)).execute(
+        "SELECT value FROM settings WHERE key='shared_session'").fetchone()[0])
+    stable_cert, stable_key = blob["account_cert_file"], blob["account_key_file"]
+    for p in (stable_cert, stable_key):          # both stable files vanish mid-session
+        if os.path.exists(p):
+            os.remove(p)
+
+    live = _fresh()                              # a live api still pointed at the missing files
+    live.account_cert_file = stable_cert
+    live.account_key_file = stable_key
+    assert session_share.ensure_account_cert(live) is True
+    assert os.path.exists(stable_cert) and os.path.exists(stable_key)
+    assert open(stable_cert, "rb").read() == b"CERTDATA"
+
+
+def test_ensure_account_cert_noop_when_present(tmp_path, monkeypatch):
+    # Files already on disk → cheap True, no re-materialization.
+    _setup(tmp_path, monkeypatch)
+    cert = tmp_path / "c.pem"; cert.write_bytes(b"X")
+    key = tmp_path / "k.pem"; key.write_bytes(b"Y")
+    a = _fresh()
+    a.account_cert_file = str(cert)
+    a.account_key_file = str(key)
+    assert session_share.ensure_account_cert(a) is True
+
+
+def test_ensure_account_cert_false_without_blob(tmp_path, monkeypatch):
+    # No saved session and the files are gone → nothing to restore from.
+    _setup(tmp_path, monkeypatch)
+    a = _fresh()
+    a.account_cert_file = str(tmp_path / "missing.pem")
+    a.account_key_file = str(tmp_path / "missing-key.pem")
+    assert session_share.ensure_account_cert(a) is False

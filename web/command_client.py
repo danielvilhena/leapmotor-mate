@@ -142,6 +142,14 @@ class LeapmotorSession:
 
     def _connect(self):
         if self._api is not None:
+            # Already authenticated — just make sure the account TLS cert is still on disk (it can be
+            # cleaned up mid-session), re-creating it from the saved bytes instead of failing a
+            # command with "Could not find the TLS certificate file" (#64).
+            try:
+                import session_share
+                session_share.ensure_account_cert(self._api)
+            except Exception:  # noqa: BLE001
+                pass
             return
         self._api = _make_client()
         self._api.login()

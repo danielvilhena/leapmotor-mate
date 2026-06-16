@@ -145,6 +145,14 @@ class LeapmotorMateClient:
         self.login()
 
     def get_status(self) -> VehicleData:
+        # Make sure the per-login account TLS cert still exists before calling the cloud — if it was
+        # cleaned up mid-session, re-create it from the saved bytes instead of failing with "Could
+        # not find the TLS certificate file" and forcing an unnecessary re-login (#64).
+        try:
+            import session_share
+            session_share.ensure_account_cert(self._api)
+        except Exception:  # noqa: BLE001
+            pass
         raw = self._api.get_vehicle_raw_status(self._vehicle)
         data = (raw or {}).get("data") or {}
         sig = data.get("signal")

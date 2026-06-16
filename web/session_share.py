@@ -123,6 +123,46 @@ def _restore(api) -> bool:
         return False
 
 
+def ensure_account_cert(api) -> bool:
+    """Best-effort: make sure the account cert/key files the API points at still exist on disk,
+    re-creating them from the base64 stashed in the shared-session blob if they vanished — WITHOUT
+    a full re-login. The per-login files can be cleaned up mid-session (often on a weak-signal /
+    asleep car that poll-fails a lot), which otherwise surfaces as "Could not find the TLS
+    certificate file" and forces an unnecessary, rate-limit-risky re-login (#64). Returns True if
+    the files are present (or were just restored), False if we couldn't materialize them."""
+    acf = getattr(api, "account_cert_file", None)
+    akf = getattr(api, "account_key_file", None)
+    if acf and akf and os.path.exists(acf) and os.path.exists(akf):
+        return True
+    try:
+        c = sqlite3.connect(_db_path(), timeout=5)
+        row = c.execute("SELECT value FROM settings WHERE key='shared_session'").fetchone()
+        c.close()
+        b = json.loads(row[0]) if row else None
+    except Exception:  # noqa: BLE001
+        return False
+    if not b:
+        return False
+    acf = acf or b.get("account_cert_file")
+    akf = akf or b.get("account_key_file")
+    cb, kb = b.get("account_cert_b64"), b.get("account_key_b64")
+    if not (acf and akf and cb and kb):
+        return False
+    try:
+        restored = False
+        if not os.path.exists(acf):
+            _write_bytes(acf, base64.b64decode(cb)); restored = True
+        if not os.path.exists(akf):
+            _write_bytes(akf, base64.b64decode(kb)); restored = True
+        api.account_cert_file = acf
+        api.account_key_file = akf
+        if restored:
+            log.info("Re-materialized the account TLS cert (was missing) — no re-login needed")
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _shared_login(self) -> None:
     """Replacement for api.login: restore the shared token first; do a real login only
     when there is no recent shared session (or a just-restored one failed within the
