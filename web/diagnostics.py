@@ -141,6 +141,7 @@ def build_system_info(version: str) -> dict:
         "poll_parked": settings.get("poll_parked", "30"),
         "poll_driving": settings.get("poll_driving", "10"),
         "retention_days": settings.get("positions_retention_days", "0"),
+        "vampire_min_drop_pct": settings.get("vampire_min_drop_pct", "0.2"),
         "positions_span": span,
         "features": {
             "mqtt": settings.get("mqtt_enabled") == "1",
@@ -191,13 +192,17 @@ def _signals_section(signals: dict | None, vin: str | None) -> str:
 
 def _vampire_section() -> str:
     """What get_vampire_drain() actually computes — so an 'empty/missing battery-drain chart'
-    report (e.g. #63) shows the real count/windows, not just the user's screenshot."""
+    report (e.g. #63) shows the real count/windows, not just the user's screenshot. Uses the SAME
+    `min_drop_pct` the battery page does, so the bundle reproduces what the user sees: a high
+    threshold that charts nothing shows count=0 here too, with measurable>0 revealing the cause."""
     try:
-        v = db_reader.get_vampire_drain()
+        mdp = float(db_reader.get_setting("vampire_min_drop_pct", "0.2") or 0.2)
+        v = db_reader.get_vampire_drain(min_drop_pct=mdp)
     except Exception as e:  # noqa: BLE001
         return f"(vampire calc failed: {e})"
-    out = [f"count={v.get('count')}  typical={v.get('typical_pct_per_day')} %/day  "
-           f"lookback={v.get('lookback_days')}d"]
+    out = [f"count={v.get('count')}  measurable={v.get('measurable_count')}  "
+           f"below_threshold={v.get('below_threshold')}  min_drop_pct={v.get('min_drop_pct')} %/day  "
+           f"typical={v.get('typical_pct_per_day')} %/day  lookback={v.get('lookback_days')}d"]
     for w in (v.get("windows") or [])[-15:]:
         out.append(f"  {str(w['start'])[:16]} → {str(w['end'])[:16]}  {w['drop_pct']}% / {w['hours']}h "
                    f"= {w['pct_per_day']} %/day  reliable={w['reliable']}"
@@ -244,6 +249,7 @@ def build_bundle(version: str, parts=_BUNDLE_PARTS, lines: int = 300, signals: d
             f"charges={info['counts']['charges']} positions={info['counts']['positions']}",
             f"Poll (s)     : parked={info['poll_parked']} driving={info['poll_driving']}",
             f"Positions    : span {info['positions_span']} · retention {info['retention_days']}d (0=keep all)",
+            f"Vampire thr  : min_drop {info['vampire_min_drop_pct']} %/day (chart display threshold)",
             f"Features     : mqtt={f['mqtt']} wallbox={f['wallbox']} abrp={f['abrp']} addon={f['addon']}",
             f"Last poll    : {info['last_poll_iso']} (age {info['last_poll_age_min']} min) "
             f"soc={info['last_soc']} gear={info['last_gear']} charging={info['last_charging']}",

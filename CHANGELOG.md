@@ -3,6 +3,14 @@
 All notable changes to LeapMotor Mate are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.22.4] — 2026-06-16
+
+### Fixed
+- **The battery-standby (vampire-drain) chart no longer looks empty when your display threshold hides every window.** The Advanced "minimum drop" setting is a *display* threshold — raising it above your car's actual standby losses used to blank the whole section with a "no measurable drain" message, making it look as if the history had been lost (#63). Now the typical-rate headline always shows while measurable parked windows exist; the chart adds a "+N below your threshold" note when it hides smaller windows; and when every window is below the threshold the page says so explicitly and points you to lower the slider in **Settings → Advanced**, instead of looking empty.
+
+### Changed
+- **Diagnostics bundle now reports the vampire-drain display threshold and reproduces the page.** The computed section uses the same `vampire_min_drop_pct` the battery page does (so a high threshold shows `count=0` here too, with the measurable-window count revealing the real cause), and the header prints the threshold value.
+
 ## [1.22.3] — 2026-06-16
 
 ### Changed

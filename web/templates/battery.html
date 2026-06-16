@@ -134,7 +134,7 @@
   <p class="text-sm text-slate-400 mt-1">{{ t('battery_vampire_subtitle') }}</p>
 </div>
 
-{% if vampire.count %}
+{% if vampire.measurable_count %}
 <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
   <div style="background:#1e293b;border:1px solid #334155;border-radius:12px;padding:14px 16px">
     <div style="font-size:10px;color:#64748b;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">{{ t('battery_vampire_typical') }}</div>
@@ -144,6 +144,10 @@
   </div>
 </div>
 
+{% if vampire.count %}
+{% if vampire.below_threshold %}
+<p class="text-xs text-slate-500 mb-2">{{ t('battery_vampire_more_below').format(n=vampire.below_threshold, thr=vampire.min_drop_pct) }}</p>
+{% endif %}
 <div class="card mb-3">
   <div id="vampire-chart" style="height:300px"></div>
 </div>
@@ -193,6 +197,15 @@
   el._c.render();
 })();
 </script>
+{% else %}
+<div class="card flex items-center justify-center h-48 text-slate-500">
+  <div class="text-center max-w-md px-4">
+    <div class="text-4xl mb-3">🦇</div>
+    <div class="font-medium text-slate-400 mb-1">{{ t('battery_vampire_below_title') }}</div>
+    <div class="text-xs text-slate-500">{{ t('battery_vampire_below_hint').format(n=vampire.below_threshold, thr=vampire.min_drop_pct) }}</div>
+  </div>
+</div>
+{% endif %}
 {% else %}
 <div class="card flex items-center justify-center h-48 text-slate-500">
   <div class="text-center max-w-md px-4">

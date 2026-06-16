@@ -96,6 +96,32 @@ def test_exact_4_quanta_drop_over_long_park_is_reliable(monkeypatch):
     assert w["reliable"] is True and w["ongoing"] is False
 
 
+def test_raised_threshold_keeps_headline_and_reveals_below_count(monkeypatch):
+    # riri19 #63: two real parked windows (0.3% and 1.4% drop). Raising the display threshold must
+    # THIN the chart, not blank the page — measurable_count + typical survive a high min_drop_pct,
+    # and below_threshold tells the UI how many windows are hidden so it can say "below your
+    # threshold" instead of the misleading "no parked data at all".
+    rows = [
+        P("00:00", 80.0, odo=1000), P("02:00", 79.7, odo=1000),     # park A: 0.3% / 2h
+        P("02:30", 79.7, speed=40, odo=1010),                       # drive closes A
+        P("03:00", 79.7, odo=1010), P("06:00", 78.3, odo=1010),     # park B: 1.4% / 3h (ongoing)
+    ]
+    _setup(monkeypatch, rows)
+
+    at02 = db_reader.get_vampire_drain(lookback_days=BIG, min_drop_pct=0.2)
+    assert (at02["count"], at02["measurable_count"], at02["below_threshold"]) == (2, 2, 0)
+
+    at05 = db_reader.get_vampire_drain(lookback_days=BIG, min_drop_pct=0.5)
+    assert (at05["count"], at05["measurable_count"], at05["below_threshold"]) == (1, 2, 1)
+    assert at05["typical_pct_per_day"] is not None
+
+    # The exact #63 regression: a slider above every drop charts nothing, but the data still exists.
+    at20 = db_reader.get_vampire_drain(lookback_days=BIG, min_drop_pct=2.0)
+    assert (at20["count"], at20["measurable_count"], at20["below_threshold"]) == (0, 2, 2)
+    assert at20["typical_pct_per_day"] is not None        # headline survives → page isn't "empty"
+    assert at20["min_drop_pct"] == 2.0                    # echoed back for the bundle + UI hint
+
+
 def test_typical_is_time_weighted_and_counts_zero_drop_parks(monkeypatch):
     # 6h/1.0% park + (drive) + 12h/0.0% park → the zero-drop park is not charted but still
     # weighs the headline: 1.0% / 18h × 24 = 1.3 %/day, NOT the charted window's 4.0.

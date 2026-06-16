@@ -2125,6 +2125,12 @@ def get_battery_health(min_soc_delta: float = 12.0, temp_min_c: float | None = N
 # measurement error — which the %/day extrapolation multiplies by 24/hours (#41).
 SOC_QUANTUM = 0.1
 _DROP_ERR = 2 * SOC_QUANTUM
+# The intrinsic noise floor: a parked drop below 2 sensor quanta is jitter, not drain. The user's
+# `vampire_min_drop_pct` is a DISPLAY threshold layered on top — raising it thins the charted bars,
+# but it must never make a car that DOES lose charge look like it has no parked data at all (#63).
+# So we always collect windows down to this floor and tag which ones clear the user's threshold,
+# letting the page tell "no parked data yet" apart from "data exists, just below your threshold".
+_VAMPIRE_NOISE_FLOOR = 0.2
 
 
 def get_vampire_drain(min_hours: float = 1.0, min_drop_pct: float = 0.2,
@@ -2141,6 +2147,9 @@ def get_vampire_drain(min_hours: float = 1.0, min_drop_pct: float = 0.2,
     time-weighted `typical_pct_per_day` headline. Pure read over data Mate already records every
     poll — no extra polling, no user input."""
     db = _get()
+    # Collect down to the intrinsic noise floor regardless of the user's display threshold, so a
+    # raised `min_drop_pct` thins the chart without hiding that drain exists at all (#63).
+    floor = min(min_drop_pct, _VAMPIRE_NOISE_FLOOR)
     cutoff = (datetime.now(timezone.utc) - timedelta(days=lookback_days)).isoformat()
     rows = db.execute(
         "SELECT recorded_at, soc, charging, speed_kmh, odometer_km FROM positions "
@@ -2178,7 +2187,7 @@ def get_vampire_drain(min_hours: float = 1.0, min_drop_pct: float = 0.2,
         # Compare the rounded drop: raw float drops sit a hair off the threshold
         # (56.8 − 56.4 = 0.3999…), so identical physical drops would randomly pass/fail.
         drop_r = round(drop, 1)
-        if hours >= min_hours and drop_r >= min_drop_pct - 1e-9:
+        if hours >= min_hours and drop_r >= floor - 1e-9:
             err = _DROP_ERR / hours * 24
             windows.append({
                 "start": t0.isoformat(), "end": t1.isoformat(),
@@ -2189,6 +2198,9 @@ def get_vampire_drain(min_hours: float = 1.0, min_drop_pct: float = 0.2,
                 "rate_err": round(err, 1),
                 "reliable": drop_r >= 2 * _DROP_ERR - 1e-9 and err <= 1.0,
                 "ongoing": ongoing,
+                # Clears the user's display threshold → charted as a bar; otherwise it's a real
+                # parked window kept only to power the "below your threshold" hint + headline.
+                "_charted": drop_r >= min_drop_pct - 1e-9,
             })
 
     cur = None
@@ -2221,13 +2233,21 @@ def get_vampire_drain(min_hours: float = 1.0, min_drop_pct: float = 0.2,
     _flush(cur, ongoing=True)               # the trailing park is still open
 
     windows = windows[-limit:]
+    # Split the kept (>= noise floor) windows into the ones charted at the user's display
+    # threshold and the rest. `measurable` = real parked drain that exists regardless of the
+    # slider; `below_threshold` powers the "data exists, just below your X% threshold" hint so a
+    # raised slider never reads as "no parked data at all" (#63).
+    charted = [w for w in windows if w.pop("_charted")]
+    measurable = len(windows)
     # Time-weighted typical (total SoC lost / total parked time): quantization noise cancels
     # across windows instead of every short park voting like a long one, and slow drain below
-    # the per-window display threshold still surfaces. Spans the whole lookback on purpose —
-    # the headline shouldn't be limited by chart pagination (`limit`). None while nothing is
-    # chartable yet, so young installs keep the no-data state.
-    typical = round(agg["drop"] / agg["hours"] * 24, 1) if windows and agg["hours"] else None
-    return {"windows": windows, "count": len(windows),
+    # the per-window display threshold still surfaces. Gated on `measurable` (not the charted
+    # count) so the headline survives a raised display threshold; None while nothing clears the
+    # noise floor, so young installs keep the no-data state.
+    typical = round(agg["drop"] / agg["hours"] * 24, 1) if measurable and agg["hours"] else None
+    return {"windows": charted, "count": len(charted),
+            "measurable_count": measurable, "below_threshold": measurable - len(charted),
+            "min_drop_pct": round(min_drop_pct, 1),
             "typical_pct_per_day": typical, "lookback_days": lookback_days}
 
 
