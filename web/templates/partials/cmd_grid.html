@@ -171,7 +171,21 @@
           {% else %}text-slate-400 bg-slate-700 border border-slate-600{% endif %}">
           {% if wins is none %}{{ t('unknown') }}{% elif wins %}{{ t('wins_open_state') }}{% else %}{{ t('wins_closed_state') }}{% endif %}
         </span>
-        <div class="mt-auto w-full">{{ toggle_btn(not wins, "open_windows", "close_windows", t('open_wins_confirm'), t('close_wins_confirm'), drv) }}</div>
+        <div class="mt-auto w-full space-y-1.5">
+          {{ toggle_btn(not wins, "open_windows", "close_windows", t('open_wins_confirm'), t('close_wins_confirm'), drv) }}
+          {# Position slider — snaps to the stops this car actually actuates (B10 = 4 discrete; T03
+             continuous). The index maps to a %; value = last commanded. All four windows together. #}
+          <input type="range" min="0" max="{{ (wins_stops | default([0,100])) | length - 1 }}" step="1"
+                 value="{{ wins_idx | default(0) }}"
+                 {% if drv %}disabled{% endif %}
+                 class="w-full cursor-pointer accent-orange-400 disabled:opacity-40"
+                 oninput="winsLbl(this.value)" onchange="winsSet(this.value, this)">
+          <div class="flex items-center justify-between text-[9px] text-slate-500 px-0.5">
+            {% if (wins_stops | default([])) | length <= 6 %}{% for s in wins_stops %}<span>{{ t('wins_closed_state') if s == 0 else (s ~ '%') }}</span>{% endfor %}
+            {% else %}<span>{{ t('wins_closed_state') }}</span><span>100%</span>{% endif %}
+          </div>
+          <div class="text-[10px] text-slate-400"><span id="wins-pct">{{ (wins_pct | default(0)) ~ '%' }}</span> <span id="wins-res" class="text-emerald-400"></span></div>
+        </div>
       </div>
 
       <!-- Sunshade -->

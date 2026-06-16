@@ -3,6 +3,12 @@
 All notable changes to LeapMotor Mate are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.23.0] — 2026-06-17
+
+### Added
+- **Window position control + per-window opening %** ([#62](https://github.com/ProtossBlaster/leapmotor-mate/issues/62)). The Commands page now has a position slider for the windows, next to the quick "vent" button. It snaps to the stops each model actually actuates — the **B10** opens to 4 discrete positions (closed / ~20% vent / ~50% / fully open; it uses a 0–10 scale and ignores everything else, confirmed on-car), while the **T03** is continuous 0–100%. Opening asks for confirmation like the buttons, the slider reflects the last commanded position, and it triggers a fast status refresh so the change shows immediately.
+- **The Vehicle page now shows each window's opening %.** The real value on cars that report it (T03), and the last commanded position on cars whose window-position sensor is dead (B10) — shown only for windows the open/closed flag confirms open, so a closed window never shows a stale number.
+
 ## [1.22.6] — 2026-06-16
 
 ### Fixed

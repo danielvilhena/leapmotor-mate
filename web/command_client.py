@@ -743,18 +743,24 @@ def set_climate_temp(temp, inside=None):
     body = json.dumps({"circle": "in", "mode": mode, "operate": "manual", "position": "all",
                        "temperature": str(t), "windlevel": "5", "wshld": "0"}, separators=(",", ":"))
     return _session.execute(lambda api, vin: api._remote_control(vin=vin, action="ac_on", cmd_content=body))
-# windows value is a position 0–100, but the accepted-and-ACTUATED value is model-specific: the B10
-# opens on "2" and ignores "100" (cloud says "request successful" either way); leapconnect's T03 opens
-# on "100" and ignores "2" (#62). So default to the B10's "2" (the only value confirmed on-car here)
-# and override per car-type for models known to need a different one. close=0 works on both.
-_WINDOWS_OPEN_VALUE = {"T03": "100"}   # car_type → open value; default "2" (B10-confirmed)
+# Window position is a 0–100% in the UI, but cmd 230's native range is model-specific: the B10 uses
+# 0–10 (10 = fully open, >10 is silently ignored — confirmed on-car), the T03 0–100 (#62). Map the UI
+# % to the model's native value via its full-open scale. cmd 230 is GLOBAL — all four windows move
+# together (the API has no per-window control). Quick button = 20% vent; slider = 0 (closed) → 100.
+_WINDOWS_SCALE = {"B10": 10}   # car_type → native value for "fully open"; default 100
 def _session_car_type() -> str:
     v = getattr(_session, "_vehicle", None)
     return (getattr(v, "car_type", "") or "").upper() if v else ""
-def open_windows():
-    return _session.execute(lambda api, vin: api.open_windows(
-        vin, value=_WINDOWS_OPEN_VALUE.get(_session_car_type(), "2")))
-def close_windows():     return _session.execute(lambda api, vin: api.close_windows(vin, value="0"))
+def _windows_native(pct) -> str:
+    try: pct = max(0, min(int(pct), 100))
+    except (TypeError, ValueError): pct = 0
+    full = _WINDOWS_SCALE.get(_session_car_type(), 100)
+    return str(round(pct / 100 * full))
+def set_windows(pct):
+    """Open all windows to a 0–100% position (mapped to the car's native scale)."""
+    return _session.execute(lambda api, vin: api.windows(vin, value=_windows_native(pct)))
+def open_windows():      return set_windows(20)   # quick "vent" — air passage
+def close_windows():     return set_windows(0)
 def battery_preheat():   return _session.execute(lambda api, vin: api.battery_preheat(vin))
 def battery_preheat_off():return _session.execute(lambda api, vin: api.battery_preheat_off(vin))
 def open_sunshade():     return _session.execute(lambda api, vin: api.open_sunshade(vin))

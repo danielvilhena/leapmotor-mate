@@ -46,9 +46,9 @@
 {% endmacro %}
 
 {# ── Window tile with open/closed icon variants ── #}
-{% macro win_tile(label, st) %}
+{% macro win_tile(label, st, pct=none) %}
   {% if st is none %}{{ tile(mdi(IC_WIN_CLOSED), label, t('no_data'), 'text-slate-500', 'text-slate-500') }}
-  {% elif st %}{{ tile(mdi(IC_WIN_OPEN), label, t('open_state'), 'text-sky-400', 'text-sky-400') }}
+  {% elif st %}{{ tile(mdi(IC_WIN_OPEN), label, (pct ~ '%') if (pct is not none and pct > 0) else t('open_state'), 'text-sky-400', 'text-sky-400') }}
   {% else %}{{ tile(mdi(IC_WIN_CLOSED), label, t('closed_state'), 'text-green-400', 'text-green-400') }}
   {% endif %}
 {% endmacro %}
@@ -97,10 +97,10 @@
   <div class="card">
     <h2 class="font-semibold text-white mb-4 flex items-center gap-2">{{ mdi(IC_WIN_CLOSED) }} {{ t('windows') }}</h2>
     <div class="grid grid-cols-2 lg:grid-cols-3 gap-3">
-      {{ win_tile(t('win_fl'), vs.windows.fl) }}
-      {{ win_tile(t('win_fr'), vs.windows.fr) }}
-      {{ win_tile(t('win_rl'), vs.windows.rl) }}
-      {{ win_tile(t('win_rr'), vs.windows.rr) }}
+      {{ win_tile(t('win_fl'), vs.windows.fl, vs.windows.fl_pct) }}
+      {{ win_tile(t('win_fr'), vs.windows.fr, vs.windows.fr_pct) }}
+      {{ win_tile(t('win_rl'), vs.windows.rl, vs.windows.rl_pct) }}
+      {{ win_tile(t('win_rr'), vs.windows.rr, vs.windows.rr_pct) }}
       {{ state_tile(mdi(IC_ROOF), t('win_sunshade'), vs.windows.sunshade, open_class='text-sky-400') }}
     </div>
   </div>

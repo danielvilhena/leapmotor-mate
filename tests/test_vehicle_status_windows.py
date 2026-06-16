@@ -17,19 +17,36 @@ pytest.importorskip("fastapi", reason="web.main needs fastapi (absent in the min
 import main
 
 
-def _windows(sig, vin, monkeypatch, *, pct_trusted):
+def _windows(sig, vin, monkeypatch, *, pct_trusted, cmd_pct=None):
     # windows_pct trusted (T03) vs broken/ignored (B10); other features default to shown.
     monkeypatch.setattr(main.capability_profile, "is_shown",
                         lambda v, feat, *a, **k: pct_trusted if feat == "windows_pct" else True)
-    return main._parse_vehicle_status(sig, vin)["windows"]
+    return main._parse_vehicle_status(sig, vin, cmd_pct)["windows"]
 
 
 def test_t03_open_windows_read_from_percent(monkeypatch):
-    # flags stay false but the position % is 20 → all four windows must read as OPEN.
+    # flags stay false but the position % is 20 → all four windows must read as OPEN, and the
+    # per-window opening % is surfaced for the Vehicle page (the T03 reports it).
     sig = {"1693": False, "1694": False, "1695": False, "1696": False,
            "3727": 20, "3728": 20, "1879": 20, "1880": 20}
     w = _windows(sig, "T03VIN", monkeypatch, pct_trusted=True)
     assert (w["fl"], w["fr"], w["rl"], w["rr"]) == (True, True, True, True)
+    assert (w["fl_pct"], w["fr_pct"], w["rl_pct"], w["rr_pct"]) == (20, 20, 20, 20)
+
+
+def test_b10_per_window_percent_from_commanded(monkeypatch):
+    # B10: % sensor dead → the per-window % falls back to the last commanded position, but only for
+    # a window the flag confirms OPEN (a closed window shows no stale %).
+    sig = {"1693": 2, "1694": 0, "1695": 0, "1696": 0}   # only FL open
+    w = _windows(sig, "B10VIN", monkeypatch, pct_trusted=False, cmd_pct=50)
+    assert (w["fl"], w["fl_pct"]) == (True, 50)
+    assert (w["fr"], w["fr_pct"]) == (False, None)
+
+
+def test_b10_no_percent_without_a_commanded_value(monkeypatch):
+    # nothing commanded yet → open/closed only, no number.
+    w = _windows({"1693": 2}, "B10VIN", monkeypatch, pct_trusted=False, cmd_pct=None)
+    assert w["fl"] is True and w["fl_pct"] is None
 
 
 def test_t03_closed_windows(monkeypatch):

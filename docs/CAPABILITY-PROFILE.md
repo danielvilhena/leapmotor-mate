@@ -47,11 +47,25 @@ toggles) on the Commands page, plus the read-only state. The international paylo
 across C10/B10 (no B10-specific flow); our earlier failure was sending `position` as a numeric
 index instead of the string `"driver"/"copilot"`.
 
+### Windows — WORKING on the B10, on a 0–10 scale (cmd 230)
+The window open/close command (`cmd 230`, `{"value":N}`) actuates the B10 — but on a **0–10 scale**,
+not the 0–100 the `leapmotor-api` docstring implies. Mapped on-car (windows in a closed box):
+- **only `0 / 2 / 5 / 10` move the car** = closed / ~20% (vent) / ~50% / fully open;
+- every other value (1, 3, 4, 6, 7, 8, 9, and 25/50/100…) is **accepted by the cloud
+  (`"请求成功"`) but ignored by the car** — so it's effectively 4 discrete stops, not continuous.
+- The T03 is the documented 0–100 continuous scale (per markoceri/leapconnect).
+
+Mate maps a uniform 0–100% UI to each model's native value (B10 ÷10, T03 ×1) and snaps the B10
+slider to the 4 valid stops. Because the B10's **position sensor is dead** (above), the Vehicle
+page shows the last *commanded* position as the %, gated by the real open/closed flag.
+
 ### Still broken / unsupported on the B10
 - **sentry** (`3636`, cmd 220): command accepted (`code=0`) but never actuates.
-- **window open/close & opening-%** (`3727/3728/1879/1880`): command accepted-but-not-executed,
-  and the opening-% sensor is **dead** (windows physically open but %=0) → hidden. Window
-  open/closed *state* works.
+- **window opening-% sensor** (`3727/3728/1879/1880`): **dead** on the B10 — reads 0 even with the
+  windows physically open (verified on-car at 50%) → not shown. The open/closed **flag** (`1693–1696`:
+  0 = closed, 2 = open) *does* work. NB the open/close **command itself works** on the B10 (see the
+  Windows note in §"What works") — only the *position read-back* is missing, so Mate shows the last
+  *commanded* position as the %.
 - **`unlock_charger`** (charge-port unlock, right 192): exposed in v1.11.5 (web + MQTT) but its
   on-car actuation on the B10 is **not yet confirmed** — may turn out accepted-but-not-executed
   like the old A/C-off; pull/gate it if so.

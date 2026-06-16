@@ -8,15 +8,36 @@
 </div>
 
 {% include "partials/cmd_grid.html" %}
+{# Dummy request-source OUTSIDE #cmd-grid: htmx puts the `htmx-request` class on the source, and the
+   command ⏳ indicators only light up when that class is on one of THEIR ancestors. Refreshing with
+   this span as source (instead of defaulting to <body>) keeps every spinner from flashing. #}
+<span id="cmd-refresh-src" class="hidden"></span>
 
 <script>
 function refreshCmdGrid() {
-  htmx.ajax('GET', 'api/cmd-grid', {target: '#cmd-grid', swap: 'outerHTML'});
+  htmx.ajax('GET', 'api/cmd-grid', {source: '#cmd-refresh-src', target: '#cmd-grid', swap: 'outerHTML'});
+}
+
+// Window slider: snaps to the stops the car actually actuates (the B10 ignores the rest, #62).
+// The slider index maps to a %; onchange posts that %, which the backend maps to the native value.
+var WINS_STOPS = {{ wins_stops | tojson }};
+var WINS_CONFIRM = {{ t('open_wins_confirm') | tojson }};
+function winsLbl(i) { var el = document.getElementById('wins-pct'); if (el) el.textContent = WINS_STOPS[i] + '%'; }
+function winsSet(i, el) {
+  // Opening confirms like the button does; cancelling reverts the slider to its last committed
+  // position (defaultValue = the server-rendered value attribute). Closing (0%) needs no prompt.
+  if (WINS_STOPS[i] > 0 && !confirm(WINS_CONFIRM)) { el.value = el.defaultValue; winsLbl(el.value); return; }
+  // Pass the slider as `source` so htmx puts the request class on IT, not on <body> — otherwise
+  // every command's ⏳ indicator (.htmx-request .htmx-indicator) would light up at once.
+  var r = document.getElementById('wins-res'); if (r) r.textContent = '⏳';
+  htmx.ajax('POST', 'api/windows', {source: el, values: {pct: WINS_STOPS[i]}, target: '#wins-res', swap: 'innerHTML'});
 }
 
 document.addEventListener('htmx:afterRequest', function(e) {
   var path = (e.detail.pathInfo || {}).requestPath || '';
-  if (!e.detail.successful || !path.startsWith('api/command/')) return;
+  // Window slider (api/windows) is a real command too → refresh the grid quickly afterwards,
+  // instead of waiting for the next manual/command-triggered refresh.
+  if (!e.detail.successful || !(path.startsWith('api/command/') || path === 'api/windows')) return;
   var resultId = 'result-' + path.split('/').pop();
   var el = document.getElementById(resultId);
   if (el && el.querySelector('[data-warn]')) {

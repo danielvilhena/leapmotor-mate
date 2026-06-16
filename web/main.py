@@ -24,7 +24,7 @@ import mqtt_check
 import auth
 import update_check
 
-MATE_VERSION = "1.22.6"  # bump together with the git tag + add-on config.yaml at release
+MATE_VERSION = "1.23.0"  # bump together with the git tag + add-on config.yaml at release
 
 import diagnostics
 import demo
@@ -585,20 +585,48 @@ def _optimistic_comfort(vin, updates):
     db_reader.set_setting(key, json.dumps(cur, separators=(",", ":")))
 
 
+def _wins_pct() -> int:
+    """Last commanded window position % (the slider reflects what was SET, not open/closed — the
+    B10 can't report its real window position)."""
+    try:
+        return max(0, min(int(db_reader.get_setting("windows_cmd_pct", "0") or 0), 100))
+    except (TypeError, ValueError):
+        return 0
+
+
+# The %-stops a car actually ACTUATES. The B10 ignores everything except these (empirically
+# 0/2/5/10 native = 0/20/50/100% — #62), so its slider snaps to 4 discrete stops; continuous
+# models (T03) get the full 0–100 range. Add a model here as its valid stops are confirmed on-car.
+_WINDOWS_STOPS = {"B10": [0, 20, 50, 100]}
+def _wins_stops() -> list:
+    vehicle, _ = db_reader.get_vehicle()
+    ct = ((vehicle or {}).get("car_type") or "").upper()
+    return _WINDOWS_STOPS.get(ct, list(range(0, 101)))
+def _wins_idx(stops, pct) -> int:
+    """Slider index of the stop nearest the last commanded %."""
+    return min(range(len(stops)), key=lambda i: abs(stops[i] - pct)) if stops else 0
+def _wins_ctx() -> dict:
+    stops = _wins_stops()
+    pct = _wins_pct()
+    return {"wins_pct": pct, "wins_stops": stops, "wins_idx": _wins_idx(stops, pct)}
+
+
 @app.get("/commands", response_class=HTMLResponse)
 async def commands(request: Request):
     vehicle, _ = db_reader.get_vehicle()
     status = db_reader.get_latest_status()
     comfort = _comfort_rows(vehicle.get("vin") if vehicle else None)
     return templates.TemplateResponse(request, "commands.html", _ctx(
-        page="commands", vehicle=vehicle, status=status, comfort=comfort,
+        page="commands", vehicle=vehicle, status=status, comfort=comfort, **_wins_ctx(),
         ac_off_shown=capability_profile.command_shown(vehicle.get("vin") if vehicle else None, "climate_off"),
     ))
 
 
-def _parse_vehicle_status(sig: dict, vin: str | None = None) -> dict:
+def _parse_vehicle_status(sig: dict, vin: str | None = None, cmd_pct: int | None = None) -> dict:
     """Parse tyres / doors / windows / temps from a fresh signal dict (live, not DB). `vin` gates
-    the per-car window-% fallback against its capability profile (#62)."""
+    the per-car window-% fallback against its capability profile (#62). `cmd_pct` = the last
+    position WE commanded — used as the window-opening % on cars whose % sensor is dead (B10), shown
+    only for windows the open/closed flag confirms open."""
     def f(k):
         try: return float(sig.get(k)) if sig.get(k) is not None else None
         except (TypeError, ValueError): return None
@@ -622,6 +650,12 @@ def _parse_vehicle_status(sig: dict, vin: str | None = None) -> dict:
         if s is None and p is None:
             return None
         return bool((s or 0) != 0 or (p or 0) > 0)
+    def win_pct(state_k, pct_k):
+        # Real sensor where trusted (T03); else fall back to the last commanded % — but only for a
+        # window the flag reports OPEN, so a closed window never shows a stale number.
+        if use_pct:
+            return i(pct_k)
+        return cmd_pct if (cmd_pct and (i(state_k) or 0) != 0) else None
     return {
         # Wheel→signal mapping corrected from a TWO-B10 vs official-app cross-check (GitHub #32:
         # the UK reporter's car + Silvio's IT car, both showing 280 kPa at the rear-right):
@@ -641,6 +675,10 @@ def _parse_vehicle_status(sig: dict, vin: str | None = None) -> dict:
         "windows": {
             "fl": win_open("1693", "3727"), "fr": win_open("1694", "3728"),
             "rl": win_open("1695", "1879"), "rr": win_open("1696", "1880"),
+            # Opening % per window: the real sensor on the T03, the last commanded position on the
+            # B10 (its sensor is dead) — shown only for windows the flag confirms open.
+            "fl_pct": win_pct("1693", "3727"), "fr_pct": win_pct("1694", "3728"),
+            "rl_pct": win_pct("1695", "1879"), "rr_pct": win_pct("1696", "1880"),
             "sunshade": is_open("1724"),
         },
         "temps": {"battery": f("1182"), "cabin": f("1349")},  # no ambient-temp signal exists
@@ -787,7 +825,7 @@ async def vehicle_status_api(request: Request):
     import asyncio
     vehicle, _ = db_reader.get_vehicle()
     signals = await asyncio.get_event_loop().run_in_executor(None, command_client.get_fresh_signals)
-    vs = _parse_vehicle_status(signals, (vehicle or {}).get("vin")) if signals else None
+    vs = _parse_vehicle_status(signals, (vehicle or {}).get("vin"), _wins_pct()) if signals else None
     return templates.TemplateResponse(request, "partials/vehicle_status.html", _ctx(vs=vs))
 
 
@@ -1797,7 +1835,7 @@ async def cmd_grid(request: Request):
     vin = vehicle.get("vin") if vehicle else None
     comfort = _comfort_rows(vin)
     return templates.TemplateResponse(request, "partials/cmd_grid.html", _ctx(
-        status=status, comfort=comfort,
+        status=status, comfort=comfort, **_wins_ctx(),
         ac_off_shown=capability_profile.command_shown(vin, "climate_off"),
     ))
 
@@ -1821,6 +1859,26 @@ async def set_seat(request: Request, func: str, position: str):
         _t = i18n.get_t(db_reader.get_language())
         txt = f"{_t('lvl_abbr')} {level}" if level > 0 else _t('lvl_off')
         return HTMLResponse(f'<span style="color:#22c55e">✓ {txt}</span>')
+    return HTMLResponse(_cmd_error_html(msg))
+
+
+@app.post("/api/windows", response_class=HTMLResponse)
+async def set_windows_api(request: Request):
+    """Open all windows to a 0–100% position (slider). cmd 230 is global — all four move together."""
+    form = await request.form()
+    try:
+        pct = max(0, min(int(form.get("pct", 0)), 100))
+    except (TypeError, ValueError):
+        pct = 0
+    import asyncio
+    ok, msg = await asyncio.get_event_loop().run_in_executor(
+        None, lambda: command_client.set_windows(pct))
+    if ok:
+        db_reader.write_optimistic_status({"windows_open": 1 if pct > 0 else 0})
+        # Remember the commanded position: the B10 can't report its real window % (dead sensor),
+        # so the slider reflects what was last SET rather than guessing from open/closed (#62).
+        db_reader.set_setting("windows_cmd_pct", str(pct))
+        return HTMLResponse(f'<span style="color:#22c55e">✓ {pct}%</span>')
     return HTMLResponse(_cmd_error_html(msg))
 
 
@@ -2421,6 +2479,8 @@ async def run_command(name: str, background_tasks: BackgroundTasks):
             _optimistic_comfort(_veh.get("vin") if _veh else None, _COMFORT_CMD_OPTIMISTIC[name])
         if overrides:
             db_reader.write_optimistic_status(overrides)
+        if name in ("open_windows", "close_windows"):   # keep the slider in sync with the quick button
+            db_reader.set_setting("windows_cmd_pct", "20" if name == "open_windows" else "0")
         # Climate commands take several seconds to reflect in signals → show the
         # spinner and refresh from real signals after a delay (like slow commands).
         slow = name in _SLOW_COMMANDS or field is not None
