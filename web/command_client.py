@@ -360,6 +360,25 @@ class LeapmotorSession:
             return None
 
 
+    def get_car_picture_package(self) -> bytes | None:
+        """Raw per-vehicle car-picture package ZIP (all layers + the static render). Rarely changes
+        → caller should cache. The web layer composes the LIVE image from it (car_image.compose),
+        reflecting the charge cable / charging animation / trunk."""
+        with self._lock:
+            for attempt in range(2):
+                try:
+                    self._connect()
+                    meta = self._api.get_car_picture(self._vehicle)
+                    key = (meta.get("data") or {}).get("key") if isinstance(meta, dict) else None
+                    if not key:
+                        return None
+                    return self._api.download_car_picture_package(picture_key=key)
+                except Exception as e:
+                    log.warning("Car picture package fetch (attempt %d): %s", attempt + 1, e)
+                    self._reset()
+            return None
+
+
     def get_energy_breakdown(self) -> dict | None:
         """Last-week energy split (driving / A/C / other), via the library's native
         get_consumption_last_week_breakdown() (0.3.x). Mapped to the dict shape the UI
@@ -411,6 +430,10 @@ _session = LeapmotorSession()
 
 def get_car_picture() -> bytes | None:
     return _session.get_car_picture()
+
+
+def get_car_picture_package() -> bytes | None:
+    return _session.get_car_picture_package()
 
 
 def get_energy_breakdown() -> dict | None:

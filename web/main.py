@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 import db_reader
 import capability_profile
 import command_client
+import car_image
 import i18n
 import ha_client
 import geocode
@@ -24,7 +25,7 @@ import mqtt_check
 import auth
 import update_check
 
-MATE_VERSION = "1.23.1"  # bump together with the git tag + add-on config.yaml at release
+MATE_VERSION = "1.24.0"  # bump together with the git tag + add-on config.yaml at release
 
 import diagnostics
 import demo
@@ -2032,26 +2033,73 @@ def _car_picture_cache_path() -> str:
     return os.path.join(os.path.dirname(os.path.abspath(db_path)), "car_picture.png")
 
 
+def _car_picture_pkg_path() -> str:
+    db_path = os.environ.get("DB_PATH", "leapmotor_mate.db")
+    return os.path.join(os.path.dirname(os.path.abspath(db_path)), "car_picture_pkg.zip")
+
+
+# Composed images memoised by body-state signature so a 30s hero refresh on an unchanged state
+# doesn't recomposite. Cleared when the package is re-downloaded.
+_car_image_memo: dict = {}
+# The hero <img> carries a ?v=<state> token, so each distinct state is a distinct URL → a state
+# change is a fresh fetch while an unchanged state is served from the browser cache (no re-download
+# on every 30s hero refresh).
+_CAR_IMG_CACHE = {"Cache-Control": "max-age=300"}
+
+
 @app.get("/api/car-picture")
 async def car_picture(refresh: int = 0):
-    """Serve the owner's vehicle PNG. Cached to disk (picture changes rarely) so the
-    overview doesn't trigger an API call + ZIP download on every page load.
-    Use ?refresh=1 to force a re-download."""
-    cache = _car_picture_cache_path()
-    if not refresh and os.path.exists(cache):
-        return FileResponse(cache, media_type="image/png")
+    """Serve the owner's vehicle image — composed LIVE from the per-vehicle layer package to reflect
+    the current state (charge cable, charging animation, trunk), like the official app. The package
+    ZIP is cached to disk (it changes only if the car/colour changes; ?refresh=1 re-downloads it).
+    Falls back to the package's static render, then the legacy cached PNG, on any problem — so the
+    Overview never breaks."""
     import asyncio
-    data = await asyncio.get_event_loop().run_in_executor(None, command_client.get_car_picture)
-    if not data:
-        if os.path.exists(cache):
-            return FileResponse(cache, media_type="image/png")
+    pkg_path = _car_picture_pkg_path()
+    pkg = None
+    if not refresh and os.path.exists(pkg_path):
+        try:
+            with open(pkg_path, "rb") as f:
+                pkg = f.read()
+        except OSError:
+            pkg = None
+    if pkg is None:
+        pkg = await asyncio.get_event_loop().run_in_executor(None, command_client.get_car_picture_package)
+        if pkg:
+            try:
+                with open(pkg_path, "wb") as f:
+                    f.write(pkg)
+            except OSError:
+                pass
+            _car_image_memo.clear()
+            car_image.clear_cache()
+    if not pkg:
+        legacy = _car_picture_cache_path()
+        if os.path.exists(legacy):
+            return FileResponse(legacy, media_type="image/png")
         return Response(status_code=404)
+
+    status = db_reader.get_latest_status() or {}
+    sig = tuple(bool(status.get(k)) for k in (
+        "plug_connected", "charging", "trunk_open",
+        "door_driver_open", "door_passenger_open", "door_rear_left_open", "door_rear_right_open",
+        "window_fl_open", "window_rl_open"))
+    if not refresh and sig in _car_image_memo:
+        body, mime = _car_image_memo[sig]
+        return Response(content=body, media_type=mime, headers=_CAR_IMG_CACHE)
     try:
-        with open(cache, "wb") as f:
-            f.write(data)
-    except OSError:
-        pass
-    return Response(content=data, media_type="image/png")
+        body, mime = await asyncio.get_event_loop().run_in_executor(None, car_image.compose, pkg, status)
+        _car_image_memo[sig] = (body, mime)
+        return Response(content=body, media_type=mime, headers=_CAR_IMG_CACHE)
+    except Exception as e:
+        log.warning("Live car image compose failed (%s) — using the static render", e)
+        static = car_image.static_image(pkg)
+        if static:
+            return Response(content=static, media_type="image/png")
+        legacy = _car_picture_cache_path()
+        if os.path.exists(legacy):
+            return FileResponse(legacy, media_type="image/png")
+        return Response(status_code=404)
 
 
 @app.post("/api/charge-limit", response_class=HTMLResponse)
@@ -2288,8 +2336,8 @@ _OPTIMISTIC = {
     "close_trunk":   {"trunk_open": 0},
     # All four windows move together (cmd 230 is global), so the optimistic count is 4 open / 0
     # closed — the Overview "Finestrini aperti N" badge flips with the state instead of lagging.
-    "open_windows":  {"windows_open": 1, "windows_open_count": 4},
-    "close_windows": {"windows_open": 0, "windows_open_count": 0},
+    "open_windows":  {"windows_open": 1, "windows_open_count": 4, "window_fl_open": 1, "window_rl_open": 1},
+    "close_windows": {"windows_open": 0, "windows_open_count": 0, "window_fl_open": 0, "window_rl_open": 0},
     "open_sunshade": {"sunshade_open": 1},
     "close_sunshade":{"sunshade_open": 0},
 }

@@ -740,8 +740,10 @@ def save_fresh_signals(signals: dict) -> None:
             climate_cooling, climate_heating, climate_defrost,
             trunk_open, windows_open, sunshade_open,
             remaining_charge_min, charge_voltage_v, charge_current_a, charge_completed, security_active,
-            windows_open_count
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            windows_open_count,
+            door_driver_open, door_passenger_open, door_rear_left_open, door_rear_right_open,
+            window_fl_open, window_rl_open
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
             vehicle_id,
             datetime.now(timezone.utc).isoformat(),
@@ -762,6 +764,9 @@ def save_fresh_signals(signals: dict) -> None:
             int(int(signals.get("3736") or 0) != 0),
             int(int(signals.get("1255") or 0) != 0),
             windows_open_count,
+            1 if sig("1277") else 0, 1 if sig("1278") else 0,
+            1 if sig("1279") else 0, 1 if sig("1280") else 0,
+            1 if _wstates[0] else 0, 1 if _wstates[2] else 0,
         ),
     )
     db.commit()

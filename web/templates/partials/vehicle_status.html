@@ -38,7 +38,7 @@
 {% set IC_BATTERY = "M4 3v3H1v14h22V6h-3V3h-6v3h-4V3zM3 8h18v10H3zm12 2v2h-2v2h2v2h2v-2h2v-2h-2v-2zM5 12v2h6v-2z" %}
 
 {# ── Open/closed state tile: value colour carries the meaning ── #}
-{% macro state_tile(icon, label, st, open_class='text-sky-400') %}
+{% macro state_tile(icon, label, st, open_class='text-red-400') %}
   {% if st is none %}{{ tile(icon, label, t('no_data'), 'text-slate-500', 'text-slate-500') }}
   {% elif st %}{{ tile(icon, label, t('open_state'), open_class, open_class) }}
   {% else %}{{ tile(icon, label, t('closed_state'), 'text-green-400', 'text-green-400') }}
@@ -48,7 +48,7 @@
 {# ── Window tile with open/closed icon variants ── #}
 {% macro win_tile(label, st, pct=none) %}
   {% if st is none %}{{ tile(mdi(IC_WIN_CLOSED), label, t('no_data'), 'text-slate-500', 'text-slate-500') }}
-  {% elif st %}{{ tile(mdi(IC_WIN_OPEN), label, (pct ~ '%') if (pct is not none and pct > 0) else t('open_state'), 'text-sky-400', 'text-sky-400') }}
+  {% elif st %}{{ tile(mdi(IC_WIN_OPEN), label, (pct ~ '%') if (pct is not none and pct > 0) else t('open_state'), 'text-amber-400', 'text-amber-400') }}
   {% else %}{{ tile(mdi(IC_WIN_CLOSED), label, t('closed_state'), 'text-green-400', 'text-green-400') }}
   {% endif %}
 {% endmacro %}
@@ -101,7 +101,7 @@
       {{ win_tile(t('win_fr'), vs.windows.fr, vs.windows.fr_pct) }}
       {{ win_tile(t('win_rl'), vs.windows.rl, vs.windows.rl_pct) }}
       {{ win_tile(t('win_rr'), vs.windows.rr, vs.windows.rr_pct) }}
-      {{ state_tile(mdi(IC_ROOF), t('win_sunshade'), vs.windows.sunshade, open_class='text-sky-400') }}
+      {{ state_tile(mdi(IC_ROOF), t('win_sunshade'), vs.windows.sunshade, open_class='text-brand') }}
     </div>
   </div>
 

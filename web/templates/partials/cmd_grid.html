@@ -12,13 +12,16 @@
 {% set clim_vent    = status.climate_venting if status and status.climate_venting  is not none else none %}
 {% set drv = (status and is_driving(status)) | default(false, true) %}{# car moving → drive-locked controls #}
 
-{% macro climate_tile(cmd, label, icon, on) %}
+{# tone = temperature semantics: cool/AC → blue (cold), heat/defrost → orange (hot), vent → teal
+   (air only, no temperature). Kept SEPARATE from the safety palette (green/amber/red). #}
+{% macro climate_tile(cmd, label, icon, on, tone='cool') %}
+{% set c = 'orange' if tone == 'heat' else ('teal' if tone == 'vent' else 'blue') %}
 <div class="rounded-lg border p-3 flex flex-col items-center gap-2 text-center h-full
-  {% if on %}border-blue-400/40 bg-blue-400/5{% else %}border-slate-700 bg-slate-800/40{% endif %}">
-  <span class="h-7 flex items-center {% if on %}text-blue-400{% elif on is none %}text-slate-600{% else %}text-slate-400{% endif %}">{{ icon|safe }}</span>
+  {% if on %}border-{{c}}-400/40 bg-{{c}}-400/5{% else %}border-slate-700 bg-slate-800/40{% endif %}">
+  <span class="h-7 flex items-center {% if on %}text-{{c}}-400{% elif on is none %}text-slate-600{% else %}text-slate-400{% endif %}">{{ icon|safe }}</span>
   <span class="text-xs font-medium text-slate-200 min-h-[2rem] flex items-center justify-center leading-tight">{{ label }}</span>
   <span class="text-[11px] font-bold px-2 py-0.5 rounded-full
-    {% if on %}text-blue-400 bg-blue-400/10 border border-blue-400/30
+    {% if on %}text-{{c}}-400 bg-{{c}}-400/10 border border-{{c}}-400/30
     {% elif on is none %}text-slate-600 border border-slate-700
     {% else %}text-slate-400 bg-slate-700 border border-slate-600{% endif %}">
     {% if on %}{{ t('climate_on_state') }}{% elif on is none %}{{ t('unknown') }}{% else %}{{ t('climate_off_state') }}{% endif %}
@@ -31,7 +34,7 @@
       hx-indicator="#spin-{{ cmd }}"
       onclick="document.getElementById('result-{{ cmd }}').innerHTML=''"
       class="w-full px-2 py-1.5 rounded-md text-xs font-medium text-white border active:scale-95 transition-all cursor-pointer
-        {% if on %}border-slate-600 hover:bg-slate-600{% else %}border-blue-500/40 hover:bg-blue-500/20{% endif %}">
+        {% if on %}border-slate-600 hover:bg-slate-600{% else %}border-{{c}}-500/40 hover:bg-{{c}}-500/20{% endif %}">
       {% if on %}{{ t('btn_off') }}{% else %}{{ t('btn_on') }}{% endif %}
     </button>
     <div class="flex items-center gap-1 min-h-[16px]">
@@ -148,11 +151,11 @@
 
       <!-- Trunk -->
       <div class="rounded-lg border p-3 flex flex-col items-center gap-2 text-center h-full
-        {% if trunk %}border-orange-400/40 bg-orange-400/5{% else %}border-slate-700 bg-slate-800/40{% endif %}">
-        <span class="h-7 flex items-center {% if trunk %}text-orange-400{% elif trunk is none %}text-slate-600{% else %}text-slate-400{% endif %}">{{ ico.mdi('car-back') }}</span>
+        {% if trunk %}border-red-400/40 bg-red-400/5{% else %}border-slate-700 bg-slate-800/40{% endif %}">
+        <span class="h-7 flex items-center {% if trunk %}text-red-400{% elif trunk is none %}text-slate-600{% else %}text-slate-400{% endif %}">{{ ico.mdi('car-back') }}</span>
         <span class="text-xs font-medium text-slate-200 min-h-[2rem] flex items-center justify-center leading-tight">{{ t('trunk') }}</span>
         <span class="text-[11px] font-bold px-2 py-0.5 rounded-full
-          {% if trunk %}text-orange-400 bg-orange-400/10 border border-orange-400/30
+          {% if trunk %}text-red-400 bg-red-400/10 border border-red-400/30
           {% elif trunk is none %}text-slate-600 border border-slate-700
           {% else %}text-slate-400 bg-slate-700 border border-slate-600{% endif %}">
           {% if trunk is none %}{{ t('unknown') }}{% elif trunk %}{{ t('trunk_open_state') }}{% else %}{{ t('trunk_closed_state') }}{% endif %}
@@ -162,11 +165,11 @@
 
       <!-- Windows -->
       <div class="rounded-lg border p-3 flex flex-col items-center gap-2 text-center h-full
-        {% if wins %}border-orange-400/40 bg-orange-400/5{% else %}border-slate-700 bg-slate-800/40{% endif %}">
-        <span class="h-7 flex items-center {% if wins %}text-orange-400{% elif wins is none %}text-slate-600{% else %}text-slate-400{% endif %}">{{ ico.mdi('car-side') }}</span>
+        {% if wins %}border-amber-400/40 bg-amber-400/5{% else %}border-slate-700 bg-slate-800/40{% endif %}">
+        <span class="h-7 flex items-center {% if wins %}text-amber-400{% elif wins is none %}text-slate-600{% else %}text-slate-400{% endif %}">{{ ico.mdi('car-side') }}</span>
         <span class="text-xs font-medium text-slate-200 min-h-[2rem] flex items-center justify-center leading-tight">{{ t('windows') }}</span>
         <span class="text-[11px] font-bold px-2 py-0.5 rounded-full
-          {% if wins %}text-orange-400 bg-orange-400/10 border border-orange-400/30
+          {% if wins %}text-amber-400 bg-amber-400/10 border border-amber-400/30
           {% elif wins is none %}text-slate-600 border border-slate-700
           {% else %}text-slate-400 bg-slate-700 border border-slate-600{% endif %}">
           {% if wins is none %}{{ t('unknown') }}{% elif wins %}{{ t('wins_open_state') }}{% else %}{{ t('wins_closed_state') }}{% endif %}
@@ -178,7 +181,7 @@
           <input type="range" min="0" max="{{ (wins_stops | default([0,100])) | length - 1 }}" step="1"
                  value="{{ wins_idx | default(0) }}"
                  {% if drv %}disabled{% endif %}
-                 class="w-full cursor-pointer accent-orange-400 disabled:opacity-40"
+                 class="w-full cursor-pointer accent-amber-400 disabled:opacity-40"
                  oninput="winsLbl(this.value)" onchange="winsSet(this.value, this)">
           <div class="flex items-center justify-between text-[9px] text-slate-500 px-0.5">
             {% if (wins_stops | default([])) | length <= 6 %}{% for s in wins_stops %}<span>{{ t('wins_closed_state') if s == 0 else (s ~ '%') }}</span>{% endfor %}
@@ -190,11 +193,11 @@
 
       <!-- Sunshade -->
       <div class="rounded-lg border p-3 flex flex-col items-center gap-2 text-center h-full
-        {% if shade %}border-sky-400/40 bg-sky-400/5{% else %}border-slate-700 bg-slate-800/40{% endif %}">
-        <span class="h-7 flex items-center {% if shade %}text-sky-400{% elif shade is none %}text-slate-600{% else %}text-slate-400{% endif %}">{{ ico.mdi('car-convertible') }}</span>
+        {% if shade %}border-brand/40 bg-brand/5{% else %}border-slate-700 bg-slate-800/40{% endif %}">
+        <span class="h-7 flex items-center {% if shade %}text-brand{% elif shade is none %}text-slate-600{% else %}text-slate-400{% endif %}">{{ ico.mdi('car-convertible') }}</span>
         <span class="text-xs font-medium text-slate-200 min-h-[2rem] flex items-center justify-center leading-tight">{{ t('sunshade') }}</span>
         <span class="text-[11px] font-bold px-2 py-0.5 rounded-full
-          {% if shade %}text-sky-400 bg-sky-400/10 border border-sky-400/30
+          {% if shade %}text-brand bg-brand/10 border border-brand/30
           {% elif shade is none %}text-slate-600 border border-slate-700
           {% else %}text-slate-400 bg-slate-700 border border-slate-600{% endif %}">
           {% if shade is none %}{{ t('unknown') }}{% elif shade %}{{ t('shade_open_state') }}{% else %}{{ t('shade_closed_state') }}{% endif %}
@@ -209,7 +212,7 @@
   <div class="card">
     <div class="flex items-center justify-between mb-3">
       <div class="flex items-center gap-2">
-        <span class="text-sky-400">{{ ico.mdi('snowflake') }}</span>
+        <span class="text-blue-400">{{ ico.mdi('snowflake') }}</span>
         <span class="font-semibold text-white">{{ t('climate') }}</span>
       </div>
       {% if status and (status.inside_temp or status.climate_target_temp) %}
@@ -223,16 +226,16 @@
     <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
       {{ climate_tile("ac_on",              t('clim_ac'),      ico.mdi('air-conditioner'),   clim_on) }}
       {{ climate_tile("quick_cool",         t('clim_cool'),    ico.mdi('snowflake'),         clim_cool) }}
-      {{ climate_tile("quick_heat",         t('clim_heat'),    ico.mdi('heat-wave'),         clim_heat) }}
-      {{ climate_tile("quick_vent",         t('clim_vent'),    ico.mdi('fan'),               clim_vent) }}
-      {{ climate_tile("windshield_defrost", t('clim_defrost'), ico.mdi('car-defrost-front'), clim_defrost) }}
+      {{ climate_tile("quick_heat",         t('clim_heat'),    ico.mdi('heat-wave'),         clim_heat, tone='heat') }}
+      {{ climate_tile("quick_vent",         t('clim_vent'),    ico.mdi('fan'),               clim_vent, tone='vent') }}
+      {{ climate_tile("windshield_defrost", t('clim_defrost'), ico.mdi('car-defrost-front'), clim_defrost, tone='heat') }}
     </div>
     {% else %}
     <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
       {{ climate_tile("quick_cool",         t('clim_cool'),    ico.mdi('snowflake'),         clim_cool) }}
-      {{ climate_tile("quick_heat",         t('clim_heat'),    ico.mdi('heat-wave'),         clim_heat) }}
-      {{ climate_tile("quick_vent",         t('clim_vent'),    ico.mdi('fan'),               clim_vent) }}
-      {{ climate_tile("windshield_defrost", t('clim_defrost'), ico.mdi('car-defrost-front'), clim_defrost) }}
+      {{ climate_tile("quick_heat",         t('clim_heat'),    ico.mdi('heat-wave'),         clim_heat, tone='heat') }}
+      {{ climate_tile("quick_vent",         t('clim_vent'),    ico.mdi('fan'),               clim_vent, tone='vent') }}
+      {{ climate_tile("windshield_defrost", t('clim_defrost'), ico.mdi('car-defrost-front'), clim_defrost, tone='heat') }}
     </div>
     {% endif %}
     {# Temperature stepper — sets the climate target (18–32 °C); auto cool/heat vs cabin temp #}
@@ -268,14 +271,14 @@
     <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
       {% for c in comfort %}
       <div class="rounded-lg border p-3 flex flex-col items-center gap-2 text-center h-full
-        {% if c.on and c.accent == 'vent' %}border-sky-400/40 bg-sky-400/5
-        {% elif c.on %}border-amber-400/40 bg-amber-400/5
+        {% if c.on and c.accent == 'vent' %}border-blue-400/40 bg-blue-400/5
+        {% elif c.on %}border-orange-400/40 bg-orange-400/5
         {% else %}border-slate-700 bg-slate-800/40{% endif %}">
-        <span class="h-7 flex items-center {% if not c.on %}text-slate-500{% elif c.accent == 'vent' %}text-sky-400{% else %}text-amber-400{% endif %}">{{ comfort_icon(c.icon) }}</span>
+        <span class="h-7 flex items-center {% if not c.on %}text-slate-500{% elif c.accent == 'vent' %}text-blue-400{% else %}text-orange-400{% endif %}">{{ comfort_icon(c.icon) }}</span>
         <span class="text-xs font-medium text-slate-200 min-h-[2rem] flex items-center justify-center leading-tight">{{ t(c.label_key) }}</span>
         <span class="text-[11px] font-bold px-2 py-0.5 rounded-full
-          {% if c.on and c.accent == 'vent' %}text-sky-400 bg-sky-400/10 border border-sky-400/30
-          {% elif c.on %}text-amber-400 bg-amber-400/10 border border-amber-400/30
+          {% if c.on and c.accent == 'vent' %}text-blue-400 bg-blue-400/10 border border-blue-400/30
+          {% elif c.on %}text-orange-400 bg-orange-400/10 border border-orange-400/30
           {% else %}text-slate-400 bg-slate-700 border border-slate-600{% endif %}">
           {% if c.on %}{{ t('climate_on_state') }}{% if c.value > 1 and c.control != 'toggle' %} · {{ c.value }}{% endif %}{% else %}{{ t('climate_off_state') }}{% endif %}
         </span>
@@ -284,7 +287,7 @@
           <input type="range" min="0" max="3" step="1" value="{{ c.value }}" name="level"
                  hx-post="api/seat/{{ c.func }}/{{ c.position }}" hx-trigger="change"
                  hx-target="#sr-{{ c.func }}-{{ c.position }}" hx-swap="innerHTML"
-                 class="w-full cursor-pointer {% if c.accent == 'vent' %}accent-sky-400{% else %}accent-amber-400{% endif %}"
+                 class="w-full cursor-pointer {% if c.accent == 'vent' %}accent-blue-400{% else %}accent-orange-400{% endif %}"
                  oninput="document.getElementById('sm-{{ c.func }}-{{ c.position }}').textContent=(this.value==0?'{{ t('lvl_off') }}':('{{ t('lvl_abbr') }} '+this.value))">
           <div class="flex items-center justify-between text-[9px] text-slate-500 px-0.5"><span>{{ t('lvl_off') }}</span><span>1</span><span>2</span><span>3</span></div>
           <div class="text-[10px] text-slate-400 mt-0.5"><span id="sm-{{ c.func }}-{{ c.position }}">{{ t('lvl_off') if c.value == 0 else (t('lvl_abbr') ~ ' ' ~ c.value) }}</span> <span id="sr-{{ c.func }}-{{ c.position }}" class="text-emerald-400"></span></div>
@@ -294,7 +297,7 @@
               hx-target="#tg-{{ c.skey }}" hx-swap="innerHTML"
               onsubmit="document.getElementById('tg-{{ c.skey }}').innerHTML=''">
           <button type="submit" class="w-full px-2 py-1 rounded-md text-xs font-medium text-white border active:scale-95 transition-all cursor-pointer
-            {% if c.on %}border-slate-600 hover:bg-slate-600{% else %}border-amber-500/40 hover:bg-amber-500/20{% endif %}">
+            {% if c.on %}border-slate-600 hover:bg-slate-600{% else %}border-orange-500/40 hover:bg-orange-500/20{% endif %}">
             {{ t('btn_off') if c.on else t('btn_on') }}
           </button>
           <div class="text-[10px] mt-0.5 min-h-[14px]"><span id="tg-{{ c.skey }}" class="text-emerald-400"></span></div>
@@ -309,7 +312,7 @@
   <!-- Quick actions — compact rows + battery/cable status pills -->
   <div class="card">
     <div class="flex items-center gap-2 mb-3">
-      <span class="text-amber-400">{{ ico.mdi('lightning-bolt') }}</span>
+      <span class="text-brand">{{ ico.mdi('lightning-bolt') }}</span>
       <span class="font-semibold text-white">{{ t('quick_actions') }}</span>
     </div>
     <div class="grid grid-cols-2 gap-2">

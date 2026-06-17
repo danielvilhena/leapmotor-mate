@@ -34,14 +34,23 @@
   <!-- Image + overlaid status -->
   <div class="relative flex-1 flex items-center justify-center min-h-[12rem]">
 
-    {% if wins is not none %}
-    <span class="hero-chip absolute left-0 top-0
-      {% if wins %}bg-sky-400/10 text-sky-400 border border-sky-400/30
-      {% else %}bg-green-400/10 text-green-400 border border-green-400/30{% endif %}">
-      {{ ico.mdi('car-side', 'w-4 h-4') }}
-      {% if wins %}{{ t('hero_windows_open') }}{% if status.windows_open_count %}<span class="ml-1 inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white text-[10px] font-bold leading-none">{{ status.windows_open_count }}</span>{% endif %}{% else %}{{ t('hero_windows_closed') }}{% endif %}
-    </span>
-    {% endif %}
+    {# Left-side status chips (stacked): same safety code as the command buttons — amber = attention
+       (windows open), red = alert (trunk open), green = safe (closed). #}
+    <div class="absolute left-0 top-0 flex flex-col items-start gap-1.5">
+      {% if wins is not none %}
+      <span class="hero-chip
+        {% if wins %}bg-amber-400/10 text-amber-400 border border-amber-400/30
+        {% else %}bg-green-400/10 text-green-400 border border-green-400/30{% endif %}">
+        {{ ico.mdi('car-side', 'w-4 h-4') }}
+        {% if wins %}{{ t('hero_windows_open') }}{% if status.windows_open_count %}<span class="ml-1 inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white text-[10px] font-bold leading-none">{{ status.windows_open_count }}</span>{% endif %}{% else %}{{ t('hero_windows_closed') }}{% endif %}
+      </span>
+      {% endif %}
+      {% if trunk %}
+      <span class="hero-chip bg-red-400/10 text-red-400 border border-red-400/30">
+        {{ ico.mdi('car-back', 'w-4 h-4') }} {{ t('hero_trunk_open') }}
+      </span>
+      {% endif %}
+    </div>
 
     {% if locked is not none %}
     <span class="hero-chip absolute right-0 top-0
@@ -52,7 +61,14 @@
     </span>
     {% endif %}
 
-    <img src="api/car-picture" alt="{{ vehicle.car_type if vehicle else 'Vehicle' }}"
+    {# Cache-bust the composed car image by the body state that affects it, so the browser re-fetches
+       when (and only when) the picture actually changes — the htmx swap alone keeps the same <img>
+       URL, which the browser would serve from cache (stale until a manual refresh). #}
+    {% set car_img_token = ([status.plug_connected, status.charging, status.trunk_open,
+                             status.door_driver_open, status.door_passenger_open,
+                             status.door_rear_left_open, status.door_rear_right_open,
+                             status.window_fl_open, status.window_rl_open] | join('-')) if status else '' %}
+    <img src="api/car-picture?v={{ car_img_token }}" alt="{{ vehicle.car_type if vehicle else 'Vehicle' }}"
          class="max-h-48 w-full object-contain"
          onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
     <div class="hidden flex-col items-center justify-center text-slate-600" style="height:12rem">
@@ -101,29 +117,28 @@
   </div>
   {% endif %}
   <div class="grid grid-cols-4 gap-2 mt-3">
-    {# Lock pair: the button matching the CURRENT lock state is highlighted (unlocked = amber
-       caution, locked = green secure). #}
+    {# #66 — neutral at rest (no rainbow); the ACTIVE button is coloured by SAFETY meaning, never a
+       single "OK-looking" accent: green = safe (locked), amber = attention (unlocked / windows open),
+       red = alert (trunk open). Teal/brand stays for chrome + charts, so an open trunk never looks
+       "fine". #}
+    {% set s_ok    = 'bg-green-400/20 border border-green-400/60 text-green-300' %}
+    {% set s_warn  = 'bg-amber-400/20 border border-amber-400/60 text-amber-300' %}
+    {% set s_alert = 'bg-red-500/20 border border-red-500/60 text-red-400' %}
     {{ cmdbtn('unlock', ico.mdi('lock-open'), t('hero_unlock'), t('unlock_confirm'),
-              color='text-amber-400',
-              active=(locked is not none and not locked),
-              active_class='bg-amber-400/20 border border-amber-400/60 text-amber-300') }}
+              active=(locked is not none and not locked), active_class=s_warn) }}
     {{ cmdbtn('lock',   ico.mdi('lock'),      t('hero_lock'),   t('lock_confirm'),
-              color='text-green-400',
-              active=(locked),
-              active_class='bg-green-400/20 border border-green-400/60 text-green-300') }}
-    {# Trunk open = alert → red. #}
+              active=(locked), active_class=s_ok) }}
     {% if trunk %}
       {{ cmdbtn('close_trunk', ico.mdi('car-back'), t('trunk'), t('close_trunk_confirm'),
-                active=true, active_class='bg-red-500/20 border border-red-500/60 text-red-400') }}
+                active=true, active_class=s_alert) }}
     {% else %}
-      {{ cmdbtn('open_trunk',  ico.mdi('car-back'), t('trunk'), t('open_trunk_confirm'), color='text-sky-400') }}
+      {{ cmdbtn('open_trunk',  ico.mdi('car-back'), t('trunk'), t('open_trunk_confirm')) }}
     {% endif %}
-    {# Windows open → highlighted violet. #}
     {% if wins %}
       {{ cmdbtn('close_windows', ico.mdi('car-side'), t('windows'), t('close_wins_confirm'),
-                active=true, active_class='bg-violet-400/20 border border-violet-400/60 text-violet-300') }}
+                active=true, active_class=s_warn) }}
     {% else %}
-      {{ cmdbtn('open_windows',  ico.mdi('car-side'), t('windows'), t('open_wins_confirm'), color='text-violet-400') }}
+      {{ cmdbtn('open_windows',  ico.mdi('car-side'), t('windows'), t('open_wins_confirm')) }}
     {% endif %}
   </div>
   <div id="hero-cmd-result" class="text-center text-[11px] mt-2 min-h-[14px]"></div>

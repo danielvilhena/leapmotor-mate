@@ -2,6 +2,6 @@ fastapi==0.115.0
 uvicorn[standard]==0.30.0
 jinja2==3.1.4
 python-multipart==0.0.9
-leapmotor-api==0.3.1
+leapmotor-api[image]==0.3.1   # [image] = Pillow, for the live composed Overview car picture (car_image.py)
 tzdata==2025.2
 cryptography>=43,<49

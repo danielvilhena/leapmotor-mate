@@ -114,6 +114,17 @@ def main():
         except OSError:
             pass
 
+    # Bundle the layer package too → /api/car-picture composes the LIVE image (charge-cable
+    # animation / doors / windows) in the demo, not just the static render. Falls back to the
+    # static one above if the package isn't shipped.
+    _psrc = os.path.join(os.path.dirname(os.path.abspath(__file__)), "demo_car_pkg.zip")
+    _pdst = os.path.join(os.path.dirname(os.path.abspath(DB_PATH)), "car_picture_pkg.zip")
+    if os.path.exists(_psrc):
+        try:
+            shutil.copyfile(_psrc, _pdst)
+        except OSError:
+            pass
+
     # ── state ────────────────────────────────────────────────────────────────
     now = datetime.now(timezone.utc)
     start = (now - timedelta(days=30)).replace(hour=6, minute=30, second=0, microsecond=0)

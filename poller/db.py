@@ -84,7 +84,13 @@ CREATE TABLE IF NOT EXISTS positions (
     ready            INTEGER DEFAULT NULL,
     charge_completed INTEGER DEFAULT NULL,
     security_active  INTEGER DEFAULT NULL,
-    windows_open_count INTEGER DEFAULT NULL
+    windows_open_count INTEGER DEFAULT NULL,
+    door_driver_open     INTEGER DEFAULT NULL,
+    door_passenger_open  INTEGER DEFAULT NULL,
+    door_rear_left_open  INTEGER DEFAULT NULL,
+    door_rear_right_open INTEGER DEFAULT NULL,
+    window_fl_open       INTEGER DEFAULT NULL,
+    window_rl_open       INTEGER DEFAULT NULL
 );
 
 CREATE TABLE IF NOT EXISTS trips (
@@ -270,6 +276,12 @@ class Database:
             self._conn.execute("ALTER TABLE positions ADD COLUMN security_active INTEGER DEFAULT NULL")
         if "windows_open_count" not in cols:
             self._conn.execute("ALTER TABLE positions ADD COLUMN windows_open_count INTEGER DEFAULT NULL")
+        # Per-door + left-side window state (the live Overview car image; the poller already computes
+        # these — see car_image.py). Names are fixed literals, never user input.
+        for _c in ("door_driver_open", "door_passenger_open", "door_rear_left_open",
+                   "door_rear_right_open", "window_fl_open", "window_rl_open"):
+            if _c not in cols:
+                self._conn.execute(f"ALTER TABLE positions ADD COLUMN {_c} INTEGER DEFAULT NULL")
         # migration: per-charge wallbox AC energy (the "wallbox, to pay" figure) on existing DBs
         ccols = {r[1] for r in self._conn.execute("PRAGMA table_info(charges)").fetchall()}
         if "ac_energy_kwh" not in ccols:
@@ -627,8 +639,10 @@ class Database:
                 climate_cooling, climate_heating, climate_defrost,
                 trunk_open, windows_open, sunshade_open, plug_connected,
                 remaining_charge_min, charge_voltage_v, charge_current_a, ready, charge_completed, security_active,
-                windows_open_count)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                windows_open_count,
+                door_driver_open, door_passenger_open, door_rear_left_open, door_rear_right_open,
+                window_fl_open, window_rl_open)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 vehicle_id, _now_iso(),
                 data.latitude, data.longitude, data.speed_kmh, data.odometer_km,
@@ -652,6 +666,12 @@ class Database:
                 1 if data.security_active else 0,
                 sum(1 for w in (data.window_fl_open, data.window_fr_open,
                                 data.window_rl_open, data.window_rr_open) if w),
+                1 if data.door_driver_open else 0,
+                1 if data.door_passenger_open else 0,
+                1 if data.door_rear_left_open else 0,
+                1 if data.door_rear_right_open else 0,
+                1 if data.window_fl_open else 0,
+                1 if data.window_rl_open else 0,
             ),
         )
         self._conn.commit()
