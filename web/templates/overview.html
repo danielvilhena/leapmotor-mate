@@ -152,4 +152,31 @@
   </div>
 
 </div>
+
+<script>
+// Quick-command feedback on the hero card. Its chips and button states only change when the card is
+// refetched, and it otherwise only auto-refreshes every 30s — so after a quick command the visible
+// state lagged up to 30s and you couldn't tell it had worked. Refresh the hero promptly after a
+// successful command: an instant flip from the optimistic overlay, then reconcile against the car as
+// the cloud catches up (mirrors the Commands page + the backend's 30s verify loop).
+function refreshHero() {
+  if (!document.getElementById('hero-card')) return;
+  htmx.ajax('GET', 'api/overview-hero', {target: '#hero-card', swap: 'innerHTML'});
+}
+document.addEventListener('htmx:afterRequest', function(e) {
+  var path = (e.detail.pathInfo || {}).requestPath || '';
+  if (!e.detail.successful || !path.startsWith('api/command/')) return;
+  var res = document.getElementById('hero-cmd-result');
+  if (res && res.querySelector('[data-warn]')) return;   // refused (e.g. while driving) — nothing changed
+  if (res && res.querySelector('[data-slow]')) {          // climate/slow: the car reflects it later
+    setTimeout(refreshHero, 12000);
+    setTimeout(refreshHero, 20000);
+  } else {
+    setTimeout(refreshHero, 800);     // instant flip from the optimistic overlay
+    setTimeout(refreshHero, 5000);    // reconcile as the cloud catches up
+    setTimeout(refreshHero, 15000);
+  }
+  setTimeout(refreshHero, 31000);     // final: real state after the verify loop's 30s deadline
+});
+</script>
 {% endblock %}

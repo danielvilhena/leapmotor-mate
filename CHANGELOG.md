@@ -3,6 +3,12 @@
 All notable changes to LeapMotor Mate are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.23.1] — 2026-06-17
+
+### Fixed
+- **T03: the Overview tile and the Commands page now show the windows open (with the count) — not just the Vehicle page.** The window open/closed state was computed in several places, but only the Vehicle page had the 1.22.6 T03 fix. The Overview "windows" chip (and its open-count badge), the Commands grid and the post-command verification still read only the open/closed flags — which the T03 leaves at 0 even when the windows are open — so they kept showing "closed", and "open windows" never self-confirmed (it timed out after ~30s and reverted the optimistic state). All four surfaces now share a single position-aware reader, so they agree and the **"windows open" count** is correct on the T03 too. The B10 is unaffected: it reports no window position at all, so it stays flag-driven exactly as before. (#62)
+- **Overview hero card: quick-command feedback is now immediate.** Pressing a quick command (lock/unlock, trunk, windows) on the car card only updated the visible state on the next 30-second auto-refresh, so it looked like nothing had happened and you couldn't tell whether the command had worked. The card now refreshes right after a command — an instant flip from the optimistic state, then it reconciles with the car as the cloud catches up (the same behaviour the Commands page already had). The window-open count flips with it.
+
 ## [1.23.0] — 2026-06-17
 
 ### Added

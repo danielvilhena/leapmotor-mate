@@ -10,6 +10,7 @@ import os
 import i18n
 import crypto  # hard import at module top: a missing crypto dep must fail web boot loudly,
               # never silently degrade a per-request secret read
+import capability_profile
 
 # Timestamps are stored in UTC (poller uses datetime.now(timezone.utc)); the UI
 # must show local time. Standalone Docker sets TZ in compose → use it. As an HA
@@ -698,8 +699,14 @@ def save_fresh_signals(signals: dict) -> None:
         return int(signals.get("1149") or 0) == 2
 
     gear_map = {0: "P", 1: "R", 2: "N", 3: "D"}
-    windows_open = int(any(sig(k) != 0 for k in ("1693", "1694", "1695", "1696")))
-    windows_open_count = sum(1 for k in ("1693", "1694", "1695", "1696") if sig(k) != 0)
+    # Windows: flag OR position % (the T03 reports only the %, the B10 only the flag) — same shared
+    # logic as the Vehicle page so the Overview tile / Commands grid agree with it (#62). use_pct is
+    # gated by the capability profile, exactly as _parse_vehicle_status does.
+    _wvin = (get_vehicle()[0] or {}).get("vin")
+    _wstates = capability_profile.window_open_states(
+        signals, bool(_wvin) and capability_profile.is_shown(_wvin, "windows_pct"))
+    windows_open = int(any(_wstates))
+    windows_open_count = sum(1 for w in _wstates if w)
 
     # Plug from signal 1149 (charge connection status), gated by motion. Signal 47
     # (acInputSlowCharge) latches at 1 for ~5 min after an AC charge on the B10 and does

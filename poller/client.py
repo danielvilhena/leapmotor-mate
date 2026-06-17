@@ -11,6 +11,8 @@ from dataclasses import dataclass
 
 from leapmotor_api import LeapmotorApiClient
 
+import capability_profile
+
 log = logging.getLogger(__name__)
 
 
@@ -429,6 +431,13 @@ def _parse_signal(vin: str, sig: dict) -> VehicleData:
     # car was parked used to be misread as "driving" and published to HA (MQTT) / ABRP.
     vehicle_state = "driving" if (gear in ("D", "R", "N") or speed_kmh > 1) else "parked"
 
+    # Windows: flag OR position % (the T03 reports only the %, the B10 only the flag) — the same
+    # shared helper the web uses, so the stored status matches the Vehicle page (#62). The poller
+    # can't reach the per-VIN capability store from here, so use_pct = bool(vin); that is identical
+    # to the web today (the windows_pct gate is never marked broken) and the B10 is safe because it
+    # sends no % signals. window_open_states returns [FL, FR, RL, RR].
+    win_states = capability_profile.window_open_states(sig, bool(vin))
+
     return VehicleData(
         vin=vin,
         timestamp_ms=int(sig.get("sts") or sig.get("1") or 0),
@@ -456,7 +465,7 @@ def _parse_signal(vin: str, sig: dict) -> VehicleData:
         climate_heating=int(sig.get("2681") or 0) == 2,
         climate_defrost=int(sig.get("1945") or 0) == 2,
         trunk_open=int(sig.get("1281") or 0) != 0,
-        windows_open=any(int(sig.get(k) or 0) != 0 for k in ("1693", "1694", "1695", "1696")),
+        windows_open=any(bool(w) for w in win_states),
         sunshade_open=int(sig.get("1724") or 0) != 0,
         any_door_open=any(
             int(sig.get(k) or 0) != 0
@@ -481,10 +490,10 @@ def _parse_signal(vin: str, sig: dict) -> VehicleData:
         door_passenger_open=int(sig.get("1278") or 0) != 0,
         door_rear_left_open=int(sig.get("1279") or 0) != 0,
         door_rear_right_open=int(sig.get("1280") or 0) != 0,
-        window_fl_open=int(sig.get("1693") or 0) != 0,
-        window_fr_open=int(sig.get("1694") or 0) != 0,
-        window_rl_open=int(sig.get("1695") or 0) != 0,
-        window_rr_open=int(sig.get("1696") or 0) != 0,
+        window_fl_open=bool(win_states[0]),
+        window_fr_open=bool(win_states[1]),
+        window_rl_open=bool(win_states[2]),
+        window_rr_open=bool(win_states[3]),
         # Tyre signal→wheel mapping. The leapmotor-api docs label these LF=2667/RF=2653/
         # LR=2646/RR=2660, but that's WRONG: cross-checked on TWO real B10s against the official
         # app's per-wheel view — the #32 reporter's UK car AND Silvio's IT car, both with the

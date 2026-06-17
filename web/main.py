@@ -24,7 +24,7 @@ import mqtt_check
 import auth
 import update_check
 
-MATE_VERSION = "1.23.0"  # bump together with the git tag + add-on config.yaml at release
+MATE_VERSION = "1.23.1"  # bump together with the git tag + add-on config.yaml at release
 
 import diagnostics
 import demo
@@ -642,14 +642,9 @@ def _parse_vehicle_status(sig: dict, vin: str | None = None, cmd_pct: int | None
     # the B10 (#62). Fall back to the % ONLY where it isn't a known-broken sensor for this car (per
     # the capability profile), otherwise the B10's dead-but-noisy % false-positives every window.
     use_pct = bool(vin) and capability_profile.is_shown(vin, "windows_pct")
-    def win_open(state_k, pct_k):
-        # open if the flag says so, OR (where the % is trusted) the position % is > 0. Library map:
-        # 1693↔3727 (FL), 1694↔3728 (FR), 1695↔1879 (RL), 1696↔1880 (RR).
-        s = i(state_k)
-        p = i(pct_k) if use_pct else None
-        if s is None and p is None:
-            return None
-        return bool((s or 0) != 0 or (p or 0) > 0)
+    # Per-window open via the shared flag-OR-position-% helper (#62), returning [FL, FR, RL, RR].
+    # The Overview tile, Commands grid and command-confirm now use the same helper, so they agree.
+    win = capability_profile.window_open_states(sig, use_pct)
     def win_pct(state_k, pct_k):
         # Real sensor where trusted (T03); else fall back to the last commanded % — but only for a
         # window the flag reports OPEN, so a closed window never shows a stale number.
@@ -673,8 +668,8 @@ def _parse_vehicle_status(sig: dict, vin: str | None = None, cmd_pct: int | None
             "trunk":      is_open("1281"),
         },
         "windows": {
-            "fl": win_open("1693", "3727"), "fr": win_open("1694", "3728"),
-            "rl": win_open("1695", "1879"), "rr": win_open("1696", "1880"),
+            "fl": win[0], "fr": win[1],
+            "rl": win[2], "rr": win[3],
             # Opening % per window: the real sensor on the T03, the last commanded position on the
             # B10 (its sensor is dead) — shown only for windows the flag confirms open.
             "fl_pct": win_pct("1693", "3727"), "fr_pct": win_pct("1694", "3728"),
@@ -2291,8 +2286,10 @@ _OPTIMISTIC = {
     "unlock":        {"is_locked": 0},
     "open_trunk":    {"trunk_open": 1},
     "close_trunk":   {"trunk_open": 0},
-    "open_windows":  {"windows_open": 1},
-    "close_windows": {"windows_open": 0},
+    # All four windows move together (cmd 230 is global), so the optimistic count is 4 open / 0
+    # closed — the Overview "Finestrini aperti N" badge flips with the state instead of lagging.
+    "open_windows":  {"windows_open": 1, "windows_open_count": 4},
+    "close_windows": {"windows_open": 0, "windows_open_count": 0},
     "open_sunshade": {"sunshade_open": 1},
     "close_sunshade":{"sunshade_open": 0},
 }
@@ -2312,10 +2309,20 @@ _CLIMATE_TILES = {
 }
 
 
+def _windows_open_now(sig: dict) -> bool:
+    """Any window open, by the same flag-OR-position-% rule the Vehicle page uses (#62) — so the
+    post-command verification of open/close_windows confirms on the T03 (whose open/closed flags
+    stay 0 even when open) instead of timing out and wiping the optimistic state."""
+    vehicle, _ = db_reader.get_vehicle()
+    vin = (vehicle or {}).get("vin")
+    return any(capability_profile.window_open_states(
+        sig, bool(vin) and capability_profile.is_shown(vin, "windows_pct")))
+
+
 _FIELD_CHECK = {
     "is_locked":       lambda sig: int(sig.get("1298") or 0) == 1,
     "trunk_open":      lambda sig: int(sig.get("1281") or 0) != 0,
-    "windows_open":    lambda sig: any(int(sig.get(k) or 0) != 0 for k in ("1693","1694","1695","1696")),
+    "windows_open":    _windows_open_now,
     "sunshade_open":   lambda sig: int(sig.get("1724") or 0) != 0,   # 1724 = shade opening % (0 = closed)
     "climate_on":      lambda sig: int(sig.get("1938") or 0) == 1,
     "climate_cooling": lambda sig: int(sig.get("2669") or 0) == 2,

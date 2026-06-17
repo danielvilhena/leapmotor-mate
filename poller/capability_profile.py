@@ -163,6 +163,33 @@ def is_shown(vin: str, feature: str, get_setting: Optional[Callable] = None) -> 
     return load(vin, get_setting).get(feature, "untested") != "broken"
 
 
+# Window open/closed mapping, shared by every surface so they always agree (#62). The open/closed
+# flags (1693-1696) are live on the B10 but DEAD on the T03 (stay 0 even when open); the position %
+# (3727/3728/1879/1880) is the opposite — live on the T03, absent on the B10. A window is OPEN if
+# its flag is set OR (where the % is consulted) its position is > 0. Pairs: FL 1693<->3727,
+# FR 1694<->3728, RL 1695<->1879, RR 1696<->1880.
+_WINDOW_PAIRS = (("1693", "3727"), ("1694", "3728"), ("1695", "1879"), ("1696", "1880"))
+
+
+def window_open_states(signals: dict, use_pct: bool) -> list:
+    """Per-window open state [FL, FR, RL, RR]: True / False, or None when the car reports neither
+    the flag nor the position for that window. `use_pct` gates the position-% fallback — the caller
+    decides it (web: is_shown(vin, 'windows_pct'); poller: bool(vin)) so a car whose % sensor is
+    untrusted never false-positives. The B10 is safe because it doesn't emit the % signals at all."""
+    def _i(k):
+        v = signals.get(k)
+        try:
+            return int(float(v)) if v is not None else None
+        except (TypeError, ValueError):
+            return None
+    states = []
+    for state_k, pct_k in _WINDOW_PAIRS:
+        s = _i(state_k)
+        p = _i(pct_k) if use_pct else None
+        states.append(None if (s is None and p is None) else bool((s or 0) != 0 or (p or 0) > 0))
+    return states
+
+
 def command_shown(vin: str, command_key: str, get_setting: Optional[Callable] = None) -> bool:
     """Should a UI/MQTT command button named `command_key` be exposed? Maps the command key to
     its gating feature (COMMAND_FEATURE); commands with no mapped feature are always shown."""
