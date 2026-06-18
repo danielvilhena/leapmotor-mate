@@ -2024,6 +2024,55 @@ def _integrate_charge_energy_kwh(db, start: str, end: str | None) -> float:
     return energy
 
 
+_AC_CHARGE_TYPES = ('AC', 'HOME', 'FREE')   # types where DC fast-rate is impossible
+
+
+def _charge_has_soc_jump(db, start: str, end: str | None,
+                         max_rate_per_min: float = 0.8) -> bool:
+    """True if any two consecutive charging samples in the session show a SoC rise rate
+    faster than max_rate_per_min %/min — a BMS recalibration snap, not real energy.
+    At AC rates (≤ 22 kW on 67 kWh), the physical max is ~0.55%/min; a threshold of 0.8
+    leaves margin for fast 3-phase AC while still catching BMS jumps (e.g. +2.5%/min).
+    Only call this for AC charge types — DC fast-charging can legitimately reach 3-4%/min."""
+    clause = "recorded_at >= ? AND recorded_at <= ?" if end else "recorded_at >= ?"
+    params = (start, end) if end else (start,)
+    rows = db.execute(
+        f"SELECT recorded_at, soc FROM positions WHERE {clause} AND charging = 1 "
+        "AND soc IS NOT NULL ORDER BY recorded_at",
+        params,
+    ).fetchall()
+    prev_soc, prev_t = None, None
+    for r in rows:
+        soc = r["soc"]
+        try:
+            t = datetime.fromisoformat(str(r["recorded_at"]).replace(" ", "T").rstrip("Z"))
+        except Exception:
+            prev_soc, prev_t = soc, None
+            continue
+        if prev_soc is not None and prev_t is not None:
+            dt_min = (t - prev_t).total_seconds() / 60.0
+            if 0 < dt_min <= 15.0 and (soc - prev_soc) / dt_min > max_rate_per_min:
+                return True
+        prev_soc, prev_t = soc, t
+    return False
+
+
+def _charge_has_active_use(db, start: str, end: str | None) -> bool:
+    """True if any position sample during the charge window had cabin HVAC running
+    (climate_cooling=1 or climate_heating=1 — not just climate_on, which also fires during
+    battery thermal management and is too broad). A running cabin compressor/heater is a
+    reliable proxy for 'user was in the car consuming power', which distorts the energy/SoC
+    ratio used for the SoH estimate."""
+    clause = "recorded_at >= ? AND recorded_at <= ?" if end else "recorded_at >= ?"
+    params = (start, end) if end else (start,)
+    row = db.execute(
+        f"SELECT 1 FROM positions WHERE {clause} "
+        "AND (climate_cooling = 1 OR climate_heating = 1) LIMIT 1",
+        params,
+    ).fetchone()
+    return row is not None
+
+
 def _charge_temp_odo(db, start: str, end: str | None):
     """Coldest battery temperature (°C) and the odometer (km) seen WHILE CHARGING in a session,
     from the positions log. The min temp is the conservative basis for the cold-charge gate; the
@@ -2089,6 +2138,12 @@ def get_battery_health(min_soc_delta: float = 12.0, temp_min_c: float | None = N
             continue
         temp, odo = _charge_temp_odo(db, r["started_at"], r["ended_at"])
         cold = temp is not None and temp < temp_min_c
+        soc_jump = (not cold and r["charge_type"] in _AC_CHARGE_TYPES
+                    and _charge_has_soc_jump(db, r["started_at"], r["ended_at"]))
+        active_use = (not cold and not soc_jump
+                      and _charge_has_active_use(db, r["started_at"], r["ended_at"]))
+        excluded = cold or soc_jump or active_use
+        exclude_reason = ("cold" if cold else ("soc_jump" if soc_jump else "active_use")) if excluded else None
         dt = _local_dt(r["started_at"])
         points.append({
             "charge_id": r["id"],
@@ -2102,8 +2157,8 @@ def get_battery_health(min_soc_delta: float = 12.0, temp_min_c: float | None = N
             "temp_c": round(temp, 1) if temp is not None else None,
             "odometer_km": round(odo) if odo is not None else None,
             "charge_type": r["charge_type"],
-            "excluded": cold,
-            "exclude_reason": "cold" if cold else None,
+            "excluded": excluded,
+            "exclude_reason": exclude_reason,
         })
     valid = [p for p in points if not p["excluded"]]
 
@@ -2125,6 +2180,9 @@ def get_battery_health(min_soc_delta: float = 12.0, temp_min_c: float | None = N
         "points": points,
         "sample_count": len(valid),
         "excluded_count": len(points) - len(valid),
+        "cold_count": sum(1 for p in points if p.get("exclude_reason") == "cold"),
+        "active_use_count": sum(1 for p in points if p.get("exclude_reason") == "active_use"),
+        "soc_jump_count": sum(1 for p in points if p.get("exclude_reason") == "soc_jump"),
         "temp_min_c": round(temp_min_c, 1),
         "latest_capacity_kwh": latest_cap,
         "latest_soh_pct": latest_soh,
@@ -2143,6 +2201,9 @@ _DROP_ERR = 2 * SOC_QUANTUM
 # So we always collect windows down to this floor and tag which ones clear the user's threshold,
 # letting the page tell "no parked data yet" apart from "data exists, just below your threshold".
 _VAMPIRE_NOISE_FLOOR = 0.2
+
+
+_VAMPIRE_ACTIVE_USE_RATE = 15.0  # %/day above this is active use (A/C, meeting, etc.), not standby
 
 
 def get_vampire_drain(min_hours: float = 1.0, min_drop_pct: float = 0.2,
@@ -2190,10 +2251,14 @@ def get_vampire_drain(min_hours: float = 1.0, min_drop_pct: float = 0.2,
             return
         hours = (t1 - t0).total_seconds() / 3600.0
         drop = (w["soc0"] or 0) - (soc_end or 0)
-        if hours >= min_hours:
+        pct_per_day = drop / hours * 24 if hours else 0
+        active_use = pct_per_day > _VAMPIRE_ACTIVE_USE_RATE
+        if hours >= min_hours and not active_use:
             # Headline aggregate: every park long enough to measure counts, including zero-drop
             # ones — a "drain happened"-only sample reads high (selection bias). SoC up-ticks
             # while parked are BMS jitter, not charging → clamp to 0.
+            # Active-use windows (rate > threshold) are excluded: that's intentional
+            # consumption (A/C, screen, user in car), not standby loss.
             agg["hours"] += hours
             agg["drop"] += max(drop, 0.0)
         # Compare the rounded drop: raw float drops sit a hair off the threshold
@@ -2206,10 +2271,11 @@ def get_vampire_drain(min_hours: float = 1.0, min_drop_pct: float = 0.2,
                 "hours": round(hours, 1),
                 "soc_start": round(w["soc0"], 1), "soc_end": round(soc_end, 1),
                 "drop_pct": drop_r,
-                "pct_per_day": round(drop / hours * 24, 1),
+                "pct_per_day": round(pct_per_day, 1),
                 "rate_err": round(err, 1),
                 "reliable": drop_r >= 2 * _DROP_ERR - 1e-9 and err <= 1.0,
                 "ongoing": ongoing,
+                "active_use": active_use,
                 # Clears the user's display threshold → charted as a bar; otherwise it's a real
                 # parked window kept only to power the "below your threshold" hint + headline.
                 "_charted": drop_r >= min_drop_pct - 1e-9,
@@ -2251,6 +2317,7 @@ def get_vampire_drain(min_hours: float = 1.0, min_drop_pct: float = 0.2,
     # raised slider never reads as "no parked data at all" (#63).
     charted = [w for w in windows if w.pop("_charted")]
     measurable = len(windows)
+    active_use_count = sum(1 for w in charted if w.get("active_use"))
     # Time-weighted typical (total SoC lost / total parked time): quantization noise cancels
     # across windows instead of every short park voting like a long one, and slow drain below
     # the per-window display threshold still surfaces. Gated on `measurable` (not the charted
@@ -2259,6 +2326,7 @@ def get_vampire_drain(min_hours: float = 1.0, min_drop_pct: float = 0.2,
     typical = round(agg["drop"] / agg["hours"] * 24, 1) if measurable and agg["hours"] else None
     return {"windows": charted, "count": len(charted),
             "measurable_count": measurable, "below_threshold": measurable - len(charted),
+            "active_use_count": active_use_count,
             "min_drop_pct": round(min_drop_pct, 1),
             "typical_pct_per_day": typical, "lookback_days": lookback_days}
 

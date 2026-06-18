@@ -41,8 +41,14 @@
   <div id="soh-chart" style="height:340px"></div>
 </div>
 
-{% if health.excluded_count %}
+{% if health.cold_count %}
 <p class="text-xs text-slate-500 leading-relaxed mb-2">{{ t('battery_soh_cold_note').format(n=health.temp_min_c|int) }}</p>
+{% endif %}
+{% if health.active_use_count %}
+<p class="text-xs text-slate-500 leading-relaxed mb-2">{{ t('battery_soh_active_use_note') }}</p>
+{% endif %}
+{% if health.soc_jump_count %}
+<p class="text-xs text-slate-500 leading-relaxed mb-2">{{ t('battery_soh_soc_jump_note') }}</p>
 {% endif %}
 <p class="text-xs text-slate-500 leading-relaxed">{{ t('battery_method') }}</p>
 
@@ -53,13 +59,15 @@
   var pts = {{ health.points | tojson }};
   var nominal = {{ health.nominal_kwh }};
   var typeColor = { HOME: '#22c55e', AC: '#60a5fa', FAST: '#fb923c', DC: '#fb923c', HPC: '#e879f9', FREE: '#a3e635' };
-  var COLD = 'rgba(100,116,139,0.5)';   // faded slate — cold charges, shown but excluded from the figure
+  var COLD   = 'rgba(100,116,139,0.5)';  // faded slate — cold charges, excluded from the figure
+  var ACTIVE = 'rgba(251,146,60,0.55)';  // faded amber — car-on charges, excluded from the figure
   var mode = 'time', curData = [];
   function dataFor(m) {
     return pts.map(function (p) {
       return { x: m === 'dist' ? p.odometer_km : new Date(p.ts).getTime(), y: p.capacity_kwh,
                soh: p.soh_pct, delta: p.soc_delta, end: p.end_soc, energy: p.energy_kwh,
-               temp: p.temp_c, type: p.charge_type || 'AC', cold: p.excluded };
+               temp: p.temp_c, type: p.charge_type || 'AC',
+               excl: p.excluded, excl_reason: p.exclude_reason };
     }).filter(function (d) { return d.x != null && d.y != null; });
   }
   function build() {
@@ -78,8 +86,9 @@
       colors: ['#38bdf8'],
       markers: { size: 6, strokeWidth: 0,
                  discrete: curData.map(function (d, i) {
-                   return { seriesIndex: 0, dataPointIndex: i, size: 6,
-                            fillColor: d.cold ? COLD : (typeColor[d.type] || '#38bdf8') };
+                   var fc = d.excl ? (d.excl_reason === 'active_use' ? ACTIVE : COLD)
+                                   : (typeColor[d.type] || '#38bdf8');
+                   return { seriesIndex: 0, dataPointIndex: i, size: 6, fillColor: fc };
                  }) },
       xaxis: xaxis,
       yaxis: { min: Math.round(nominal * 0.6), max: Math.round(nominal * 1.1),
@@ -99,7 +108,9 @@
                            '  ·  +' + d.delta + '% → ' + (d.end != null ? d.end + '%' : '') +
                            ' / ' + d.energy + ' kWh (' + d.type + ')';
                    if (d.temp != null) s += '  ·  ' + d.temp + '°C';
-                   if (d.cold) s += '  ·  {{ t('battery_cold_excluded') }}';
+                   if (d.excl_reason === 'cold') s += '  ·  {{ t('battery_cold_excluded') }}';
+                   else if (d.excl_reason === 'active_use') s += '  ·  {{ t('battery_active_use_excluded') }}';
+                   else if (d.excl_reason === 'soc_jump') s += '  ·  {{ t('battery_soc_jump_excluded') }}';
                    return s;
                  }, title: { formatter: function () { return ''; } } } }
     });
@@ -148,6 +159,9 @@
 {% if vampire.below_threshold %}
 <p class="text-xs text-slate-500 mb-2">{{ t('battery_vampire_more_below').format(n=vampire.below_threshold, thr=vampire.min_drop_pct) }}</p>
 {% endif %}
+{% if vampire.active_use_count %}
+<p class="text-xs text-slate-500 mb-2">{{ t('battery_vampire_active_use_note').format(n=vampire.active_use_count) }}</p>
+{% endif %}
 <div class="card mb-3">
   <div id="vampire-chart" style="height:300px"></div>
 </div>
@@ -163,7 +177,7 @@
   // tooltip carries the time, duration, drop and SoC range.
   var meta = wins.map(function (w) {
     return { drop: w.drop_pct, hours: w.hours, s0: w.soc_start, s1: w.soc_end,
-             err: w.rate_err, reliable: w.reliable, ongoing: w.ongoing,
+             err: w.rate_err, reliable: w.reliable, ongoing: w.ongoing, active_use: w.active_use,
              when: w.start.slice(8, 10) + '/' + w.start.slice(5, 7) + ' ' + w.start.slice(11, 16) };
   });
   el._c = new ApexCharts(el, {
@@ -171,8 +185,11 @@
     series: [{ name: '%/{{ t('day_unit') }}', data: wins.map(function (w) { return w.pct_per_day; }) }],
     // Ghost bars: a short (or still-open) park extrapolates a single 0.1% SoC step into
     // several %/day (#41) — its rate is an estimate, so it renders translucent, not alarming.
+    // Active-use bars (car on with climate) render in amber to distinguish intentional
+    // consumption from standby drain.
     colors: [function (o) {
       var w = wins[o.dataPointIndex];
+      if (w.active_use) return 'rgba(251,146,60,0.6)';
       return (w.reliable && !w.ongoing) ? '#14b8a6' : 'rgba(20,184,166,0.35)';
     }],
     plotOptions: { bar: { columnWidth: '55%', borderRadius: 3 } },
@@ -188,7 +205,8 @@
                y: { formatter: function (v, o) {
                  var d = meta[o.dataPointIndex];
                  var s = v + ' ±' + d.err.toFixed(1) + ' %/{{ t('day_unit') }}  ·  −' + d.drop + '% / ' + d.hours + ' h  ·  ' + d.s0 + '→' + d.s1 + '%';
-                 if (d.ongoing) s += '  ·  {{ t('battery_vampire_ongoing') }}';
+                 if (d.active_use) s += '  ·  {{ t('battery_vampire_active_use') }}';
+                 else if (d.ongoing) s += '  ·  {{ t('battery_vampire_ongoing') }}';
                  else if (!d.reliable) s += '  ·  {{ t('battery_vampire_low_conf') }}';
                  return s;
                }, title: { formatter: function () { return ''; } } },
