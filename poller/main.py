@@ -337,6 +337,15 @@ def main():
 
     db = Database(db_path)
 
+    # Factory reset requested from Settings: the web side set this marker, cleared the setup gate
+    # and relaunched the app (run.sh restarts both processes). The destructive wipe happens HERE,
+    # at startup, where the poller is the sole DB writer — so it can't race a concurrent poll — and
+    # the wizard-wait below then opens a fresh setup. The wipe clears the marker too (one txn).
+    if db.get_setting("factory_reset_pending", "0") == "1":
+        log.warning("Factory reset requested — erasing all local data (account, trips, charges, "
+                    "positions, settings); the setup wizard will reopen")
+        db.factory_reset()
+
     # If no env vars set, wait for the setup wizard to complete
     if not os.environ.get("LEAPMOTOR_USER") and not db.is_setup_complete():
         log.info("Waiting for setup wizard...")
@@ -358,7 +367,46 @@ def main():
         device_id=device_id,
     )
 
-    client.login()
+    # Startup login with in-process retry + backoff. A transient cloud error here — e.g. the
+    # `code 39 "Information verification failed, try again later"` that hits right after a freshly
+    # accepted car share (not yet propagated on the backend), or a token/connection blip — used to
+    # propagate out of main(), exit the process, and let the entrypoint restart it in a tight storm
+    # that hammered the cloud (the poll loop already self-heals via relogin(); only startup didn't).
+    # Retry HERE instead so we never exit on a recoverable error. Genuinely bad credentials are not
+    # hammered in a tight loop: record a clear status for the setup UI and wait. Either way, a
+    # credentials change in the setup wizard restarts the poller at once to apply the new login.
+    _login_backoff = 5.0
+    while True:
+        try:
+            client.login()
+            db.set_setting("poller_login_error", "")   # clear any stale error on success
+            break
+        except Exception as exc:  # noqa: BLE001
+            msg = str(exc)
+            # Bad credentials won't fix themselves by retrying. Everything else — the transient
+            # cloud `code 39`, an unpropagated fresh car-share ("no vehicles found"), cert/token/
+            # connection blips — is recoverable: keep retrying with a capped backoff.
+            bad_creds = any(s in msg.lower() for s in (
+                "password", "incorrect", "wrong account", "account does not exist",
+                "invalid account", "user does not exist", "account or password",
+            ))
+            db.set_setting("poller_login_error", msg[:300])
+            log.error("Startup login failed%s: %s",
+                      " (check credentials)" if bad_creds else " — will retry", msg)
+            # Wait before retrying, but stay responsive to a credentials change made in the setup
+            # wizard (fix a typo / re-onboard). On bad creds wait long (no point hammering the
+            # cloud); on transient errors retry after the growing backoff.
+            wait = 3600.0 if bad_creds else _login_backoff
+            waited = 0.0
+            while waited < wait:
+                time.sleep(min(5.0, wait - waited))
+                waited += 5.0
+                _now = load_config(db)
+                if (_now["username"], _now["password"], _now["pin"]) != _startup_login:
+                    log.info("Credentials changed during startup login — restarting to apply")
+                    os._exit(42)
+            _login_backoff = min(_login_backoff * 2, 300.0)
+
     # Vehicle is known after login; register it in the DB
     from leapmotor_api import LeapmotorApiClient
     v = client._vehicle

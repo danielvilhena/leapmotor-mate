@@ -3,6 +3,17 @@
 All notable changes to LeapMotor Mate are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.29.2] — 2026-06-23
+
+### Added
+- **Delete account / Factory reset.** Settings now has a destructive **🗑️ Delete account / Reset** action (next to Log out) that wipes *everything* — the account, all trips, charges, positions and every setting (MQTT / wallbox / prices / Home Assistant) — and reopens the setup wizard as a brand-new install. Unlike **Log out** (which keeps your history, keyed to the car), this keeps nothing except the app-level certificate on disk, so re-onboarding still needs only your e-mail, password and PIN. It is **type-to-confirm** (you must type `RESET`) because it cannot be undone.
+
+### Fixed
+- **Onboarding no longer gets stuck after linking a freshly-shared car.** Right after a shared car is accepted, the Leapmotor cloud can briefly reject requests with a transient "verification failed, try again later" error until the share propagates. Two things handled that badly: the poller's **first login** let the error crash the process, which then restarted in a tight loop that hammered the cloud; and the **car picture** could be saved as the error response itself, leaving the Overview with no image until a manual refresh. The first login now **retries in-process with a backoff** (and picks up a corrected login at once) instead of restart-looping, and the car-picture download is now **validated as a real image** before it is cached. Both recover on their own.
+
+### Changed
+- **Comfort card laid out in two columns** on the Commands page (was three) — larger, easier-to-read seat / steering / mirror tiles.
+
 ## [1.29.1] — 2026-06-22
 
 ### Fixed

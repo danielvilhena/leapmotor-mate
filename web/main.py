@@ -25,7 +25,7 @@ import mqtt_check
 import auth
 import update_check
 
-MATE_VERSION = "1.29.1"  # bump together with the git tag + add-on config.yaml at release
+MATE_VERSION = "1.29.2"  # bump together with the git tag + add-on config.yaml at release
 
 import diagnostics
 import demo
@@ -1557,6 +1557,36 @@ async def account_logout(request: Request):
     return resp
 
 
+@app.post("/api/account/factory-reset")
+async def account_factory_reset(request: Request):
+    """Full, IRREVERSIBLE wipe (Settings → Delete account / Factory reset). Erases ALL local data —
+    account, trips, charges, positions and every setting (MQTT / wallbox / prices / HA included) —
+    and reopens the setup wizard as a brand-new install. Unlike Logout (which keeps history by VIN),
+    this keeps nothing except the app-level TLS cert on disk, so the re-onboard still needs only the
+    login. Type-to-confirm guarded. The destructive table wipe is done by the POLLER at startup
+    (sole DB writer there → no race); here we set the marker, open the setup gate so the redirect
+    below isn't bounced during the ~2s relaunch window, drop the cached car image, and relaunch the
+    whole app (web exits 42 → run.sh restarts poller + web; the poller wipes on its next startup)."""
+    form = await request.form()
+    if (form.get("confirm") or "").strip().upper() != "RESET":
+        return Response(status_code=400)
+    db_reader.set_setting("factory_reset_pending", "1")
+    db_reader.set_setting("setup_complete", "0")        # gate open immediately; poller wipes the rest
+    command_client._session._reset()
+    # Drop the cached car-picture artifacts (on disk, not in the DB) so the next account starts clean.
+    for p in (_car_picture_pkg_path(), _car_picture_cache_path()):
+        try:
+            os.remove(p)
+        except OSError:
+            pass
+    _car_image_memo.clear()
+    car_image.clear_cache()
+    _restart_container()        # exit 42 → run.sh relaunches poller + web; poller wipes on startup
+    resp = Response(status_code=204)
+    resp.headers["HX-Redirect"] = request.headers.get("x-ingress-path", "") + "/setup"
+    return resp
+
+
 def _status_dot(color: str, label: str) -> HTMLResponse:
     """A small coloured status dot + label for an integration summary header —
     same visual language as the Wallbox connection badge."""
@@ -2820,6 +2850,9 @@ async def setup_submit(request: Request):
     if vin and car_type:
         db_reader.upsert_vehicle(vin, car_type)
 
+    # Completing setup cancels any pending factory reset: the user has intentionally configured
+    # this install, so a stray marker (e.g. if a reset's relaunch never fired) must never wipe it.
+    db_reader.set_setting("factory_reset_pending", "0")
     db_reader.set_setting("setup_complete", "1")
 
     # Reset the command session so it picks up new credentials

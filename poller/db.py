@@ -632,6 +632,32 @@ class Database:
     def mark_setup_complete(self) -> None:
         self.set_setting("setup_complete", "1")
 
+    def factory_reset(self) -> None:
+        """Destructively wipe ALL local data — every row of every table — returning the
+        instance to a brand-new, unconfigured install (the setup wizard reopens). Keeps the
+        schema, and the app-level TLS cert on disk (app identity, not account data) is left
+        untouched, so the re-onboard only needs username/password/PIN. Run once at poller
+        startup when the web 'Delete account / Factory reset' action sets the marker — the
+        poller is the sole DB writer there, so the wipe can't race a concurrent poll. The whole
+        wipe (including the marker itself) is one transaction, so an interrupted reset simply
+        retries on the next start instead of leaving a half-wiped DB."""
+        tables = [r["name"] for r in self._conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+        ).fetchall()]
+        for t in tables:
+            self._conn.execute(f'DELETE FROM "{t}"')
+        try:
+            self._conn.execute("DELETE FROM sqlite_sequence")   # reset AUTOINCREMENT counters
+        except sqlite3.OperationalError:
+            pass
+        self._conn.commit()
+        try:
+            self._conn.execute("VACUUM")        # reclaim the space the wiped history used
+            self._conn.commit()
+        except sqlite3.OperationalError:
+            pass
+        log.warning("Factory reset complete — wiped %d tables; starting fresh setup", len(tables))
+
     # ── Vehicles ─────────────────────────────────────────────────────────────
 
     def ensure_vehicle(self, vin: str, car_type: str, year: Optional[int] = None) -> int:

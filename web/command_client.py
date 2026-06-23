@@ -382,7 +382,20 @@ class LeapmotorSession:
                     key = (meta.get("data") or {}).get("key") if isinstance(meta, dict) else None
                     if not key:
                         return None
-                    return self._api.download_car_picture_package(picture_key=key)
+                    pkg = self._api.download_car_picture_package(picture_key=key)
+                    # The cloud can answer the download with a tiny error JSON body instead of the
+                    # ZIP (e.g. the transient `{"code":39,...}` seen right after a freshly-accepted
+                    # car share) under an HTTP 200, so it slips past the library. Returning those
+                    # bytes as "the package" makes the caller cache an error blob as
+                    # car_picture_pkg.zip and then serve no image until a manual ?refresh=1. A real
+                    # ZIP always starts with the "PK" magic; treat anything else as a transient
+                    # failure → reset + retry, and None after the attempts (caller falls back).
+                    if not (pkg and pkg[:2] == b"PK"):
+                        log.warning("Car picture package was not a ZIP (%d bytes, attempt %d) — "
+                                    "transient cloud error, not caching", len(pkg or b""), attempt + 1)
+                        self._reset()
+                        continue
+                    return pkg
                 except Exception as e:
                     log.warning("Car picture package fetch (attempt %d): %s", attempt + 1, e)
                     self._reset()
