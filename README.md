@@ -71,6 +71,7 @@ LeapMotor Mate is free and open-source, developed in my spare time. If it's usef
 - **Advanced settings** — a collapsible card to tune the edge cases: missed-charge detection threshold, vampire-drain noise floor, the AC/DC power threshold (for 22 kW AC wallboxes), and the **battery-health cold cutoff**. Sane defaults, one-tap reset.
 - **Recover missed charges** — scan your history for charges that happened while the car was asleep before automatic detection existed; previews what it finds before adding anything.
 - **Single Home Assistant lock toggle** — an MQTT *lock* entity for dashboards **plus a “Door Lock Toggle” switch** for launcher widgets that can't toggle locks (e.g. Samsung's): one tap locks, the next unlocks — perfect as a phone front-screen button. The classic buttons stay too.
+- **Delete account / Factory reset** — a guarded action in *Settings → Vehicle* that wipes **everything** (account, trips, charges and all settings) and reopens the setup wizard as a brand‑new install — for handing the install on, or starting clean. Type‑to‑confirm; the app certificate is kept, so re‑onboarding only needs your login.
 
 ## How it works
 
@@ -305,6 +306,7 @@ LeapMotor Mate è gratuito e open-source, sviluppato nel tempo libero. Se ti è 
 - **Impostazioni avanzate** — una scheda richiudibile per regolare i casi particolari: soglia rilevamento ricariche perse, soglia rumore consumo-da-fermo, soglia potenza AC/DC (per wallbox AC da 22 kW) e la **soglia freddo per la salute batteria**. Valori predefiniti sensati, reset con un tocco.
 - **Recupero ricariche perse** — cerca nella cronologia le ricariche avvenute mentre l'auto dormiva prima che esistesse il rilevamento automatico; mostra cosa trova prima di aggiungere qualcosa.
 - **Toggle blocco singolo per Home Assistant** — un'entità MQTT *lock* per i dashboard **più uno switch “Door Lock Toggle”** per i widget launcher che non sanno toggleare i lock (es. Samsung): un tocco blocca, il successivo sblocca — perfetto come bottone singolo sulla home del telefono. I pulsanti classici restano.
+- **Cancella account / Factory reset** — un'azione protetta in *Impostazioni → Veicolo* che azzera **tutto** (account, viaggi, ricariche e ogni impostazione) e riapre il wizard di setup come una nuova installazione — per passare l'installazione a qualcun altro o ripartire da zero. Conferma da digitare; il certificato dell'app viene mantenuto, quindi il re-onboarding chiede solo il login.
 
 ## Come funziona
 
