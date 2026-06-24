@@ -3,6 +3,11 @@
 All notable changes to LeapMotor Mate are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.32.0] — 2026-06-24
+
+### Added
+- **Saved wallbox profiles.** If you charge in more than one place — e.g. two homes, each with its own wallbox — you can now save a wallbox configuration (the Home Assistant connection, the entity mapping **and** the electricity tariff) under a name and switch between them in one click from **Settings → Wallbox**, instead of re-entering everything each time. The active profile is shown on the **Costs** page; switching is **blocked while a charge is in progress** so a session is never split across two wallboxes, and the per-profile **tariff travels with the profile** so each home's costs stay correct. Community feature contributed by **@domevite** (#84).
+
 ## [1.31.0] — 2026-06-24
 
 ### Added
