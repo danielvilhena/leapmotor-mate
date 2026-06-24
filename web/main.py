@@ -25,7 +25,7 @@ import mqtt_check
 import auth
 import update_check
 
-MATE_VERSION = "1.29.3"  # bump together with the git tag + add-on config.yaml at release
+MATE_VERSION = "1.30.0"  # bump together with the git tag + add-on config.yaml at release
 
 import diagnostics
 import demo
@@ -447,7 +447,8 @@ async def battery_page(request: Request):
     vehicle, _ = db_reader.get_vehicle()
     health = db_reader.get_battery_health()
     vampire = db_reader.get_vampire_drain(
-        min_drop_pct=float(db_reader.get_setting("vampire_min_drop_pct", "0.2") or 0.2))
+        min_drop_pct=float(db_reader.get_setting("vampire_min_drop_pct", "0.2") or 0.2),
+        min_hours=float(db_reader.get_setting("vampire_min_hours", "1") or 1))
     return templates.TemplateResponse(request, "battery.html", _ctx(
         page="battery", vehicle=vehicle, health=health, vampire=vampire,
     ))
@@ -871,6 +872,7 @@ async def settings_page(request: Request):
                 "positions_retention_days": db_reader.get_setting("positions_retention_days", "0"),
                 "charge_reconstruct_min_pct": db_reader.get_setting("charge_reconstruct_min_pct", "2.0"),
                 "vampire_min_drop_pct": db_reader.get_setting("vampire_min_drop_pct", "0.2"),
+                "vampire_min_hours": db_reader.get_setting("vampire_min_hours", "1"),
                 "charge_dc_min_kw": db_reader.get_setting("charge_dc_min_kw", "11"),
                 "wallbox_auto_home": db_reader.get_setting("wallbox_auto_home", "0"),
                 "db_size_mb": round(db_reader.get_db_size_bytes() / 1048576, 1)}
@@ -1293,6 +1295,32 @@ def _wallbox_overlay(curve: dict, charge_id: int) -> list | None:
             j += 1
         out.append(round(last, 3) if last is not None else None)
     return out if any(v is not None for v in out) else None
+
+
+@app.post("/api/charges/manual", response_class=HTMLResponse)
+async def add_manual_charge_api(request: Request):
+    """Add a historical charge by hand (#87) — for sessions from before Mate was installed, so the
+    lifetime totals / monthly report are complete. Only date+energy are required; cost and AC/DC are
+    optional. No SoC / power curve (manual entries carry no telemetry)."""
+    form = await request.form()
+    t = i18n.get_t(db_reader.get_language())
+    date = (form.get("date") or "").strip()
+    time_ = (form.get("time") or "").strip() or "12:00"        # noon default → no day-shift on display
+    try:
+        energy = float(str(form.get("energy", "")).strip().replace(",", "."))
+    except ValueError:
+        energy = 0.0
+    cost_raw = str(form.get("cost", "")).strip().replace(",", ".")
+    try:
+        cost = float(cost_raw) if cost_raw else None
+    except ValueError:
+        cost = None
+    ctype = (form.get("charge_type") or "AC").strip().upper()
+    if not date or energy <= 0:
+        return HTMLResponse(f'<span style="color:#ef4444">✗ {t("manual_charge_required")}</span>', status_code=400)
+    db_reader.add_manual_charge(f"{date}T{time_}:00", energy, cost, ctype)
+    return HTMLResponse(f'<span style="color:#22c55e">✓ {t("manual_charge_added")}</span>',
+                        headers={"HX-Trigger": "chargeAdded"})
 
 
 @app.get("/api/charge/{charge_id}/power-chart", response_class=HTMLResponse)
@@ -2026,6 +2054,7 @@ async def charge_detect_settings(request: Request):
 _ADVANCED_DEFAULTS = {
     "charge_reconstruct_min_pct": (2.0, 1.0, 10.0),
     "vampire_min_drop_pct":       (0.2, 0.1, 2.0),
+    "vampire_min_hours":          (1.0, 1.0, 12.0),
     "charge_dc_min_kw":           (11.0, 11.0, 32.0),
     "soh_temp_min_c":             (15.0, 0.0, 25.0),
 }

@@ -3,6 +3,16 @@
 All notable changes to LeapMotor Mate are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.30.0] — 2026-06-24
+
+### Added
+- **Add a past charge by hand.** A new **➕ Add a past charge** form on the Charges page lets you backfill charging sessions from before you started using Mate, so the lifetime totals and the monthly report are complete. You enter just the date, energy (kWh), optional cost and AC/DC — manual entries carry no SoC or power curve, so they're excluded from the Battery-Health estimate and never have their cost overwritten by the automatic coster. (Requested by twiktorowicz, #87.)
+
+### Changed
+- **Statistics trend charts are now per **day**, not per trip.** The distance / efficiency / regen mini-charts under each month aggregate by day, so a handful of short hops no longer crowds the axis or spikes the efficiency line — the trend is far easier to read. (Suggested by riri19, #86.)
+- **Vampire-drain chart gets two view toggles + a duration filter.** You can switch the bars between **%/day** (the normalised rate) and **% lost** (the actual SoC dropped during the stop), and between **per stop** and **per day** (one aggregated bar per calendar day) — so short parks no longer show alarming extrapolated spikes. A new Advanced setting, **minimum parking time**, hides parked stretches shorter than the chosen number of hours. (Suggested by riri19, #88.)
+- **"Best efficiency" now ignores tiny trips.** The headline best-efficiency figure only considers trips of at least 15 km, so a short downhill coast or a glitchy frame can't masquerade as your record. (Suggested by riri19, #86.)
+
 ## [1.29.3] — 2026-06-24
 
 ### Fixed

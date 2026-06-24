@@ -601,6 +601,29 @@ def update_charge_price(key: str, value: float) -> None:
     set_setting(key, str(value))
 
 
+def add_manual_charge(started_at: str, energy_kwh: float, cost: Optional[float] = None,
+                      charge_type: str = "AC", ended_at: Optional[str] = None) -> int:
+    """Insert a user-entered historical charge — e.g. sessions from before Mate was installed —
+    so the lifetime totals / monthly report reflect them (#87). Manual charges carry only the
+    essentials (date, energy, cost, AC/DC) and deliberately have NO telemetry: start/end SoC are
+    left NULL, so they're excluded from the SoH estimate and have no power curve, and
+    location_type='MANUAL' keeps the automatic costers from overwriting the cost the user typed."""
+    db = _conn_rw()
+    try:
+        vrow = db.execute("SELECT id FROM vehicles ORDER BY id LIMIT 1").fetchone()
+        vehicle_id = vrow["id"] if vrow else None
+        ct = "DC" if str(charge_type).upper() in ("DC", "FAST", "HPC") else "AC"
+        cur = db.execute(
+            "INSERT INTO charges (vehicle_id, started_at, ended_at, energy_added_kwh, "
+            "charge_type, location_type, cost, reconstructed) "
+            "VALUES (?, ?, ?, ?, ?, 'MANUAL', ?, 0)",
+            (vehicle_id, started_at, ended_at or started_at, energy_kwh, ct, cost))
+        db.commit()
+        return cur.lastrowid
+    finally:
+        db.close()
+
+
 def upsert_vehicle(vin: str, car_type: str) -> None:
     """Pre-populate vehicles table from setup wizard (before first poller run)."""
     db = _conn_rw()
@@ -1682,7 +1705,10 @@ def get_stats_summary() -> dict:
                ROUND(SUM(distance_km * efficiency_kwh_100km) /
                      NULLIF(SUM(CASE WHEN efficiency_kwh_100km IS NOT NULL
                                      THEN distance_km END), 0), 1)           AS avg_efficiency,
-               ROUND(MIN(CASE WHEN efficiency_kwh_100km > 0 THEN efficiency_kwh_100km END), 1) AS best_efficiency,
+               -- "Best" must come from a real trip, not a 3 km downhill coast or a glitch frame
+               -- (#86): a min-distance floor keeps this metric representative of the car.
+               ROUND(MIN(CASE WHEN efficiency_kwh_100km > 0 AND distance_km >= 15
+                              THEN efficiency_kwh_100km END), 1) AS best_efficiency,
                ROUND(SUM(regen_kwh), 2)                                      AS total_regen_kwh,
                ROUND(AVG(regen_kwh), 2)                                      AS avg_regen_kwh
            FROM trips WHERE ended_at IS NOT NULL"""

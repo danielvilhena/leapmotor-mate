@@ -180,7 +180,7 @@
           </div>
         </summary>
 
-        <!-- Per-trip charts: Distance + Efficiency + Regen -->
+        <!-- Per-DAY charts: Distance + Efficiency + Regen -->
         <div class="ml-4 mt-2 pb-3 px-2 grid grid-cols-1 lg:grid-cols-3 gap-3">
           <div style="background:#0a1628;border:1px solid #1a2438;border-radius:10px;padding:12px">
             <div class="text-xs text-slate-500 uppercase tracking-wide mb-2">{{ t('distance_per_trip') }}</div>
@@ -197,11 +197,13 @@
         </div>
         <script>
         (function () {
-          const trips    = {{ month.trips | tojson }};
-          const labels   = trips.map(t => t.label);
-          const kmData   = [{% for t in month.trips %}{{ dist_val(t.distance_km or 0) }}{{ "," if not loop.last }}{% endfor %}];
-          const effData  = [{% for t in month.trips %}{{ eff_val(t.efficiency_kwh_100km) if t.efficiency_kwh_100km else 'null' }}{{ "," if not loop.last }}{% endfor %}];
-          const regenData = trips.map(t => t.regen_kwh || 0);
+          // Per-DAY aggregates (not per-trip): fewer, evenly-spaced points so the trend isn't
+          // dominated by short micro-trips (#86). month.days is newest-first → reverse to chronological.
+          const days     = {{ (month.days | reverse | list) | tojson }};
+          const labels   = days.map(d => d.day_key.slice(8, 10) + '/' + d.day_key.slice(5, 7));
+          const kmData   = [{% for d in month.days|reverse %}{{ dist_val(d.total_km or 0) }}{{ "," if not loop.last }}{% endfor %}];
+          const effData  = [{% for d in month.days|reverse %}{{ eff_val(d.avg_efficiency) if d.avg_efficiency else 'null' }}{{ "," if not loop.last }}{% endfor %}];
+          const regenData = days.map(d => d.total_regen_kwh || 0);
           const tick = { color: '#64748b', font: { size: 9 }, maxRotation: 45 };
           const grid = { color: '#1e293b' };
 
