@@ -25,12 +25,13 @@ import mqtt_check
 import auth
 import update_check
 
-MATE_VERSION = "1.33.2"  # bump together with the git tag + add-on config.yaml at release
+MATE_VERSION = "1.34.0"  # bump together with the git tag + add-on config.yaml at release
 
 import diagnostics
 import demo
 import maintenance
 import research
+import ec_enrich
 
 _IS_DEMO = demo.is_demo()
 demo.install(command_client, ha_client)   # no-op unless MATE_DEMO is set
@@ -64,6 +65,10 @@ log = logging.getLogger("mate.web")
 
 app = FastAPI(title="LeapMotor Mate")
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
+
+# Per-trip EC enrichment runs on a background timer (not only on page renders), so a fresh trip's
+# cloud EC is picked up + re-fetched-until-stable even when nobody has the app open.
+ec_enrich.start_background()
 
 
 def _nice(x) -> str:
@@ -185,6 +190,9 @@ def _ctx(**kwargs):
     # Same piggyback for the 📍 station labels — settings probe + tiny SELECT per render,
     # the OSM lookups run in a background thread on a TTL (see charger_locator.maybe_sweep).
     charger_locator.maybe_sweep()
+    # Same piggyback for per-trip EC (driving) energy enrichment (Phase 2) — no-op unless the
+    # feature is enabled; the cloud calls run in a background thread on a TTL.
+    ec_enrich.maybe_sweep()
     lang = db_reader.get_language()
     t = i18n.get_t(lang)
     def state_label(pos: dict) -> str:
@@ -213,6 +221,7 @@ def _ctx(**kwargs):
             "wallbox_enabled": wallbox_enabled,
             "is_reev": db_reader.get_setting("is_reev", "0") == "1",
             "research": research.research_enabled(),
+            "ec_periods": db_reader.get_setting("ec_periods_enabled", "1") == "1",
             "wb_active_profile_name": wb_active_profile_name,
             "wb_active_profile_id":   wb_active_profile_id,
             "currency": db_reader.get_currency(), "auth_enabled": auth.enabled(),
@@ -404,6 +413,13 @@ async def trips_merge(request: Request, a: int, b: int, gap: int = db_reader.TRI
     the tree shows the combined trip; on a guard failure returns an inline message."""
     res = db_reader.merge_trips(a, b, gap)
     if res.get("ok"):
+        # Auto-convert the combined drive: merged close trips are one cloud session, so the official
+        # getEC the individual trips couldn't isolate is now retrievable over the combined window.
+        # Best-effort — a merge never fails because the cloud has no data.
+        try:
+            ec_enrich.convert_trip(res.get("parent_id"))
+        except Exception:  # noqa: BLE001
+            pass
         return Response(status_code=200, headers={"HX-Refresh": "true"})
     t = i18n.get_t(db_reader.get_language())
     return HTMLResponse(f'<div style="color:#f87171;font-size:13px;padding:6px 0">⚠️ {t("merge_failed")}</div>')
@@ -414,6 +430,24 @@ async def trips_unmerge(request: Request, parent: int):
     """Split a merged group back into its original trips (reversible — nothing was lost)."""
     db_reader.unmerge_trip(parent)
     return Response(status_code=200, headers={"HX-Refresh": "true"})
+
+
+@app.post("/api/trips/{trip_id}/convert-ec", response_class=HTMLResponse)
+async def trip_convert_ec(request: Request, trip_id: int):
+    """'Convert with official data' button: fetch the cloud getEC for this one trip and apply it,
+    replacing the SoC estimate (reversible — SoC kept as backup). On success reload the page so the
+    official figure + breakdown appear; if the cloud has no data for it (too old / unresolved), show
+    an inline message and change nothing."""
+    res = ec_enrich.convert_trip(trip_id)
+    if res.get("ok"):
+        return Response(status_code=200, headers={"HX-Refresh": "true"})
+    t = i18n.get_t(db_reader.get_language())
+    if res.get("reason") == "merged_cloud":
+        # Actionable (amber): merging the two trips would recover the data.
+        return HTMLResponse(f'<span class="text-amber-400 text-xs">⚠️ {t("ec_convert_merged")}</span>')
+    # Not an error — the cloud just has no per-trip detail for this (often short) trip. Calm, neutral
+    # tone so it doesn't read as "something is broken": the SoC estimate above stands.
+    return HTMLResponse(f'<span class="text-slate-400 text-xs">ℹ️ {t("ec_convert_nodata")}</span>')
 
 
 @app.delete("/api/charges/{charge_id}")
@@ -553,11 +587,25 @@ async def research_export():
         s = io.StringIO(); w = csv.writer(s)
         w.writerow(["ts_ms", "note"]); w.writerows([(n["ts"], n["note"]) for n in logbook])
         z.writestr("logbook.csv", s.getvalue())
+        # Cloud consumption probe: UNMAPPED raw responses (getEC 24h/7d + 6-week rank), so a REEV's
+        # fuel/L-100km field surfaces even though the BEV mapping ignores it. Best-effort: a cloud
+        # hiccup must not fail the export.
+        cloud = None
+        try:
+            cloud = command_client.get_consumption_probe_raw()
+        except Exception:  # noqa: BLE001
+            cloud = None
+        if cloud:
+            import re as _re
+            cp = json.dumps(cloud, indent=2, ensure_ascii=False)
+            cp = _re.sub(r"LFZ[A-Z0-9]{12,}", "<VIN>", cp)  # defensive: responses carry no VIN, but scrub anyway
+            z.writestr("cloud_probes.json", cp)
         z.writestr("meta.json", json.dumps({
             "mate_version": MATE_VERSION,
             "car_type": (db_reader.get_vehicle()[0] or {}).get("car_type"),
             "is_reev": db_reader.get_setting("is_reev", "0"),
             "signal_rows": len(rows), "logbook_notes": len(logbook),
+            "cloud_probes": bool(cloud),
             "redacted_signals": sorted(research.REDACT_SIGNALS),
         }, indent=2))
     encrypted = research.encrypt_bundle(buf.getvalue())
@@ -2427,6 +2475,86 @@ async def consumption_rank(request: Request, refresh: int = 0):
             _rank_cache["data"] = data
             _rank_cache["ts"] = time.time()
     return templates.TemplateResponse(request, "partials/consumption_rank.html", _ctx(cr=_rank_cache["data"]))
+
+
+_cum_cache: dict = {"data": None, "ts": 0.0}
+
+
+@app.get("/api/cumulative-summary", response_class=HTMLResponse)
+async def cumulative_summary(request: Request, refresh: int = 0):
+    """Since-delivery cumulative totals from the cloud (total energy incl. parked, mileage, lifetime
+    kWh/100km, driving vs parked split), as an HTML partial. Lifetime data → cached 6h."""
+    import time, asyncio
+    if refresh or not _cum_cache["data"] or time.time() - _cum_cache["ts"] >= 6 * 3600:
+        data = await asyncio.get_event_loop().run_in_executor(None, command_client.get_cumulative_summary)
+        if data is not None:
+            _cum_cache["data"] = data
+            _cum_cache["ts"] = time.time()
+    return templates.TemplateResponse(request, "partials/cumulative_summary.html", _ctx(cs=_cum_cache["data"]))
+
+
+_period_cache: dict = {}
+
+
+@app.get("/api/energy-period", response_class=HTMLResponse)
+async def energy_period(request: Request, period: str = "", start: str = "", end: str = "", refresh: int = 0):
+    """Energy split (driving / A/C / other) for a CURRENT period (day|week|month) OR a custom
+    date range [start,end] (YYYY-MM-DD; day-granular — the cloud has no finer reliable bound).
+    Reuses the shared energy_breakdown partial, with the label adapted to the period. The split
+    is the DRIVING-session figure (same as the official app); parked/standby energy isn't in it.
+    Cached 30 min per resolved window."""
+    import time, asyncio
+    from datetime import datetime, timedelta, timezone
+    t = i18n.get_t(db_reader.get_language())
+    tz = db_reader._LOCAL_TZ
+    now = datetime.now(timezone.utc).astimezone(tz)
+    try:
+        if start and end:
+            b = datetime.strptime(start, "%Y-%m-%d").replace(
+                hour=0, minute=0, second=0, microsecond=0, tzinfo=now.tzinfo)
+            e = datetime.strptime(end, "%Y-%m-%d").replace(
+                hour=23, minute=59, second=59, microsecond=0, tzinfo=now.tzinfo)
+            if b > e:
+                b, e = e.replace(hour=0, minute=0, second=0), b.replace(hour=23, minute=59, second=59)
+            if e > now:
+                e = now
+            _fd = lambda s: datetime.strptime(s, "%Y-%m-%d").strftime("%d/%m/%Y")
+            label = f"{_fd(start)} → {_fd(end)}"
+            key = f"r:{start}:{end}"
+        elif period == "week":
+            b = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+            e, label, key = now, t("ec_this_week"), f"p:week:{now.strftime('%Y-%m-%d')}"
+        elif period == "month":
+            b = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            e, label, key = now, t("ec_this_month"), f"p:month:{now.strftime('%Y-%m')}"
+        elif period == "alltime":
+            first = db_reader.get_first_trip_date()
+            if first:
+                b = datetime.strptime(first, "%Y-%m-%d").replace(
+                    hour=0, minute=0, second=0, microsecond=0, tzinfo=now.tzinfo)
+            else:
+                b = now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=730)
+            e, label, key = now, t("ec_alltime_title"), f"p:all:{first or 'na'}:{now.strftime('%Y-%m-%d')}"
+        else:
+            b = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            e, label, key = now, t("ec_today"), f"p:day:{now.strftime('%Y-%m-%d')}"
+        begin_ts, end_ts = int(b.timestamp()), int(e.timestamp())
+    except Exception:
+        return templates.TemplateResponse(request, "partials/energy_breakdown.html", _ctx(eb=None, eb_label=None))
+    c = _period_cache.get(key)
+    if refresh or not c or time.time() - c["ts"] >= 1800:
+        data = await asyncio.get_event_loop().run_in_executor(
+            None, command_client.get_energy_breakdown_range, begin_ts, end_ts)
+        # Never cache a None: a transient cloud miss must not poison the slot for 30 min — the next
+        # load retries. Keep the last good value if this fetch missed. (Genuinely-empty windows just
+        # re-query each load; that's rare and correct.)
+        if data is not None:
+            _period_cache[key] = {"data": data, "ts": time.time()}
+        eb = data if data is not None else (c["data"] if c else None)
+    else:
+        eb = c["data"]
+    return templates.TemplateResponse(request, "partials/energy_breakdown.html",
+                                      _ctx(eb=eb, eb_label=label))
 
 
 def _car_picture_cache_path() -> str:

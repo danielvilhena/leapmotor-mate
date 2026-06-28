@@ -110,6 +110,13 @@ CREATE TABLE IF NOT EXISTS trips (
     regen_kwh            REAL DEFAULT 0,
     duration_min         REAL,
     efficiency_kwh_100km REAL,
+    efficiency_soc       REAL,                    -- backup of the SoC-derived efficiency (EC override is reversible)
+    ec_kwh               REAL,                    -- cloud getEC total for this trip (driving energy)
+    ec_driving           REAL,
+    ec_ac                REAL,
+    ec_other             REAL,
+    ec_tried             INTEGER DEFAULT 0,       -- EC enrichment attempts (cloud aggregation lags a fresh trip)
+    ec_stable            INTEGER DEFAULT 0,       -- 1 once the cloud EC stabilised (two equal reads) → stop re-fetching
     merged_into_id       INTEGER DEFAULT NULL
 );
 
@@ -332,6 +339,14 @@ class Database:
         tcols = {r[1] for r in self._conn.execute("PRAGMA table_info(trips)").fetchall()}
         if "merged_into_id" not in tcols:
             self._conn.execute("ALTER TABLE trips ADD COLUMN merged_into_id INTEGER DEFAULT NULL")
+        # migration: per-trip EC (driving) energy split from the cloud getEC endpoint (Phase 2).
+        # efficiency_soc backs up the original SoC-derived efficiency so the EC override is fully
+        # reversible; ec_tried counts enrichment attempts (cloud aggregation lags a fresh trip).
+        for _c, _t in (("efficiency_soc", "REAL"), ("ec_kwh", "REAL"), ("ec_driving", "REAL"),
+                       ("ec_ac", "REAL"), ("ec_other", "REAL"), ("ec_tried", "INTEGER DEFAULT 0"),
+                       ("ec_stable", "INTEGER DEFAULT 0")):
+            if _c not in tcols:
+                self._conn.execute(f"ALTER TABLE trips ADD COLUMN {_c} {_t}")
         self._conn.commit()
         self._repair_odometer_trips()
         self._repair_quantized_trip_distance()

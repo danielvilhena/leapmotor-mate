@@ -83,6 +83,10 @@
 
 {% if not demo %}
 <!-- Cloud insights: energy distribution + 6-week consumption trend (live cloud data; hidden in demo) -->
+<!-- Totali da consegna (mileage/energy/detail → totalEnergy/totalmileage + guida/fermo) -->
+<div class="card mb-4" hx-get="api/cumulative-summary" hx-trigger="load" hx-swap="innerHTML">
+  <div class="text-center py-4 text-slate-500 text-sm">{{ t('loading') }}…</div>
+</div>
 <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
   <div class="card" hx-get="api/energy-breakdown" hx-trigger="load" hx-swap="innerHTML">
     <div class="text-center py-4 text-slate-500 text-sm">{{ t('loading') }}…</div>
@@ -91,6 +95,57 @@
     <div class="text-center py-4 text-slate-500 text-sm">{{ t('loading') }}…</div>
   </div>
 </div>
+{% endif %}
+
+{% if ec_periods and not demo %}
+<!-- Consumo di guida per intervallo a scelta (unità = giorno solare; via getEC, dato ufficiale) -->
+<div class="card mb-6">
+  <div class="flex items-center justify-between mb-3 gap-2 flex-wrap">
+    <h2 class="font-semibold text-white">{{ t('ec_custom_title') }}</h2>
+    <div class="flex flex-wrap items-end gap-2">
+      <label class="text-xs text-slate-400">{{ t('ec_from') }}
+        <input type="date" id="ec-start" class="block bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-sm text-white mt-0.5">
+      </label>
+      <label class="text-xs text-slate-400">{{ t('ec_to') }}
+        <input type="date" id="ec-end" class="block bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-sm text-white mt-0.5">
+      </label>
+      <button type="button" id="ec-run" class="rounded-lg bg-brand/90 hover:bg-brand text-white px-3 py-1.5 text-sm font-medium">{{ t('ec_apply') }}</button>
+    </div>
+  </div>
+  <div class="flex flex-wrap gap-2 mb-3">
+    <button type="button" class="ec-preset text-xs rounded-full border border-slate-700 text-slate-300 px-2.5 py-1 hover:bg-slate-700/50" data-preset="30d">{{ t('ec_preset_30d') }}</button>
+    <button type="button" class="ec-preset text-xs rounded-full border border-slate-700 text-slate-300 px-2.5 py-1 hover:bg-slate-700/50" data-preset="ytd">{{ t('ec_preset_ytd') }}</button>
+    <button type="button" class="ec-preset text-xs rounded-full border border-slate-700 text-slate-300 px-2.5 py-1 hover:bg-slate-700/50" data-preset="all">{{ t('ec_preset_all') }}</button>
+  </div>
+  <div id="ec-range-body">
+    <div class="text-center py-4 text-slate-500 text-sm">{{ t('ec_pick_range') }}</div>
+  </div>
+  <p class="text-[11px] text-slate-500 mt-3 leading-snug">{{ t('ec_note') }}</p>
+</div>
+<script>
+(function () {
+  var s = document.getElementById('ec-start'), e = document.getElementById('ec-end');
+  if (!s || !e) return;
+  var iso = function (d) { return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'); };
+  var today = new Date();
+  s.value = iso(new Date(Date.now() - 30*864e5));
+  e.value = iso(today);
+  function run() {
+    if (!s.value || !e.value) return;
+    htmx.ajax('GET', 'api/energy-period?start=' + s.value + '&end=' + e.value, {target: '#ec-range-body', swap: 'innerHTML'});
+  }
+  document.getElementById('ec-run').addEventListener('click', run);
+  document.querySelectorAll('.ec-preset').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var start, p = b.dataset.preset;
+      if (p === 'ytd') start = new Date(today.getFullYear(), 0, 1);
+      else if (p === 'all') start = new Date(Date.now() - 730*864e5);   // far back: EC returns from first data
+      else start = new Date(Date.now() - 30*864e5);
+      s.value = iso(start); e.value = iso(new Date()); run();
+    });
+  });
+})();
+</script>
 {% endif %}
 
 <!-- Regen KPI row -->

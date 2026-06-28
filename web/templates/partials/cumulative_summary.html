@@ -1,0 +1,54 @@
+<div class="flex items-center justify-between mb-3">
+  <h2 class="font-semibold text-white">{{ t('cum_title') }}</h2>
+</div>
+
+{% if cs %}
+<div class="grid grid-cols-3 gap-3 mb-4">
+  <div>
+    <div class="text-xs text-slate-400">{{ t('cum_total_energy') }}</div>
+    <div class="text-white text-lg font-bold">{{ cs.total_energy_kwh|nice }}<span class="text-sm font-normal text-slate-400"> kWh</span></div>
+  </div>
+  <div>
+    <div class="text-xs text-slate-400">{{ t('distance') }}</div>
+    <div class="text-white text-lg font-bold">{{ dist_val(cs.total_mileage_km, 0)|nice }}<span class="text-sm font-normal text-slate-400"> {{ dist_unit() }}</span></div>
+  </div>
+  <div>
+    <div class="text-xs text-slate-400">{{ t('avg_efficiency') }}</div>
+    {% if cs.lifetime_eff_kwh_100km %}
+    <div class="text-white text-lg font-bold">{{ eff_val(cs.lifetime_eff_kwh_100km)|nice }}<span class="text-sm font-normal text-slate-400"> {{ eff_unit() }}</span></div>
+    {% else %}<div class="text-white text-lg font-bold">—</div>{% endif %}
+  </div>
+</div>
+
+{% if cs.ec_driving_kwh is not none and cs.parked_kwh is not none and cs.total_energy_kwh %}
+{% set _tot = cs.total_energy_kwh %}
+<div class="flex w-full h-3 rounded-full overflow-hidden bg-slate-700 mb-3">
+  <div class="bg-brand"      style="width:{{ (cs.ec_driving_kwh / _tot * 100) | round(1) }}%"></div>
+  <div class="bg-sky-400"    style="width:{{ (cs.ec_ac_kwh / _tot * 100) | round(1) }}%"></div>
+  <div class="bg-amber-400"  style="width:{{ (cs.ec_other_kwh / _tot * 100) | round(1) }}%"></div>
+  <div class="bg-purple-400" style="width:{{ (cs.parked_kwh / _tot * 100) | round(1) }}%"></div>
+</div>
+<div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+  <div>
+    <div class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-brand shrink-0"></span><span class="text-xs text-slate-400">{{ t('eb_driving') }}</span></div>
+    <div class="text-white font-medium mt-0.5">{{ cs.ec_driving_kwh|nice }}<span class="text-xs text-slate-500"> kWh · {{ (cs.ec_driving_kwh / _tot * 100) | round | int }}%</span></div>
+  </div>
+  <div>
+    <div class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-sky-400 shrink-0"></span><span class="text-xs text-slate-400">{{ t('eb_ac') }}</span></div>
+    <div class="text-white font-medium mt-0.5">{{ cs.ec_ac_kwh|nice }}<span class="text-xs text-slate-500"> kWh · {{ (cs.ec_ac_kwh / _tot * 100) | round | int }}%</span></div>
+  </div>
+  <div>
+    <div class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-amber-400 shrink-0"></span><span class="text-xs text-slate-400">{{ t('eb_other') }}</span></div>
+    <div class="text-white font-medium mt-0.5">{{ cs.ec_other_kwh|nice }}<span class="text-xs text-slate-500"> kWh · {{ (cs.ec_other_kwh / _tot * 100) | round | int }}%</span></div>
+  </div>
+  <div>
+    <div class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-purple-400 shrink-0"></span><span class="text-xs text-slate-400">{{ t('cum_parked') }}</span></div>
+    <div class="text-white font-medium mt-0.5">~{{ cs.parked_kwh|nice }}<span class="text-xs text-slate-500"> kWh · {{ (cs.parked_kwh / _tot * 100) | round | int }}%</span></div>
+  </div>
+</div>
+{% endif %}
+
+<p class="text-[10px] text-slate-600 mt-3 leading-snug">{{ t('cum_note') }}</p>
+{% else %}
+<div class="text-center py-4 text-slate-500 text-sm">{{ t('eb_no_data') }}</div>
+{% endif %}

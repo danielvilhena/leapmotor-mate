@@ -223,6 +223,15 @@ Più in basso trovi mini-statistiche e un **indicatore di "reattività auto"** (
 - Puoi **unire** due viaggi spezzati per errore (Fusione 🔗) o **separarli** di nuovo, e
   **cancellare** un viaggio.
 - Soste brevi (semafori, code) **non** spezzano un viaggio: una guidata resta una sola riga.
+- **Consumi ufficiali dal cloud 🆕** — quando disponibili, **consumo, efficienza e costo** del viaggio
+  vengono dal **dato ufficiale Leapmotor** (la vera ripartizione **guida / A·C / altro**) invece della
+  sola stima dal calo di batteria. Subito dopo il viaggio vedi la stima con l'avviso **⏳ provvisorio**;
+  appena il cloud elabora il dato (di solito qualche decina di minuti) viene **sostituito da solo** con
+  quello ufficiale, e nel dettaglio compare la **ripartizione**. Sui viaggi più vecchi c'è il bottone
+  **"Converti con dati ufficiali"**. Se per un viaggio il cloud non ha il dato (capita, su qualsiasi
+  auto connessa), resta la **stima** — non è un errore. È **sempre attivo**, nessuna configurazione.
+  > L'energia ufficiale può differire un po' dalla stima da SoC (è il conteggio "di guida" del cloud):
+  > il viaggio mantiene comunque sempre un valore: ufficiale se c'è, altrimenti la stima.
 
 ### Mappa
 **(menu: Mappa)** — La posizione dell'auto su mappa. Mostra l'ultima posizione nota; se l'ultimo
@@ -263,11 +272,16 @@ costo dei viaggi (calcolato sul prezzo "medio" dell'energia in batteria al momen
 **distanza media per viaggio**, **tempo di guida**, **consumo medio** (pesato sulla distanza) e
 **migliore**, **energia usata e ricaricata**, **recupero** totale e medio, numero di **sessioni di
 ricarica**, con le relative **tendenze** (efficienza e recupero nel tempo). Tra i totali c'è anche una
-scheda **Totale V2L** con l'energia cumulativa prelevata via V2L in tutto lo storico.
+scheda **Totale V2L** con l'energia cumulativa prelevata via V2L in tutto lo storico. C'è anche la
+**ricerca consumo per intervallo** (date libere + preset) e la scheda **"Cumulativo Totale del
+Veicolo"** 🆕 — energia totale, chilometraggio e media kWh/100 km **da consegna** (dal contatore
+dell'auto, quindi non intaccata dai rari viaggi che il cloud non registra), con una barra
+**Guida / A·C / Altro / Da-fermo**.
 
 ### Report mensile
 **(menu: Report mensile)** — Una sintesi **mese per mese**: quanto hai guidato, quanta energia hai
-usato e ricaricato, quanto hai speso. Comodo per tenere d'occhio l'andamento.
+usato e ricaricato, quanto hai speso. Comodo per tenere d'occhio l'andamento. Include anche le schede
+**consumo ufficiale** (Oggi / Questa settimana / Questo mese) dal cloud. 🆕
 
 ### Salute batteria
 **(menu: Salute batteria)** — Una **stima dello stato di salute (SoH)** della batteria, cioè quanta

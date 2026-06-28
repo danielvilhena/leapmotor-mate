@@ -1,7 +1,11 @@
 <div class="flex items-center justify-between mb-3">
+  {% if eb_label %}
+  <span class="text-sm font-medium text-slate-200">{{ eb_label }}</span>
+  {% else %}
   <h2 class="font-semibold text-white">{{ t('energy_distribution') }}</h2>
+  {% endif %}
   {% if eb and eb.total_kwh and eb.total_kwh > 0 %}
-  <span class="text-xs text-slate-500">{{ t('last_week') }} · {{ eb.total_kwh }} kWh</span>
+  <span class="text-xs text-slate-500">{% if not eb_label %}{{ t('last_week') }} · {% endif %}{{ eb.total_kwh }} kWh</span>
   {% endif %}
 </div>
 

@@ -929,6 +929,124 @@ def delete_trip(trip_id: int) -> bool:
     return cur.rowcount > 0
 
 
+# ── Phase 2: per-trip EC (driving) energy enrichment ─────────────────────────
+# The cloud getEC endpoint gives the official DRIVING-energy split (Guida/AC/Altro) for a trip's
+# exact window. We enrich NEW trips (after the feature's cutoff) and, when enabled, make EC the
+# trip's energy — backing up the SoC value so it's fully reversible. Old trips stay SoC.
+def _trip_epoch(s):
+    """A stored trip timestamp (UTC ISO, possibly naive) → epoch seconds, or None."""
+    if not s:
+        return None
+    try:
+        d = datetime.fromisoformat(str(s).replace("Z", "+00:00"))
+        if d.tzinfo is None:
+            d = d.replace(tzinfo=timezone.utc)
+        return int(d.timestamp())
+    except Exception:
+        return None
+
+
+def trip_epoch_window(trip: dict):
+    """(begin_ts, end_ts) for a trip dict."""
+    return _trip_epoch(trip.get("started_at")), _trip_epoch(trip.get("ended_at"))
+
+
+def trip_ec_window(trip: dict, pad_s: int = 120):
+    """Window for the getEC QUERY: start a bit BEFORE the trip (T0 − pad_s), end EXACTLY at the trip
+    end (T1).
+
+    getEC stamps a driving session's whole energy at ONE instant near the session start (≈ ready /
+    leaving Park), slightly BEFORE Mate's movement-based `started_at` (verified on trip 165: the
+    anchor sits ~15-20 s before T0 → a query starting at T0 misses it → 0.1 kWh, but starting ~2 min
+    earlier catches the full 2.8). So:
+      START = T0 − pad_s, CLAMPED to the midpoint with the PREVIOUS trip (never into its energy).
+      END   = T1, with NO padding — the energy is at the start anchor, and T1 + pad would risk
+              landing in the FUTURE (getEC then returns None) and could reach the NEXT trip.
+    Returns (begin_ts, end_ts) or (None, None)."""
+    b, e = trip_epoch_window(trip)
+    if not b or not e:
+        return (None, None)
+    db = _get()
+    begin = b - pad_s
+    prev = db.execute(
+        "SELECT MAX(ended_at) AS m FROM trips WHERE merged_into_id IS NULL "
+        "AND ended_at IS NOT NULL AND ended_at < ?", (trip.get("started_at"),)).fetchone()
+    if prev and prev["m"]:
+        pe = _trip_epoch(prev["m"])
+        if pe:
+            begin = max(begin, (pe + b) // 2)
+    return (int(begin), int(e))
+
+
+def get_trips_needing_ec(cutoff_iso: str, limit: int = 5, min_age_s: int = 600,
+                         giveup_age_s: int = 6 * 3600) -> list[dict]:
+    """Finalized, non-merged trips started on/after `cutoff_iso` whose cloud EC isn't STABLE yet,
+    within the re-fetchable window: ended between `giveup_age_s` and `min_age_s` ago. The cloud
+    aggregates a fresh trip's EC with a lag and writes it incrementally, so we keep re-reading
+    (store_trip_ec overwrites with the latest) until two equal reads lock it (ec_stable=1) or it
+    ages out. Returns ec_kwh too so the sweep can compare to the previous read. Skips zero-distance."""
+    now = datetime.now(timezone.utc)
+    not_after = (now - timedelta(seconds=min_age_s)).isoformat()      # ended_at <= this (old enough)
+    not_before = (now - timedelta(seconds=giveup_age_s)).isoformat()  # ended_at >= this (not too old)
+    db = _conn_rw()
+    rows = db.execute(
+        """SELECT id, started_at, ended_at, distance_km, ec_kwh FROM trips
+           WHERE merged_into_id IS NULL AND ended_at IS NOT NULL
+             AND started_at >= ? AND ended_at <= ? AND ended_at >= ?
+             AND COALESCE(ec_stable, 0) = 0 AND COALESCE(ec_tried, 0) < 80 AND distance_km > 0
+           ORDER BY started_at DESC LIMIT ?""",
+        (cutoff_iso, not_after, not_before, int(limit))).fetchall()
+    return [dict(r) for r in rows]
+
+
+def store_trip_ec(trip_id: int, ec: Optional[dict], distance_km, apply_energy: bool,
+                  stable: bool = False) -> None:
+    """Record an EC enrichment attempt. Always bumps ec_tried. With data: store the split + total
+    (overwriting any earlier partial read), back up the SoC efficiency once, and (if apply_energy)
+    override efficiency_kwh_100km with the EC-derived value. `stable=True` locks the trip
+    (ec_stable=1) so the sweep stops re-fetching it."""
+    db = _conn_rw()
+    if not ec:
+        db.execute("UPDATE trips SET ec_tried = COALESCE(ec_tried, 0) + 1 WHERE id=?", (trip_id,))
+        db.commit()
+        return
+    drv, ac, oth, tot = ec.get("driving_kwh"), ec.get("ac_kwh"), ec.get("other_kwh"), ec.get("total_kwh")
+    db.execute(
+        """UPDATE trips SET ec_tried = COALESCE(ec_tried, 0) + 1,
+               ec_kwh=?, ec_driving=?, ec_ac=?, ec_other=?, ec_stable=?
+           WHERE id=?""",
+        (tot, drv, ac, oth, 1 if stable else 0, trip_id))
+    # Override the trip's energy/efficiency only once the EC is STABLE — a fresh trip's cloud value
+    # is written incrementally, so applying an early partial read would show a wrong figure. Back up
+    # the SoC efficiency at the same moment so the override stays exactly reversible.
+    if apply_energy and stable and tot and distance_km and distance_km > 0:
+        db.execute(
+            """UPDATE trips SET efficiency_soc = COALESCE(efficiency_soc, efficiency_kwh_100km),
+                   efficiency_kwh_100km=? WHERE id=?""",
+            (round(tot / distance_km * 100, 1), trip_id))
+    db.commit()
+
+
+def apply_ec_trip_energy() -> int:
+    """Flag ON: make EC the energy for every trip that has EC data (backing up SoC first)."""
+    db = _conn_rw()
+    cur = db.execute(
+        """UPDATE trips SET efficiency_soc = COALESCE(efficiency_soc, efficiency_kwh_100km),
+               efficiency_kwh_100km = ROUND(ec_kwh / distance_km * 100, 1)
+           WHERE ec_kwh IS NOT NULL AND ec_stable = 1 AND distance_km > 0""")
+    db.commit()
+    return cur.rowcount
+
+
+def revert_ec_trip_energy() -> int:
+    """Flag OFF: restore the original SoC efficiency for every overridden trip."""
+    db = _conn_rw()
+    cur = db.execute(
+        "UPDATE trips SET efficiency_kwh_100km = efficiency_soc WHERE efficiency_soc IS NOT NULL")
+    db.commit()
+    return cur.rowcount
+
+
 def delete_charge(charge_id: int) -> bool:
     """Permanently remove a charge session. Returns True if one was deleted. Day/month/lifetime
     charge totals recompute from the DB automatically. The shared per-poll positions log is untouched."""
@@ -1001,7 +1119,10 @@ def command_responsiveness(last_n: int = 24, min_samples: int = 3) -> dict:
 # A merged trip is a parent + child trips (merged_into_id = parent.id), joined by the user when
 # a journey was split by a SHORT, NON-charging stop. Nothing is deleted or overwritten — the group
 # stats are computed on the fly, so "unmerge" restores the originals exactly.
-TRIP_MERGE_GAP_DEFAULT = 30   # minutes
+TRIP_MERGE_GAP_DEFAULT = 5    # minutes — a stop under this is plausibly ONE continuous drive split by
+                              # a brief pause (lights/gate/quick drop-off). A 15-30 min stop is a real
+                              # destination = two separate trips → never auto-suggested for merge. The
+                              # merge UI slider still opens up to TRIP_MERGE_GAP_MAX for manual merges.
 TRIP_MERGE_GAP_MIN = 5
 TRIP_MERGE_GAP_MAX = 90
 
@@ -1060,6 +1181,11 @@ def _trip_group_stats(parent: dict, children: list) -> dict:
     if ssoc is not None and esoc is not None and dist > 0:
         energy = max((ssoc - esoc) / 100.0 * get_battery_capacity_kwh(), 0)
         d["efficiency_kwh_100km"] = round(energy / dist * 100, 1) if energy > 0 else None
+    # If the group was converted to the official cloud EC (stored on the parent over the COMBINED
+    # distance, e.g. convert-on-merge), prefer it over the SoC estimate so the headline matches the
+    # breakdown card.
+    if d.get("ec_stable") and d.get("ec_kwh") and dist > 0:
+        d["efficiency_kwh_100km"] = round(d["ec_kwh"] / dist * 100, 1)
     d["merged_count"] = len(segs)
     d["is_merged"] = True
     d["segment_ids"] = [s["id"] for s in segs]
@@ -1119,6 +1245,13 @@ def unmerge_trip(parent_id: int) -> dict:
     All rows were untouched, so they reappear exactly as before."""
     db = _conn_rw()
     cur = db.execute("UPDATE trips SET merged_into_id=NULL WHERE merged_into_id=?", (parent_id,))
+    # The parent may hold the COMBINED cloud EC (from a convert-on-merge); once split it no longer
+    # matches the standalone trip → drop it and restore the SoC efficiency (the user can re-convert
+    # the standalone trip). Only touches a parent that actually carries an EC override.
+    db.execute(
+        "UPDATE trips SET efficiency_kwh_100km=COALESCE(efficiency_soc, efficiency_kwh_100km), "
+        "efficiency_soc=NULL, ec_kwh=NULL, ec_driving=NULL, ec_ac=NULL, ec_other=NULL, ec_stable=0 "
+        "WHERE id=? AND ec_kwh IS NOT NULL", (parent_id,))
     db.commit()
     return {"ok": True, "restored": cur.rowcount}
 
@@ -1195,6 +1328,11 @@ def get_trips_grouped() -> list[dict]:
             node["avg_eff"] = round(node["_eff_wsum"] / node["_eff_wdist"], 1)
 
     lang = get_language()
+    # Provisional-SoC marker per trip (same rule as get_trip_detail) so the list shows which trips are
+    # still waiting for the official cloud value. Settings read once, not per trip.
+    _ec_on = get_setting("ec_trip_energy_enabled", "1") == "1"
+    _ec_cutoff = get_setting("ec_trip_since", "")
+    _now_ts = datetime.now(timezone.utc).timestamp()
     years: dict = OrderedDict()
     for t in trips:
         if not t.get("started_at"):
@@ -1202,6 +1340,12 @@ def get_trips_grouped() -> list[dict]:
         dt = _local_dt(t["started_at"])
         if dt is None:
             continue
+        # ec_pending must use the RAW (UTC) started_at/ended_at — compute it before the local rewrite.
+        _ee = _trip_epoch(t.get("ended_at")) if t.get("ended_at") else None
+        t["ec_pending"] = bool(
+            _ec_on and not t.get("ec_stable") and _ec_cutoff
+            and t["started_at"] >= _ec_cutoff
+            and _ee and (_now_ts - _ee) < 6 * 3600)
         # Rewrite to local-time ISO so the template (started_at[11:16]) shows local
         t["started_at"] = dt.isoformat()
         t["ended_at"] = _local_iso(t.get("ended_at"))
@@ -1253,6 +1397,16 @@ def get_trips_summary() -> dict:
         "regen":    r["regen"] or 0,
         "avg_eff":  (r["eff_wsum"] / r["eff_wdist"]) if r["eff_wdist"] else None,
     }
+
+
+def get_first_trip_date() -> Optional[str]:
+    """Earliest trip date (YYYY-MM-DD, local) — the lower bound for the 'all-time' EC window on the
+    Trips page. None if there are no trips yet."""
+    db = _get()
+    r = db.execute("SELECT MIN(started_at) AS m FROM trips WHERE started_at IS NOT NULL").fetchone()
+    if not r or not r["m"]:
+        return None
+    return (_local_iso(r["m"]) or r["m"])[:10]
 
 
 def _wac_blend(charges) -> Optional[float]:
@@ -1351,6 +1505,23 @@ def get_trip_detail(trip_id: int) -> Optional[dict]:
         if rate and rate > 0:
             trip_d["cost_per_kwh"] = round(rate, 4)
             trip_d["cost"] = round(trip_d["energy_kwh"] * rate, 2)
+
+    # Provisional-SoC marker: a getEC-candidate trip (feature on, started on/after the cutoff) whose
+    # official cloud value hasn't locked yet is showing the SoC ESTIMATE for energy/efficiency/cost.
+    # Flag it so the UI can label it "provisional — waiting for cloud" instead of looking like a final
+    # (and slightly imprecise) number. Only while still inside the enrichment retry window (~6h); older
+    # trips the cloud never enriched stay plain SoC with no "waiting" claim.
+    trip_d["ec_pending"] = False
+    try:
+        if get_setting("ec_trip_energy_enabled", "1") == "1" and not trip_d.get("ec_stable"):
+            cutoff = get_setting("ec_trip_since", "")
+            sa, ea = trip["started_at"], trip["ended_at"]
+            ee = _trip_epoch(ea) if ea else None
+            if cutoff and sa and sa >= cutoff and ee and \
+                    (datetime.now(timezone.utc).timestamp() - ee) < 6 * 3600:
+                trip_d["ec_pending"] = True
+    except Exception:  # noqa: BLE001
+        pass
 
     return {
         **trip_d,

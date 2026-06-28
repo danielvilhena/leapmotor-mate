@@ -132,6 +132,27 @@ def _make_client() -> LeapmotorApiClient:
     return api
 
 
+def _classify_ec_response(j) -> tuple[str, dict | None]:
+    """Classify a getLastweekEC (getEC) response body:
+      - ('data', {driverEC,...}) → a real driving-energy split,
+      - ('empty', None)          → genuine 'no driving in this window' (result 0/100 / 'No data found'),
+      - ('auth',  None)          → an auth/token failure or other non-data error → refresh & retry.
+    Verified shapes: success = {result:0,code:0,data:{...}}; no-data = {result:100,code:100,
+    message:'No data found'}. Splitting these out fixes the bug where an expired-token response (no
+    'data' key) was misread as 'no data', so the Convert button / background sweep silently reported
+    'no official data' for trips that DO have it (a long-lived web session's token had expired)."""
+    if not isinstance(j, dict):
+        return "auth", None
+    d = j.get("data") or {}
+    if d:
+        return "data", d
+    result = j.get("result")
+    msg = str(j.get("message") or "").lower()
+    if result in (0, 100) or "no data" in msg:
+        return "empty", None
+    return "auth", None
+
+
 class LeapmotorSession:
     """Login once, reuse token for all subsequent API calls."""
 
@@ -448,6 +469,182 @@ class LeapmotorSession:
             return None
 
 
+    def get_energy_breakdown_range(self, begin_ts: int, end_ts: int) -> dict | None:
+        """Energy split (driving / A/C / other) for an ARBITRARY interval, via the same cloud
+        endpoint as last-week (getEC) but with custom epoch-second bounds — the library only
+        exposes the fixed previous-week window, so we sign+POST it directly. The cloud resolves
+        sub-day windows (≥ ~15 min); a window with no driving returns None. NB: this is the
+        DRIVING-session split (parked/standby energy is not included). Same dict shape as
+        get_energy_breakdown()."""
+        import json as _json
+        from urllib.parse import quote
+        try:
+            from leapmotor_api.crypto import build_consumption_last_week_headers
+        except Exception:  # noqa: BLE001
+            return None
+        with self._lock:
+            refreshed = False
+            for attempt in range(3):
+                try:
+                    self._connect()
+                    api, vin = self._api, self._vehicle.vin
+                    headers = build_consumption_last_week_headers(
+                        sign_key=api.sign_key, device_id=api.device_id, carvin=vin,
+                        begintime=str(begin_ts), endtime=str(end_ts), language=api.language,
+                    ).to_dict()
+                    headers.update(api._auth_headers())
+                    body = f"endtime={end_ts}&begintime={begin_ts}&carvin={quote(vin, safe='')}"
+                    resp = api._post(
+                        path="/carownerservice/oversea/drivingRecord/v1/getLastweekEC",
+                        headers=headers, data=body, cert=api.account_cert,
+                    )
+                    raw = resp.get("body")
+                    j = _json.loads(raw) if isinstance(raw, str) else (raw or {})
+                    kind, d = _classify_ec_response(j)
+                    if kind == "empty":
+                        return None  # genuine: no driving recorded in this window
+                    if kind == "auth":
+                        # A long-lived web session's token expires; the cloud then returns a non-data
+                        # response that USED to be misread as "no data" (the Convert-button / sweep
+                        # false negative on trips that DO have cloud data). Refresh the token once —
+                        # safe on a shared account, unlike a full re-login — and retry.
+                        log.info("Energy range: non-data response %s — token refresh & retry", j)
+                        if not refreshed:
+                            refreshed = True
+                            try:
+                                api.token_refresh()
+                            except Exception:  # noqa: BLE001
+                                self._reset()
+                            continue
+                        return None
+                    drv = float(d.get("driverEC") or 0)
+                    ac = float(d.get("acEC") or 0)
+                    oth = float(d.get("otherEC") or 0)
+                    total = drv + ac + oth
+                    if total <= 0:
+                        return None
+                    pct = lambda v: round(v / total * 100, 1)  # noqa: E731
+                    return {
+                        "driving_kwh": round(drv, 1), "ac_kwh": round(ac, 1), "other_kwh": round(oth, 1),
+                        "total_kwh": round(total, 1),
+                        "driving_pct": pct(drv), "ac_pct": pct(ac), "other_pct": pct(oth),
+                    }
+                except Exception as e:  # noqa: BLE001
+                    log.warning("Energy range fetch (attempt %d): %s", attempt + 1, e)
+                    self._reset()
+            return None
+
+
+    def _raw_getec(self, begin_ts: int, end_ts: int):
+        """Raw, UNMAPPED getEC response for [begin,end] (research probe helper). No lock/connect of
+        its own — the caller holds the lock and has connected."""
+        import json as _json
+        from urllib.parse import quote
+        from leapmotor_api.crypto import build_consumption_last_week_headers
+        api, vin = self._api, self._vehicle.vin
+        headers = build_consumption_last_week_headers(
+            sign_key=api.sign_key, device_id=api.device_id, carvin=vin,
+            begintime=str(begin_ts), endtime=str(end_ts), language=api.language).to_dict()
+        headers.update(api._auth_headers())
+        body = f"endtime={end_ts}&begintime={begin_ts}&carvin={quote(vin, safe='')}"
+        resp = api._post(path="/carownerservice/oversea/drivingRecord/v1/getLastweekEC",
+                         headers=headers, data=body, cert=api.account_cert)
+        raw = resp.get("body")
+        return _json.loads(raw) if isinstance(raw, str) else (raw or {})
+
+    def _raw_weekly_rank(self):
+        """Raw, UNMAPPED 6-week 100km-EC + rank response (research probe helper)."""
+        import json as _json
+        from urllib.parse import quote
+        from leapmotor_api.crypto import build_consumption_weekly_rank_headers
+        api, vin = self._api, self._vehicle.vin
+        headers = build_consumption_weekly_rank_headers(
+            sign_key=api.sign_key, device_id=api.device_id, carvin=vin, language=api.language).to_dict()
+        headers.update(api._auth_headers())
+        resp = api._post(path="/carownerservice/oversea/drivingRecord/v1/getLastNweeks100kmECAndRank",
+                         headers=headers, data=f"carvin={quote(vin, safe='')}", cert=api.account_cert)
+        raw = resp.get("body")
+        return _json.loads(raw) if isinstance(raw, str) else (raw or {})
+
+    def get_consumption_probe_raw(self) -> dict | None:
+        """Research/beta ONLY: UNMAPPED raw JSON of the cloud consumption endpoints, for REEV field
+        discovery — e.g. a fuel L/100km field the BEV mapping (driverEC/acEC/otherEC, hundredKmEC)
+        would silently drop. Captures getEC over the last 24h and last 7d, plus the 6-week 100km
+        rank. Returns {label: raw_json} or None. Called only from the research-gated export."""
+        import time as _time
+        with self._lock:
+            try:
+                self._connect()
+                now = int(_time.time())
+                return {
+                    "captured_at_ms": now * 1000,
+                    "getEC_last24h":  self._raw_getec(now - 86400, now),
+                    "getEC_last7d":   self._raw_getec(now - 7 * 86400, now),
+                    "weekly_rank_6w": self._raw_weekly_rank(),
+                }
+            except Exception as e:  # noqa: BLE001
+                log.warning("consumption probe (research) failed: %s", e)
+                self._reset()
+                return None
+
+
+    def get_cumulative_summary(self) -> dict | None:
+        """Since-delivery cumulative totals from the cloud, via mileage/energy/detail — which needs a
+        SIGNED begin/end window (body_params) or it returns mileage only. Gives total energy (incl.
+        parked/standby), total mileage and lifetime kWh/100km; plus driving (getEC over the car's
+        life) and the derived parked share (total − driving). Returns a dict or None."""
+        import json as _json, time as _time
+        from urllib.parse import quote
+        from leapmotor_api.crypto import build_signed_headers
+        with self._lock:
+            for attempt in range(2):
+                try:
+                    self._connect()
+                    api, vin = self._api, self._vehicle.vin
+                    now_ms = int(_time.time() * 1000); b_ms = now_ms - 7 * 86400 * 1000
+                    h = build_signed_headers(
+                        sign_key=api.sign_key, device_id=api.device_id, vin=vin, language=api.language,
+                        body_params={"begintime": str(b_ms), "endtime": str(now_ms)}).to_dict()
+                    h.update(api._auth_headers())
+                    body = f"endtime={now_ms}&begintime={b_ms}&vin={quote(vin, safe='')}"
+                    resp = api._post(path="/carownerservice/oversea/drivingRecord/v1/mileage/energy/detail",
+                                     headers=h, data=body, cert=api.account_cert)
+                    raw = resp.get("body"); j = _json.loads(raw) if isinstance(raw, str) else (raw or {})
+                    d = (j.get("data") or {}) if isinstance(j, dict) else {}
+                    te, km = d.get("totalEnergy"), d.get("totalmileage")
+                    if te is None or not km:
+                        return None
+                    total, mileage = float(te), float(km)
+                    out = {
+                        "total_energy_kwh": round(total, 1),
+                        "total_mileage_km": round(mileage, 1),
+                        "lifetime_eff_kwh_100km": round(total / mileage * 100, 1) if mileage > 0 else None,
+                        "ec_driving_kwh": None, "ec_ac_kwh": None, "ec_other_kwh": None,
+                        "driving_kwh": None, "parked_kwh": None,
+                    }
+                    # Driving split (driver / A·C / other) over the car's whole life via getEC (caps at
+                    # delivery); parked/standby = total − driving.
+                    now_s = int(_time.time())
+                    ecj = self._raw_getec(now_s - 800 * 86400, now_s)
+                    ecd = (ecj.get("data") or {}) if isinstance(ecj, dict) else {}
+                    if ecd:
+                        drv = round(float(ecd.get("driverEC") or 0), 1)
+                        ac = round(float(ecd.get("acEC") or 0), 1)
+                        oth = round(float(ecd.get("otherEC") or 0), 1)
+                        driving = drv + ac + oth
+                        if driving > 0:
+                            out["ec_driving_kwh"] = drv
+                            out["ec_ac_kwh"] = ac
+                            out["ec_other_kwh"] = oth
+                            out["driving_kwh"] = round(driving, 1)
+                            out["parked_kwh"] = round(max(total - driving, 0), 1)
+                    return out
+                except Exception as e:  # noqa: BLE001
+                    log.warning("Cumulative summary fetch (attempt %d): %s", attempt + 1, e)
+                    self._reset()
+            return None
+
+
 _session = LeapmotorSession()
 
 
@@ -463,8 +660,20 @@ def get_energy_breakdown() -> dict | None:
     return _session.get_energy_breakdown()
 
 
+def get_consumption_probe_raw() -> dict | None:
+    return _session.get_consumption_probe_raw()
+
+
+def get_cumulative_summary() -> dict | None:
+    return _session.get_cumulative_summary()
+
+
 def get_consumption_rank() -> dict | None:
     return _session.get_consumption_rank()
+
+
+def get_energy_breakdown_range(begin_ts: int, end_ts: int) -> dict | None:
+    return _session.get_energy_breakdown_range(begin_ts, end_ts)
 
 
 def detect_vehicle(user: str, pwd: str, pin: str) -> dict:

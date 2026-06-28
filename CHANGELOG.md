@@ -3,6 +3,20 @@
 All notable changes to LeapMotor Mate are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.34.0] — 2026-06-29
+
+### Added
+- **Official trip consumption from the Leapmotor cloud.** Each trip's **energy, efficiency and cost** now use Leapmotor's **official figure** — the real **driving / A·C / other** split from the cloud (`getEC`) — when it's available, instead of only the battery‑% (SoC) estimate. The trip detail shows the **breakdown**, and the official numbers flow through into the **Report** and **Statistics** aggregates. While the cloud is still aggregating a fresh trip the figure is the SoC estimate marked **⏳ provisional**, then it **swaps to the official number on its own** once it stabilises (the SoC value is kept as a fully reversible backup). The feature is **always on** and degrades gracefully: if the cloud hasn't recorded a trip — which happens occasionally on any connected car — that trip simply stays on the SoC estimate, never an error.
+- **"Convert with official data" button** on any trip that isn't official yet — it works for older trips too (the cloud retains the data well beyond a week). If two trips were really one drive split by a very short stop, it tells you to **merge** them; merging then converts the **combined** drive automatically over its full distance (Unmerge reverts cleanly).
+- **"Vehicle Cumulative Total" card** (Statistics) — since‑delivery **total energy, total mileage and lifetime kWh/100 km** read from the car's own lifetime counter, plus a **driving / A·C / other / standby** split. The total is counter‑based (not a sum of per‑trip figures), so it is **not affected** by the occasional missing‑trip gaps.
+- **Official driving‑consumption views** — Today / This week / This month cards (Report) and a custom date‑range query (Statistics), with the driving / A·C / other split from the cloud.
+
+### Changed
+- **Trips list — "Collapse days"** now collapses only the day groups (the month/year structure stays), and collapsing a month re‑collapses its days so re‑opening it is tidy. **Merge mode** no longer expands the whole archive — it opens only the days that actually have a joinable pair. The merge **default gap is now 5 minutes** (a longer stop is a real, separate trip); the slider still opens up to 90 minutes for manual merges.
+
+### Notes
+- **Upgrade‑safe**: the new per‑trip columns are added by an automatic, additive migration (verified on a real pre‑feature database — no rows lost, existing trips unchanged). Historical trips keep their SoC values; only trips from the update forward are enriched automatically (older ones can be converted by hand).
+
 ## [1.33.2] — 2026-06-27
 
 ### Fixed

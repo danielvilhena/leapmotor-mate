@@ -45,6 +45,40 @@
   {% endif %}
 </div>
 
+{% if ec_periods %}
+<!-- Consumo di guida (dato ufficiale Leapmotor via getEC) — periodo in corso: giorno/settimana/mese.
+     Split Guida/AC/Altro; è il consumo DI GUIDA (come l'app ufficiale), il fermo/standby non è incluso. -->
+<div class="card mb-6">
+  <div class="flex items-center justify-between mb-3 gap-2 flex-wrap">
+    <h2 class="font-semibold text-white">{{ t('ec_section_title') }}</h2>
+    <div class="inline-flex rounded-lg border border-slate-700 overflow-hidden text-sm">
+      <button type="button" class="ec-tab px-3 py-1.5 bg-slate-700 text-white"
+              hx-get="api/energy-period?period=day" hx-target="#ec-period-body" hx-swap="innerHTML">{{ t('ec_today') }}</button>
+      <button type="button" class="ec-tab px-3 py-1.5 text-slate-300 hover:bg-slate-700/50 border-l border-slate-700"
+              hx-get="api/energy-period?period=week" hx-target="#ec-period-body" hx-swap="innerHTML">{{ t('ec_this_week') }}</button>
+      <button type="button" class="ec-tab px-3 py-1.5 text-slate-300 hover:bg-slate-700/50 border-l border-slate-700"
+              hx-get="api/energy-period?period=month" hx-target="#ec-period-body" hx-swap="innerHTML">{{ t('ec_this_month') }}</button>
+    </div>
+  </div>
+  <div id="ec-period-body" hx-get="api/energy-period?period=day" hx-trigger="load" hx-swap="innerHTML">
+    <div class="text-center py-4 text-slate-500 text-sm">{{ t('loading') }}…</div>
+  </div>
+  <p class="text-[11px] text-slate-500 mt-3 leading-snug">{{ t('ec_note') }}</p>
+</div>
+<script>
+(function () {
+  document.querySelectorAll('.ec-tab').forEach(function (b) {
+    b.addEventListener('click', function () {
+      document.querySelectorAll('.ec-tab').forEach(function (x) {
+        x.classList.remove('bg-slate-700', 'text-white'); x.classList.add('text-slate-300');
+      });
+      b.classList.add('bg-slate-700', 'text-white'); b.classList.remove('text-slate-300');
+    });
+  });
+})();
+</script>
+{% endif %}
+
 {% if not r.has_data %}
   <div class="card text-center py-12 text-slate-500">
     <div class="text-5xl mb-3">📆</div>

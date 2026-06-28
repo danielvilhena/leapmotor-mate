@@ -224,6 +224,14 @@ Verbrauch (kWh/100 km), zurückgewonnene Energie** beim Bremsen und die geschät
 - Sie können zwei versehentlich getrennte Fahrten **zusammenführen** (Zusammenführen 🔗) oder sie wieder
   **trennen** und eine Fahrt **löschen**.
 - Kurze Pausen (Ampeln, Staus) **trennen** eine Fahrt **nicht**: Eine Fahrt bleibt eine einzige Zeile.
+- **Offizieller Verbrauch aus der Cloud 🆕** — sofern vorhanden, stammen **Verbrauch, Effizienz und
+  Kosten** einer Fahrt aus der **offiziellen Leapmotor-Angabe** (der echten Aufteilung **Fahren / Klima /
+  Sonstiges**) statt nur aus der Batterie-%-Schätzung. Direkt nach einer Fahrt sehen Sie die Schätzung mit
+  dem Hinweis **⏳ vorläufig**; sobald die Cloud die Daten verarbeitet hat (meist einige Dutzend Minuten),
+  wird sie **von selbst** durch den offiziellen Wert ersetzt und die **Aufschlüsselung** erscheint im
+  Detail. Ältere Fahrten haben eine Schaltfläche **„Mit offiziellen Daten umwandeln“**. Wenn die Cloud die
+  Daten einer Fahrt nicht hat (kommt vor, bei jedem vernetzten Auto), bleibt die **Schätzung** — kein
+  Fehler. **Immer aktiv**, keine Einrichtung.
 
 ### Karte
 **(Menü: Karte)** — Die Position des Autos auf der Karte. Sie zeigt die letzte bekannte Position; wenn das letzte

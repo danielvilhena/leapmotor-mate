@@ -235,6 +235,14 @@ capteur de courant de la voiture — une petite charge de ~10 W reste invisible)
   **supprimer** un trajet.
 - Les arrêts brefs (feux, embouteillages) **ne** coupent **pas** un trajet : une conduite reste une seule
   ligne.
+- **Consommation officielle depuis le cloud 🆕** — lorsqu'elles sont disponibles, la **consommation,
+  l'efficacité et le coût** d'un trajet proviennent de la **donnée officielle** Leapmotor (la vraie
+  répartition **conduite / clim. / autre**) au lieu de la seule estimation par le % de batterie. Juste
+  après un trajet, vous voyez l'estimation marquée **⏳ provisoire** ; dès que le cloud a traité la donnée
+  (en général quelques dizaines de minutes), elle est **remplacée automatiquement** par l'officielle et la
+  **répartition** apparaît dans le détail. Les trajets plus anciens ont un bouton **« Convertir avec les
+  données officielles »**. Si le cloud n'a pas la donnée d'un trajet (cela arrive, sur toute voiture
+  connectée), l'**estimation** reste — ce n'est pas une erreur. **Toujours actif**, sans configuration.
 
 ### Carte
 **(menu : Carte)** — La position de la voiture sur la carte. Elle affiche la dernière position connue ; si la

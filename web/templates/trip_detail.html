@@ -60,6 +60,29 @@
           {% else %}<div class="stat-value text-slate-500">—</div>{% endif %}
         </div>
       </div>
+      {% if trip.ec_pending %}
+      <!-- Provisional SoC estimate shown while the official cloud (getEC) value is still being
+           aggregated; it auto-replaces this number + reveals the breakdown card once stable. -->
+      <div class="mt-3 flex items-start gap-2 rounded-lg bg-amber-500/10 border border-amber-500/30 px-3 py-2">
+        <span class="text-amber-400 text-sm leading-none mt-0.5">⏳</span>
+        <span class="text-xs text-amber-300/90 leading-snug">{{ t('ec_provisional') }}</span>
+      </div>
+      {% endif %}
+      {% if not trip.ec_stable and trip.distance_km %}
+      <!-- Manual on-demand getEC conversion — works on old trips too, within the cloud's ~3-4 week
+           retention. Replaces the SoC estimate with the official figure (SoC kept as backup). -->
+      <div class="mt-3">
+        <button type="button"
+                class="inline-flex items-center gap-1.5 rounded-lg border border-sky-500/40 text-sky-300 px-3 py-1.5 text-xs font-medium hover:border-sky-400 hover:text-sky-200"
+                hx-post="api/trips/{{ trip.id }}/convert-ec"
+                hx-target="#ec-convert-msg" hx-swap="innerHTML"
+                hx-indicator="#ec-convert-spin">
+          ☁️ {{ t('ec_convert_btn') }}
+        </button>
+        <span id="ec-convert-spin" class="htmx-indicator text-xs text-slate-400 ml-2">…</span>
+        <span id="ec-convert-msg" class="ml-2"></span>
+      </div>
+      {% endif %}
     </div>
     <div class="card space-y-3 text-sm">
       <div class="flex justify-between">
@@ -91,6 +114,42 @@
         <span class="text-white font-medium">{{ trip.positions|length }}</span>
       </div>
     </div>
+
+    {% if trip.ec_stable and trip.ec_kwh and trip.ec_kwh > 0 %}
+    <!-- Consumo ufficiale (cloud getEC) di QUESTO viaggio: totale + Guida/AC/Altro in kWh.
+         Mostrato solo a EC STABILE (ec_stable) → mai un valore parziale/transitorio. -->
+    {% set _t = trip.ec_kwh %}
+    {% set _d = trip.ec_driving or 0 %}
+    {% set _a = trip.ec_ac or 0 %}
+    {% set _o = trip.ec_other or 0 %}
+    <div class="card">
+      <h2 class="font-semibold text-white text-sm mb-2">{{ t('ec_breakdown_title') }}</h2>
+      <div class="flex items-baseline justify-between mb-3">
+        <span class="text-xs text-slate-400 uppercase tracking-wide">{{ t('ec_total') }}</span>
+        <span class="text-2xl font-bold text-white">{{ "%.1f"|format(_t) }}<span class="text-sm font-normal text-slate-400"> kWh</span></span>
+      </div>
+      <div class="flex w-full h-3 rounded-full overflow-hidden bg-slate-700 mb-3">
+        <div class="bg-brand"     style="width:{{ (_d / _t * 100) | round(1) }}%"></div>
+        <div class="bg-sky-400"   style="width:{{ (_a / _t * 100) | round(1) }}%"></div>
+        <div class="bg-amber-400" style="width:{{ (_o / _t * 100) | round(1) }}%"></div>
+      </div>
+      <div class="space-y-2 text-sm">
+        <div class="flex items-center justify-between">
+          <span class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-full bg-brand shrink-0"></span><span class="text-slate-300">{{ t('eb_driving') }}</span></span>
+          <span class="text-white font-medium">{{ "%.1f"|format(_d) }} kWh <span class="text-slate-500 font-normal">· {{ (_d / _t * 100) | round | int }}%</span></span>
+        </div>
+        <div class="flex items-center justify-between">
+          <span class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-full bg-sky-400 shrink-0"></span><span class="text-slate-300">{{ t('eb_ac') }}</span></span>
+          <span class="text-white font-medium">{{ "%.1f"|format(_a) }} kWh <span class="text-slate-500 font-normal">· {{ (_a / _t * 100) | round | int }}%</span></span>
+        </div>
+        <div class="flex items-center justify-between">
+          <span class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-full bg-amber-400 shrink-0"></span><span class="text-slate-300">{{ t('eb_other') }}</span></span>
+          <span class="text-white font-medium">{{ "%.1f"|format(_o) }} kWh <span class="text-slate-500 font-normal">· {{ (_o / _t * 100) | round | int }}%</span></span>
+        </div>
+      </div>
+      <p class="text-[10px] text-slate-600 mt-3 leading-snug">{{ t('ec_trip_note') }}</p>
+    </div>
+    {% endif %}
   </div>
 
   <!-- Map -->

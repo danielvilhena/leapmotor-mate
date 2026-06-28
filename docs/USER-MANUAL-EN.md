@@ -223,6 +223,13 @@ duration, consumption (kWh/100 km), energy recovered** in braking and the estima
 - You can **merge** two trips that were split by mistake (Merge 🔗) or **split** them again, and
   **delete** a trip.
 - Short stops (traffic lights, queues) do **not** split a trip: one drive stays a single row.
+- **Official consumption from the cloud 🆕** — when available, a trip's **consumption, efficiency and
+  cost** come from Leapmotor's **official figure** (the real **driving / A·C / other** split) instead of
+  the battery‑% estimate alone. Right after a drive you see the estimate marked **⏳ provisional**; once
+  the cloud has processed the data (usually some tens of minutes) it is **replaced on its own** with the
+  official one and the **breakdown** appears in the detail. Older trips have a **"Convert with official
+  data"** button. If the cloud doesn't have a trip's data (it happens, on any connected car), the
+  **estimate** stays — not an error. **Always on**, no setup.
 
 ### Map
 **(menu: Map)** — The car's position on a map. It shows the last known position; if the latest data

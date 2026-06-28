@@ -83,6 +83,13 @@
 </div>
 {% endif %}
 
+{% if ec_periods and summary and summary.count %}
+<!-- Consumo totale di guida (cloud getEC, da sempre): Totale + Guida/AC/Altro che riconciliano fra loro -->
+<div class="card mb-8" hx-get="api/energy-period?period=alltime" hx-trigger="load" hx-swap="innerHTML">
+  <div class="text-slate-500 text-sm text-center py-4">···</div>
+</div>
+{% endif %}
+
 <!-- ── Trips (year / month / day tree) ──────────────────────────── -->
 {% if grouped %}
 <section>
@@ -194,6 +201,9 @@
                     {{ trip.efficiency_kwh_100km | eff }}
                   </span>
                   {% endif %}
+                  {% if trip.ec_pending %}
+                  <span class="block mt-0.5 text-amber-400 text-[11px] font-medium" title="{{ t('ec_provisional') }}">⏳ {{ t('ec_provisional_short') }}</span>
+                  {% endif %}
                 </div>
 
               </a>
@@ -257,21 +267,26 @@ document.querySelectorAll('#trips-tree details').forEach(el => {
   }
 });
 
-// Save state on every toggle
+// Save state on every toggle. When a MONTH or YEAR is collapsed, also close the days inside it, so
+// re-opening it later shows them tidy (closed) instead of however they were last left open.
 document.querySelectorAll('#trips-tree details').forEach(el => {
   el.addEventListener('toggle', () => {
     const st = JSON.parse(localStorage.getItem(LS_KEY) || '{}');
     st[el.id] = el.open;
+    if (!el.open && (el.id.startsWith('y-') || el.id.startsWith('m-'))) {
+      el.querySelectorAll('details[id^="d-"]').forEach(d => { d.open = false; st[d.id] = false; });
+    }
     localStorage.setItem(LS_KEY, JSON.stringify(st));
   });
 });
 
-// Collapse all
+// "Collapse all" closes only the DAY groups (months/years stay open) → one tap to tidy the list back
+// to a clean day-by-day overview, without losing the month structure or re-opening every trip.
 document.getElementById('collapse-all-trips')?.addEventListener('click', () => {
   const st = JSON.parse(localStorage.getItem(LS_KEY) || '{}');
-  document.querySelectorAll('#trips-tree details').forEach(el => {
-    el.open = false;
-    st[el.id] = false;
+  document.querySelectorAll('#trips-tree details[id^="d-"]').forEach(d => {
+    d.open = false;
+    st[d.id] = false;
   });
   localStorage.setItem(LS_KEY, JSON.stringify(st));
 });
@@ -303,21 +318,35 @@ if (HIGHLIGHT) {
 </div>
 
 <script>
-// Merge mode: the 🔗 toggle reveals the in-tree connectors between joinable adjacent trips; the
-// gap slider filters them live (a connector shows only while its stop ≤ the slider). No round-trips.
+// Merge mode: the 🔗 toggle reveals the in-tree connectors between joinable adjacent trips and opens
+// ONLY the days that actually contain something actionable (a connector visible at the current gap, or
+// an already-merged trip to split) — NOT the whole archive. The gap slider filters live; leaving merge
+// mode restores the exact view you had before.
 (function () {
   const btn = document.getElementById('merge-toggle');
   const bar = document.getElementById('merge-bar');
   const slider = document.getElementById('merge-gap');
   const out = document.getElementById('merge-gap-out');
-  let on = false;
+  let on = false, savedOpen = null;
+  function openAncestors(node) {            // open the day (+ its month/year) holding this element
+    let el = node.parentElement;
+    while (el && el.id !== 'trips-tree') {
+      if (el.tagName === 'DETAILS') el.open = true;
+      el = el.parentElement;
+    }
+  }
   function apply() {
-    const g = slider ? +slider.value : 30;
+    const g = slider ? +slider.value : {{ merge_gap_default }};
     if (out) out.textContent = g;
     document.querySelectorAll('.merge-connector').forEach(c => {
-      c.style.display = (on && (+c.dataset.gap) <= g) ? 'flex' : 'none';
+      const show = on && (+c.dataset.gap) <= g;
+      c.style.display = show ? 'flex' : 'none';
+      if (show) openAncestors(c);
     });
-    document.querySelectorAll('.merge-sep').forEach(s => { s.style.display = on ? 'block' : 'none'; });
+    document.querySelectorAll('.merge-sep').forEach(s => {
+      s.style.display = on ? 'block' : 'none';
+      if (on) openAncestors(s);
+    });
   }
   btn && btn.addEventListener('click', () => {
     on = !on;
@@ -325,8 +354,12 @@ if (HIGHLIGHT) {
     btn.classList.toggle('text-yellow-400', on);
     btn.classList.toggle('bg-yellow-400/10', on);
     if (bar) bar.style.display = on ? 'flex' : 'none';
-    if (on) {  // open every day so the connectors are visible
-      document.querySelectorAll('#trips-tree details').forEach(d => d.open = true);
+    if (on) {                               // remember the current view to restore on exit
+      savedOpen = {};
+      document.querySelectorAll('#trips-tree details').forEach(d => { savedOpen[d.id] = d.open; });
+    } else if (savedOpen) {                  // exit → put every group back exactly as it was
+      document.querySelectorAll('#trips-tree details').forEach(d => { d.open = !!savedOpen[d.id]; });
+      savedOpen = null;
     }
     apply();
   });
