@@ -263,12 +263,35 @@
       var socHi = Math.min(100, Math.ceil(sMax + 1));
       if (socHi - socLo < 4) { socLo = Math.max(0, socHi - 4); }   // keep a sane minimum span
 
+      // Cursor marker: shown on the map while hovering the chart.
+      var cursorMarker = null;
+      function showCursor(i) {
+        if (i < 0 || !pts[i] || pts[i].latitude == null) { hideCursor(); return; }
+        var ll = [pts[i].latitude, pts[i].longitude];
+        if (!cursorMarker) {
+          cursorMarker = L.circleMarker(ll, {
+            radius: 7, color: '#fff', weight: 2,
+            fillColor: '#38bdf8', fillOpacity: 1, interactive: false
+          }).addTo(map);
+        } else {
+          cursorMarker.setLatLng(ll);
+          if (!map.hasLayer(cursorMarker)) cursorMarker.addTo(map);
+        }
+      }
+      function hideCursor() {
+        if (cursorMarker && map.hasLayer(cursorMarker)) map.removeLayer(cursorMarker);
+      }
+
       // Mirrors the proven charge-power chart config: plain-array data + categories +
       // seriesName-bound y-axes (multi-axis needs the binding or nothing draws).
       el._c = new ApexCharts(el, {
         chart: { type: 'line', height: 200, toolbar: { show: false }, zoom: { enabled: false },
                  fontFamily: 'inherit', background: 'transparent', parentHeightOffset: 0,
-                 animations: { enabled: false } },
+                 animations: { enabled: false },
+                 events: {
+                   mouseMove: function (event, ctx, config) { showCursor(config.dataPointIndex); },
+                   mouseLeave: function () { hideCursor(); }
+                 } },
         series: [{ name: nmSoc, type: 'area', data: socArr },
                  { name: nmSpd, type: 'line', data: spdArr }],
         colors: ['#22c55e', '#38bdf8'],
