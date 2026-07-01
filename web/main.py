@@ -25,7 +25,7 @@ import mqtt_check
 import auth
 import update_check
 
-MATE_VERSION = "1.36.1"  # bump together with the git tag + add-on config.yaml at release
+MATE_VERSION = "1.36.2"  # bump together with the git tag + add-on config.yaml at release
 
 import diagnostics
 import demo
@@ -507,11 +507,14 @@ async def statistics(request: Request):
 
 @app.get("/report", response_class=HTMLResponse)
 async def report(request: Request, month: str | None = None):
+    from datetime import datetime, timezone
     vehicle, _ = db_reader.get_vehicle()
     data = db_reader.get_monthly_report(month)
     track = db_reader.get_month_track(data["month"]) if data.get("has_data") else []
+    now_month = datetime.now(timezone.utc).astimezone(db_reader._LOCAL_TZ).strftime("%Y-%m")
     return templates.TemplateResponse(request, "report.html", _ctx(
         page="report", vehicle=vehicle, r=data, track=track,
+        is_current_month=(data.get("month") == now_month),
     ))
 
 
@@ -2513,20 +2516,41 @@ async def cumulative_summary(request: Request, refresh: int = 0):
 _period_cache: dict = {}
 
 
+def _enrich_eb_with_trip_totals(eb: "dict | None", begin_ts: int, end_ts: int) -> "dict | None":
+    """Add local distance/duration/average-kWh-per-100km to a getEC breakdown, computed from
+    trips in the SAME window — mirrors the car's own "since last charge" screen (Distanza/Durata/
+    Media shown next to the same Guida/AC/Altro split). No-op when there's no energy to average."""
+    if not eb or not eb.get("total_kwh"):
+        return eb
+    tot = db_reader.get_trip_totals_between(begin_ts, end_ts)
+    dist_km = tot.get("distance_km") or 0
+    eb = {**eb, "distance_km": dist_km, "duration_min": tot.get("duration_min") or 0}
+    if dist_km > 0:
+        eb["avg_kwh100"] = round(eb["total_kwh"] / dist_km * 100, 1)
+    return eb
+
+
 @app.get("/api/energy-period", response_class=HTMLResponse)
-async def energy_period(request: Request, period: str = "", start: str = "", end: str = "", refresh: int = 0):
+async def energy_period(request: Request, period: str = "", start: str = "", end: str = "",
+                         month: str = "", refresh: int = 0):
     """Energy split (driving / A/C / other) for a CURRENT period (day|week|month) OR a custom
     date range [start,end] (YYYY-MM-DD; day-granular — the cloud has no finer reliable bound).
     Reuses the shared energy_breakdown partial, with the label adapted to the period. The split
     is the DRIVING-session figure (same as the official app); parked/standby energy isn't in it.
-    Cached 30 min per resolved window."""
+    `month` ('YYYY-MM') optionally overrides `period=month` to a SPECIFIC month (e.g. the one the
+    Report page has navigated to) instead of the real current one — same day-by-day-growing /
+    full-month bounds as the Report page's own driving tiles. Cached 30 min per resolved window."""
     import time, asyncio
     from datetime import datetime, timedelta, timezone
     t = i18n.get_t(db_reader.get_language())
     tz = db_reader._LOCAL_TZ
     now = datetime.now(timezone.utc).astimezone(tz)
     try:
-        if start and end:
+        if period == "month" and month:
+            b_ts, e_ts = _report_month_bounds(month, now)
+            b, e = datetime.fromtimestamp(b_ts, tz=tz), datetime.fromtimestamp(e_ts, tz=tz)
+            label, key = i18n.fmt_month_year(db_reader.get_language(), b), f"p:month:{month}:{e_ts}"
+        elif start and end:
             b = datetime.strptime(start, "%Y-%m-%d").replace(
                 hour=0, minute=0, second=0, microsecond=0, tzinfo=now.tzinfo)
             e = datetime.strptime(end, "%Y-%m-%d").replace(
@@ -2570,6 +2594,7 @@ async def energy_period(request: Request, period: str = "", start: str = "", end
         eb = data if data is not None else (c["data"] if c else None)
     else:
         eb = c["data"]
+    eb = _enrich_eb_with_trip_totals(eb, begin_ts, end_ts)
     return templates.TemplateResponse(request, "partials/energy_breakdown.html",
                                       _ctx(eb=eb, eb_label=label))
 
@@ -2601,8 +2626,54 @@ async def energy_since_charge(request: Request, refresh: int = 0):
         eb = data if data is not None else (c["data"] if c else None)
     else:
         eb = c["data"]
+    eb = _enrich_eb_with_trip_totals(eb, begin_ts, end_ts)
     return templates.TemplateResponse(request, "partials/energy_breakdown.html",
                                       _ctx(eb=eb, eb_label=label))
+
+
+def _report_month_bounds(month: str, now: "datetime") -> "tuple[int, int]":
+    """[begin_ts, end_ts] (epoch seconds) for a 'YYYY-MM' report month: begin = the 1st at
+    00:00 local; end = "now" while the month is still in progress (so the getEC total grows
+    day by day), or the month's last moment once it's closed. `now` must be tz-aware in the
+    same local tz as `month` is interpreted in."""
+    import calendar
+    from datetime import datetime
+    y, mo = int(month[:4]), int(month[5:7])
+    b = datetime(y, mo, 1, tzinfo=now.tzinfo)
+    last_day = calendar.monthrange(y, mo)[1]
+    month_end = datetime(y, mo, last_day, 23, 59, 59, tzinfo=now.tzinfo)
+    e = min(now, month_end)
+    return int(b.timestamp()), int(e.timestamp())
+
+
+@app.get("/api/report-driving", response_class=HTMLResponse)
+async def report_driving(request: Request, month: str, refresh: int = 0):
+    """Consumo medio + Energia consumata for the Monthly Report's driving tiles, sourced from the
+    SAME live getEC query as the Statistics/Report period cards — so "today" (both here and in the
+    getEC card above) always shows the SAME figure, instead of this section's old per-trip local sum
+    (which silently differs whenever a trip fell back to the SoC estimate). `month` = 'YYYY-MM', the
+    one the Report page is already showing (always passed explicitly — never guessed here). Cached
+    30 min per month, same as the other period cards."""
+    import time, asyncio
+    from datetime import datetime, timezone
+    tz = db_reader._LOCAL_TZ
+    try:
+        now = datetime.now(timezone.utc).astimezone(tz)
+        begin_ts, end_ts = _report_month_bounds(month, now)
+    except (ValueError, TypeError):
+        return templates.TemplateResponse(request, "partials/report_driving_energy.html", _ctx(eb=None))
+    key = f"p:reportmonth:{month}:{end_ts}"
+    c = _period_cache.get(key)
+    if refresh or not c or time.time() - c["ts"] >= 1800:
+        data = await asyncio.get_event_loop().run_in_executor(
+            None, command_client.get_energy_breakdown_range, begin_ts, end_ts)
+        if data is not None:
+            _period_cache[key] = {"data": data, "ts": time.time()}
+        eb = data if data is not None else (c["data"] if c else None)
+    else:
+        eb = c["data"]
+    eb = _enrich_eb_with_trip_totals(eb, begin_ts, end_ts)
+    return templates.TemplateResponse(request, "partials/report_driving_energy.html", _ctx(eb=eb))
 
 
 def _car_picture_cache_path() -> str:

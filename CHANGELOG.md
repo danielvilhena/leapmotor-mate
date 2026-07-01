@@ -3,6 +3,14 @@
 All notable changes to LeapMotor Mate are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.36.2] — 2026-07-01
+
+### Added
+- **Distance, duration and average consumption alongside every official driving-energy card** (Statistics' day/week/month/all-time/since-last-charge, and the Monthly Report) — the same figures the car's own "since last charge" screen shows next to its Driving/A/C/Other split.
+
+### Fixed
+- **The Monthly Report's "Average consumption" and "Energy used" tiles now match the official cloud figure shown just above them.** They previously came from summing each trip's own stored value (which falls back to the SoC estimate for the rare trip without cloud data yet), so on a short or recent period they could show a visibly different number than the live official figure right next to them. Both now read from the same official source. Navigating to a past month with ◀/▶ shows that month's own official total (the day/week "quick" tabs only make sense for the current month, so they're hidden on a past one).
+
 ## [1.36.1] — 2026-07-01
 
 ### Added

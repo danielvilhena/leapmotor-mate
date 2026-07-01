@@ -46,21 +46,27 @@
 </div>
 
 {% if ec_periods %}
-<!-- Consumo di guida (dato ufficiale Leapmotor via getEC) — periodo in corso: giorno/settimana/mese.
-     Split Guida/AC/Altro; è il consumo DI GUIDA (come l'app ufficiale), il fermo/standby non è incluso. -->
+<!-- Consumo di guida (dato ufficiale Leapmotor via getEC). Sul mese CORRENTE: giorno/settimana/mese
+     a scelta (come prima). Su un mese PASSATO navigato con ◀▶: niente tab (oggi/settimana non hanno
+     senso fuori dal mese corrente) — mostra direttamente quel mese, stessa finestra dei tile GUIDA
+     sotto, cosicché i due numeri non possano mai disallinearsi (GitHub: notato da Silvio 01/07). -->
 <div class="card mb-6">
   <div class="flex items-center justify-between mb-3 gap-2 flex-wrap">
     <h2 class="font-semibold text-white">{{ t('ec_section_title') }}</h2>
+    {% if is_current_month %}
     <div class="inline-flex rounded-lg border border-slate-700 overflow-hidden text-sm">
       <button type="button" class="ec-tab px-3 py-1.5 bg-slate-700 text-white"
               hx-get="api/energy-period?period=day" hx-target="#ec-period-body" hx-swap="innerHTML">{{ t('ec_today') }}</button>
       <button type="button" class="ec-tab px-3 py-1.5 text-slate-300 hover:bg-slate-700/50 border-l border-slate-700"
               hx-get="api/energy-period?period=week" hx-target="#ec-period-body" hx-swap="innerHTML">{{ t('ec_this_week') }}</button>
       <button type="button" class="ec-tab px-3 py-1.5 text-slate-300 hover:bg-slate-700/50 border-l border-slate-700"
-              hx-get="api/energy-period?period=month" hx-target="#ec-period-body" hx-swap="innerHTML">{{ t('ec_this_month') }}</button>
+              hx-get="api/energy-period?period=month&month={{ r.month }}" hx-target="#ec-period-body" hx-swap="innerHTML">{{ t('ec_this_month') }}</button>
     </div>
+    {% endif %}
   </div>
-  <div id="ec-period-body" hx-get="api/energy-period?period=day" hx-trigger="load" hx-swap="innerHTML">
+  <div id="ec-period-body"
+       hx-get="api/energy-period?period={{ 'day' if is_current_month else 'month' }}{% if not is_current_month %}&month={{ r.month }}{% endif %}"
+       hx-trigger="load" hx-swap="innerHTML">
     <div class="text-center py-4 text-slate-500 text-sm">{{ t('loading') }}…</div>
   </div>
   <p class="text-[11px] text-slate-500 mt-3 leading-snug">{{ t('ec_note') }}</p>
@@ -103,24 +109,15 @@
     <div class="stat-label">{{ t('total_trips') }}</div>
     <div class="stat-value">{{ c.trip_count }}</div>
   </div>
-  <div class="card">
-    <div class="stat-label">{{ t('avg_efficiency') }}</div>
-    <div class="flex items-baseline gap-2">
-      {% if c.avg_efficiency %}
-      <span class="stat-value {% if c.avg_efficiency < 18 %}text-green-400{% elif c.avg_efficiency < 22 %}text-yellow-400{% else %}text-red-400{% endif %}">
-        {{ eff_val(c.avg_efficiency)|nice }}<span class="text-base font-normal text-slate-400"> {{ eff_unit() }}</span>
-      </span>
-      {% if r.deltas %}{{ delta_badge(r.deltas.efficiency, 'down') }}{% endif %}
-      {% else %}
-      <span class="stat-value text-slate-500">—</span>
-      {% endif %}
+  <div id="report-driving-energy" class="contents"
+       hx-get="api/report-driving?month={{ r.month }}" hx-trigger="load" hx-swap="innerHTML">
+    <div class="card">
+      <div class="stat-label">{{ t('avg_efficiency') }}</div>
+      <div class="stat-value text-slate-500">···</div>
     </div>
-  </div>
-  <div class="card">
-    <div class="stat-label">{{ t('energy_used') }}</div>
-    <div class="flex items-baseline gap-2">
-      <span class="stat-value">{{ c.total_kwh_used }}</span><span class="text-slate-400 text-sm">kWh</span>
-      {% if r.deltas %}{{ delta_badge(r.deltas.kwh_used, 'down') }}{% endif %}
+    <div class="card">
+      <div class="stat-label">{{ t('energy_used') }}</div>
+      <div class="stat-value text-slate-500">···</div>
     </div>
   </div>
 </div>

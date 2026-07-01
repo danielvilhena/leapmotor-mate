@@ -1731,6 +1731,24 @@ def get_last_charge_end() -> Optional[datetime]:
     return _local_dt(row["ended_at"]) if row else None
 
 
+def get_trip_totals_between(begin_ts: int, end_ts: int) -> dict:
+    """Distance/duration/count of LOCAL trips started within [begin_ts, end_ts] (epoch seconds) —
+    paired by the caller with a live getEC total for the SAME window, to show distance + average
+    kWh/100km alongside the official split (mirrors the car's own "since last charge" screen, which
+    shows Distanza/Durata/Media next to the same Guida/AC/Altro breakdown)."""
+    b = datetime.fromtimestamp(begin_ts, tz=timezone.utc).isoformat()
+    e = datetime.fromtimestamp(end_ts, tz=timezone.utc).isoformat()
+    db = _get()
+    row = db.execute(
+        """SELECT COUNT(*) AS trip_count,
+                  ROUND(SUM(distance_km), 2) AS distance_km,
+                  ROUND(SUM(duration_min), 0) AS duration_min
+           FROM trips WHERE ended_at IS NOT NULL AND started_at >= ? AND started_at <= ?""",
+        (b, e),
+    ).fetchone()
+    return dict(row) if row else {}
+
+
 def get_charge_power_curve(charge_id: int) -> dict:
     """Per-sample charging power for one session, for the expandable power chart.
     Power = |pack_voltage(1177) x pack_current(1178)| / 1000 — the same value as the
