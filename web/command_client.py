@@ -986,15 +986,16 @@ def ac_on():
     body = json.dumps({"circle": "in", "mode": "nohotcold", "operate": "auto", "position": "all",
                        "temperature": str(temp), "windlevel": "5", "wshld": "0"}, separators=(",", ":"))
     return _session.execute(lambda api, vin: api._remote_control(vin=vin, action="ac_on", cmd_content=body))
-# A/C full-OFF is MODEL-SPECIFIC:
+# A/C full-OFF is MODEL-SPECIFIC — the B10 and T03 want OPPOSITE payloads:
 #  • B10/C10: ac_switch with operate=off — drives acSwitch signal 1938→0, confirmed on-car
-#    2026-06-06. Left exactly as-is (it works; don't touch what works).
-#  • T03: the dedicated ac_off action. The T03 ACCEPTS ac_switch operate=off from the cloud but the
-#    car ignores it (issue #67, Gr1m214: A/C turns on but won't turn off) — so we replicate what
-#    markoceri's own T03 app (leapconnect) does to switch it off: api.ac_off(). Since leapmotor-api
-#    0.3.1, ac_off() sends the dedicated "ac_off" action (it used to send operate=close — the old
-#    B10→AUTO bug we reported in markoceri/leapmotor-api#3, fixed upstream since). B05 stays on the
-#    B10/C10 path (no data either way — don't change what we can't verify).
+#    2026-06-06. The B10 IGNORES operate=close (tested live: it applies the setpoint and stays on),
+#    so ac_switch operate=off is its only real full-off. Left exactly as-is.
+#  • T03: api.ac_off(), which sends RemoteActionCtlClimate(operate=close) (leapmotor-api mappings.py,
+#    REMOTE_CTL_AC_OFF). The T03 ACCEPTS but IGNORES ac_switch operate=off (#67, Gr1m214: A/C turns on
+#    but won't turn off) — the opposite of the B10 — and operate=close is what markoceri's own T03 app
+#    (leapconnect) uses to switch it off. NOT verified on-car by us (we have no T03); it mirrors what a
+#    T03 owner's app does. (Our old report markoceri/leapmotor-api#3 was about the B10 ignoring close.)
+#  • B05: stays on the B10/C10 path (no data either way — don't change what we can't verify).
 def ac_off():
     def _do(api, vin):
         if _session_car_type() == "T03":

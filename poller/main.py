@@ -155,10 +155,11 @@ def _handle_mqtt_command(client, service, db, vin: str, cmd: str, value):
             elif cmd == "climate_defrost":
                 api.windshield_defrost(vin); optimistic = ("climate_on", True)
             elif cmd == "climate_off":
-                # A/C full-OFF, MODEL-SPECIFIC (mirrors command_client.ac_off): B10/C10 use ac_switch
-                # operate=off (drives acSwitch 1938→0, confirmed on-car 2026-06-06); the T03 accepts
-                # but ignores that (#67), so it gets the dedicated ac_off action — what markoceri's own
-                # T03 app uses. B05 stays on the B10/C10 path. Guarded so an off-when-already-off no-ops.
+                # A/C full-OFF, MODEL-SPECIFIC (mirrors command_client.ac_off): the B10/T03 want
+                # OPPOSITE payloads. B10/C10 use ac_switch operate=off (1938→0, confirmed on-car; the
+                # B10 ignores operate=close); the T03 is the reverse — it ignores ac_switch operate=off
+                # (#67) and switches off via api.ac_off() = operate=close, as markoceri's own T03 app
+                # does. B05 stays on the B10/C10 path. Guarded so an off-when-already-off no-ops.
                 if getattr(service, "last_climate_on", None) is False:
                     return
                 if (getattr(getattr(client, "_vehicle", None), "car_type", "") or "").upper() == "T03":
