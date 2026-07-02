@@ -986,11 +986,21 @@ def ac_on():
     body = json.dumps({"circle": "in", "mode": "nohotcold", "operate": "auto", "position": "all",
                        "temperature": str(temp), "windlevel": "5", "wshld": "0"}, separators=(",", ":"))
     return _session.execute(lambda api, vin: api._remote_control(vin=vin, action="ac_on", cmd_content=body))
-# B10 A/C full-OFF: the working payload is ac_switch with operate=off (drives acSwitch
-# signal 1938 → 0). Found empirically on-car 2026-06-06 — the lib's ac_off() sends
-# operate=close, which on the B10 only flips the HVAC to AUTO (never off). Reported
-# upstream (markoceri/leapmotor-api#3).
-def ac_off():            return _session.execute(lambda api, vin: api.ac_switch(vin, params={"operate": "off"}))
+# A/C full-OFF is MODEL-SPECIFIC:
+#  • B10/C10: ac_switch with operate=off — drives acSwitch signal 1938→0, confirmed on-car
+#    2026-06-06. Left exactly as-is (it works; don't touch what works).
+#  • T03: the dedicated ac_off action. The T03 ACCEPTS ac_switch operate=off from the cloud but the
+#    car ignores it (issue #67, Gr1m214: A/C turns on but won't turn off) — so we replicate what
+#    markoceri's own T03 app (leapconnect) does to switch it off: api.ac_off(). Since leapmotor-api
+#    0.3.1, ac_off() sends the dedicated "ac_off" action (it used to send operate=close — the old
+#    B10→AUTO bug we reported in markoceri/leapmotor-api#3, fixed upstream since). B05 stays on the
+#    B10/C10 path (no data either way — don't change what we can't verify).
+def ac_off():
+    def _do(api, vin):
+        if _session_car_type() == "T03":
+            return api.ac_off(vin)
+        return api.ac_switch(vin, params={"operate": "off"})
+    return _session.execute(_do)
 def quick_cool():        return _session.execute(lambda api, vin: api.quick_cool(vin))
 def quick_heat():        return _session.execute(lambda api, vin: api.quick_heat(vin))
 def windshield_defrost():

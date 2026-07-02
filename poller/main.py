@@ -155,12 +155,17 @@ def _handle_mqtt_command(client, service, db, vin: str, cmd: str, value):
             elif cmd == "climate_defrost":
                 api.windshield_defrost(vin); optimistic = ("climate_on", True)
             elif cmd == "climate_off":
-                # B10 full A/C off: ac_switch with operate=off (drives acSwitch 1938→0;
-                # confirmed on-car 2026-06-06). Guarded so an "A/C Off" press when the A/C
-                # is already off is a no-op.
+                # A/C full-OFF, MODEL-SPECIFIC (mirrors command_client.ac_off): B10/C10 use ac_switch
+                # operate=off (drives acSwitch 1938→0, confirmed on-car 2026-06-06); the T03 accepts
+                # but ignores that (#67), so it gets the dedicated ac_off action — what markoceri's own
+                # T03 app uses. B05 stays on the B10/C10 path. Guarded so an off-when-already-off no-ops.
                 if getattr(service, "last_climate_on", None) is False:
                     return
-                api.ac_switch(vin, params={"operate": "off"});  optimistic = ("climate_on", False)
+                if (getattr(getattr(client, "_vehicle", None), "car_type", "") or "").upper() == "T03":
+                    api.ac_off(vin)
+                else:
+                    api.ac_switch(vin, params={"operate": "off"})
+                optimistic = ("climate_on", False)
             elif cmd == "climate_vent":
                 api._remote_control(vin=vin, action="ac_on",
                     cmd_content='{"circle":"in","mode":"wind","operate":"manual","position":"all","temperature":"26","windlevel":"7","wshld":"0"}')
