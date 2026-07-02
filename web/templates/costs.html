@@ -23,41 +23,7 @@
     <span>{{ t('costs_future_note') }}</span>
   </div>
 
-  <!-- ── Pricing mode ─────────────────────────────────────────────────── -->
-  <div class="card">
-    <h2 class="font-semibold text-white mb-3">{{ t('cost_mode') }}</h2>
-    <form hx-post="api/costs/mode" hx-trigger="change" hx-target="#mode-feedback" hx-swap="innerHTML">
-      <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <label class="flex items-start gap-3 bg-slate-950 rounded-xl p-3 border border-slate-800 cursor-pointer hover:border-slate-600">
-          <input type="radio" name="cost_mode" value="flat" {% if cost_mode not in ('tou', 'dynamic') %}checked{% endif %}
-                 onchange="setMode('flat')" class="mt-0.5 w-4 h-4 accent-brand flex-shrink-0">
-          <div>
-            <div class="text-sm font-semibold text-white">{{ t('cost_mode_flat') }}</div>
-            <div class="text-xs text-slate-400">{{ t('cost_mode_flat_desc') }}</div>
-          </div>
-        </label>
-        <label class="flex items-start gap-3 bg-slate-950 rounded-xl p-3 border border-slate-800 cursor-pointer hover:border-slate-600">
-          <input type="radio" name="cost_mode" value="tou" {% if cost_mode == 'tou' %}checked{% endif %}
-                 onchange="setMode('tou')" class="mt-0.5 w-4 h-4 accent-brand flex-shrink-0">
-          <div>
-            <div class="text-sm font-semibold text-white">{{ t('cost_mode_tou') }}</div>
-            <div class="text-xs text-slate-400">{{ t('cost_mode_tou_desc') }}</div>
-          </div>
-        </label>
-        <label class="flex items-start gap-3 bg-slate-950 rounded-xl p-3 border border-slate-800 cursor-pointer hover:border-slate-600">
-          <input type="radio" name="cost_mode" value="dynamic" {% if cost_mode == 'dynamic' %}checked{% endif %}
-                 onchange="setMode('dynamic')" class="mt-0.5 w-4 h-4 accent-brand flex-shrink-0">
-          <div>
-            <div class="text-sm font-semibold text-white">{{ t('cost_mode_dynamic') }}</div>
-            <div class="text-xs text-slate-400">{{ t('cost_mode_dynamic_desc') }}</div>
-          </div>
-        </label>
-      </div>
-      <div id="mode-feedback" class="text-xs mt-2"></div>
-    </form>
-  </div>
-
-  <!-- ── Base prices (also the off-band price in TOU mode) ────────────── -->
+  <!-- ── Prices + per-type pricing mode — ONE card (#106 fix) ─────────── -->
   <div class="card">
     <div class="flex items-center justify-between mb-1 flex-wrap gap-2">
       <h2 class="font-semibold text-white">{{ t('cost_base_prices') }}</h2>
@@ -72,42 +38,84 @@
       {% endif %}
     </div>
     <p class="text-xs text-slate-400 mb-4">
-      {{ t('charge_prices_desc') }}
-      <span id="base-note" class="{% if cost_mode != 'tou' %}hidden{% endif %}">{{ t('cost_base_note') }}</span>
-      <span id="base-note-dynamic" class="{% if cost_mode != 'dynamic' %}hidden{% endif %}">{{ t('cost_dynamic_base_note') }}</span>
+      {{ t('charge_prices_desc') }} {{ t('cost_mode_per_type_hint') }}
+      <span id="base-note" class="{% if 'tou' not in cost_modes.values() %}hidden{% endif %}">{{ t('cost_base_note') }}</span>
+      <span id="base-note-dynamic" class="{% if 'dynamic' not in cost_modes.values() %}hidden{% endif %}">{{ t('cost_dynamic_base_note') }}</span>
     </p>
 
     <form hx-post="api/settings/prices" hx-target="#prices-feedback" hx-swap="innerHTML" style="margin:0">
       <div class="space-y-3">
         {% for key, icon, label, setting_key, color in price_rows %}
-        <div class="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 bg-slate-950 rounded-xl p-3 sm:p-4 border border-slate-900">
-          <div class="flex items-center gap-3 flex-1">
-            <span class="text-xl w-8 text-center">{{ icon }}</span>
-            <div>
-              <div class="text-sm font-semibold" style="color:{{ color }}">{{ label }}</div>
-              <div class="text-[11px] text-slate-500">
-                {% if key == 'HOME' %}{{ t('home_desc') }}
-                {% elif key == 'AC' %}{{ t('ac_desc') }}
-                {% elif key == 'FAST' %}{{ t('fast_desc') }}
-                {% else %}{{ t('hpc_desc') }}
-                {% endif %}
+        <div class="bg-slate-950 rounded-xl p-3 sm:p-4 border border-slate-900">
+          <div class="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
+            <div class="flex items-center gap-3 flex-1">
+              <span class="text-xl w-8 text-center">{{ icon }}</span>
+              <div>
+                <div class="text-sm font-semibold" style="color:{{ color }}">{{ label }}</div>
+                <div class="text-[11px] text-slate-500">
+                  {% if key == 'HOME' %}{{ t('home_desc') }}
+                  {% elif key == 'AC' %}{{ t('ac_desc') }}
+                  {% elif key == 'FAST' %}{{ t('fast_desc') }}
+                  {% else %}{{ t('hpc_desc') }}
+                  {% endif %}
+                </div>
               </div>
             </div>
+            {# Per-type pricing mode (#106 fix): posts alone to api/costs/mode (hx on the element,
+               NOT a nested form), including the other selects so the handler always gets all 4.
+               Dynamic (HA sensor) is HOME-ONLY (Silvio 02/07): no HA integration exposes a
+               price for public AC/DC/HPC charging (those are operator-billed, not a home
+               tariff), so offering it on away types just invites a dead/misleading config. #}
+            <select name="cost_mode_{{ key }}" data-ctype="{{ key }}"
+                    hx-post="api/costs/mode" hx-trigger="change" hx-include=".mode-select"
+                    hx-target="#mode-feedback" hx-swap="innerHTML"
+                    onchange="updateModeUI()"
+                    class="mode-select w-full sm:w-48 bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-white text-sm focus:outline-none focus:border-brand cursor-pointer"
+                    title="{{ t('cost_mode') }}">
+              <option value="flat" {% if cost_modes[key] not in ('tou', 'dynamic') %}selected{% endif %}>{{ t('cost_mode_flat') }}</option>
+              <option value="tou" {% if cost_modes[key] == 'tou' %}selected{% endif %}>{{ t('cost_mode_tou') }}</option>
+              {% if key == 'HOME' %}
+              <option value="dynamic" {% if cost_modes[key] == 'dynamic' %}selected{% endif %}>{{ t('cost_mode_dynamic') }}</option>
+              {% endif %}
+            </select>
+            {# Price input HIDDEN (not just dimmed) while this type is Dynamic (Silvio 02/07):
+               a live sensor prices it, this field isn't the reference and mustn't be edited —
+               a visible number spinner invites exactly the kind of accident that raised this
+               (an unrelated mouse-wheel-over-the-input scroll silently changed it to 54).
+               Stays in the DOM (not disabled) so the prices form still posts its stored value
+               unchanged — the number itself IS still used as the offline/in-progress fallback,
+               it's just not something to look at or touch while the sensor is doing the job. #}
+            <div id="price-block-{{ key }}" class="flex items-center gap-2 self-end sm:self-auto {% if cost_modes[key] == 'dynamic' %}hidden{% endif %}">
+              <span class="text-slate-500 text-sm">{{ currency.symbol }}</span>
+              <input type="number" name="{{ setting_key }}" id="price-input-{{ key }}"
+                     value="{{ settings.get(setting_key, '0.00') }}"
+                     step="0.01" min="0" max="9.99"
+                     class="price-input w-20 bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-white text-sm font-semibold text-right focus:outline-none focus:border-brand">
+              <span class="text-slate-500 text-xs">/ kWh</span>
+            </div>
           </div>
-          <div class="flex items-center gap-2 self-end sm:self-auto">
-            <span class="text-slate-500 text-sm">{{ currency.symbol }}</span>
-            <input type="number" name="{{ setting_key }}"
-                   value="{{ settings.get(setting_key, '0.00') }}"
-                   step="0.01" min="0" max="9.99"
-                   class="w-20 bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-white text-sm font-semibold text-right focus:outline-none focus:border-brand">
-            <span class="text-slate-500 text-xs">/ kWh</span>
+          {# Fallback-price note (Step 3, Silvio 02/07): explains why there's no price shown/
+             editable here while dynamic is active, and what governs cost when the sensor misses. #}
+          <div id="fallback-note-{{ key }}" class="text-[11px] text-slate-500 mt-1.5 {% if cost_modes[key] != 'dynamic' %}hidden{% endif %}">
+            {{ t('cost_dynamic_fallback_note') }}
+          </div>
+          {# Per-type dynamic sensor picker, lazy-loaded the first time this type turns dynamic.
+             hx-target="this" is LOAD-BEARING: without it the div INHERITS the enclosing prices
+             form's hx-target="#prices-feedback" and the picker lands at the card bottom (the
+             v2.1.0 page break). Form-less partial for the same reason (no nested <form>). #}
+          <div id="dyn-wrap-{{ key }}" class="{% if cost_modes[key] != 'dynamic' %}hidden{% endif %}"
+               {% if cost_modes[key] == 'dynamic' %}data-loaded="1" hx-get="api/costs/dynamic-entities?ctype={{ key }}" hx-trigger="load" hx-target="this" hx-swap="innerHTML"{% endif %}>
+            <div class="text-center py-3 text-slate-500 text-sm">{{ t('loading') }}…</div>
           </div>
         </div>
         {% endfor %}
       </div>
 
       <div style="display:flex;align-items:center;justify-content:space-between;margin-top:16px">
-        <div id="prices-feedback" style="font-size:13px;color:#64748b"></div>
+        <div class="flex items-center gap-3">
+          <div id="prices-feedback" style="font-size:13px;color:#64748b"></div>
+          <div id="mode-feedback" class="text-xs"></div>
+        </div>
         <button type="submit"
                 style="background:#14b8a6;color:white;border:none;border-radius:8px;
                        padding:8px 20px;font-size:13px;font-weight:600;cursor:pointer">
@@ -117,8 +125,8 @@
     </form>
   </div>
 
-  <!-- ── Time-of-use bands (visible only in TOU mode) ─────────────────── -->
-  <div id="tou-section" class="card {% if cost_mode != 'tou' %}hidden{% endif %}">
+  <!-- ── Time-of-use bands (visible when ANY charge type uses TOU) ────── -->
+  <div id="tou-section" class="card {% if 'tou' not in cost_modes.values() %}hidden{% endif %}">
     <h2 class="font-semibold text-white mb-1">{{ t('tou_bands_title') }}</h2>
     <p class="text-xs text-slate-400 mb-4">{{ t('tou_bands_desc') }}</p>
 
@@ -179,16 +187,6 @@
     </form>
   </div>
 
-  <!-- ── Dynamic price sensor (visible only in dynamic mode) ──────────── -->
-  <div id="dynamic-section" class="card {% if cost_mode != 'dynamic' %}hidden{% endif %}">
-    <h2 class="font-semibold text-white mb-1">{{ t('dyn_price_title') }}</h2>
-    <p class="text-xs text-slate-400 mb-1">{{ t('dyn_price_desc') }}</p>
-    <div id="dyn-picker-wrap"
-         {% if cost_mode == 'dynamic' %}hx-get="api/costs/dynamic-entities" hx-trigger="load" hx-swap="innerHTML"{% endif %}>
-      <div class="text-center py-4 text-slate-500 text-sm">{{ t('loading') }}…</div>
-    </div>
-  </div>
-
 </div>
 
 <script>
@@ -217,20 +215,71 @@
     FAST: "{{ settings.get('price_fast_kwh', '') }}",
     HPC:  "{{ settings.get('price_hpc_kwh', '') }}"
   };
+  const MODE_LABELS = {
+    flat: "{{ t('cost_mode_flat') }}", tou: "{{ t('cost_mode_tou') }}",
+    dynamic: "{{ t('cost_mode_dynamic') }}"
+  };
+  // Live per-type mode, kept in sync by updateModeUI() — the band editor reads this to grey
+  // out columns for types not on Time slots (Silvio 02/07: a band's DC/HPC price was editable
+  // and looked live even while DC/HPC were on Fisso, so it silently never priced anything).
+  let CURRENT_MODES = {{ cost_modes_json|safe }};
 
-  function setMode(mode) {
-    document.getElementById('tou-section').classList.toggle('hidden', mode !== 'tou');
+  function updateModeUI() {
+    // Per-type modes (#106 fix): the TOU editor shows when ANY type uses bands; the base-price
+    // notes reflect whether any type is in TOU / dynamic; each dynamic type reveals its own
+    // sensor picker, lazily fetched the first time (a live HA call — never spent on
+    // flat/TOU-only visitors); each dynamic type's own base-price input is marked as the
+    // fallback it actually is; the band editor's columns follow the live modes.
+    const modes = {};
+    document.querySelectorAll('.mode-select').forEach((s) => { modes[s.dataset.ctype] = s.value; });
+    CURRENT_MODES = modes;
+    const vals = Object.values(modes);
+    const anyTou = vals.includes('tou'), anyDyn = vals.includes('dynamic');
+    document.getElementById('tou-section').classList.toggle('hidden', !anyTou);
     const note = document.getElementById('base-note');
-    if (note) note.classList.toggle('hidden', mode !== 'tou');
-    const dynSection = document.getElementById('dynamic-section');
-    dynSection.classList.toggle('hidden', mode !== 'dynamic');
+    if (note) note.classList.toggle('hidden', !anyTou);
     const dynNote = document.getElementById('base-note-dynamic');
-    if (dynNote) dynNote.classList.toggle('hidden', mode !== 'dynamic');
-    // Load the sensor picker the first time the user switches INTO dynamic mode — it needs
-    // a live HA call, so it's never fetched for flat/TOU users just visiting this page.
-    if (mode === 'dynamic') {
-      htmx.ajax('GET', 'api/costs/dynamic-entities', {target: '#dyn-picker-wrap', swap: 'innerHTML'});
-    }
+    if (dynNote) dynNote.classList.toggle('hidden', !anyDyn);
+    Object.entries(modes).forEach(([ctype, mode]) => {
+      const wrap = document.getElementById('dyn-wrap-' + ctype);
+      if (wrap) {
+        wrap.classList.toggle('hidden', mode !== 'dynamic');
+        if (mode === 'dynamic' && wrap.dataset.loaded !== '1') {
+          wrap.dataset.loaded = '1';
+          htmx.ajax('GET', 'api/costs/dynamic-entities?ctype=' + ctype, {target: '#dyn-wrap-' + ctype, swap: 'innerHTML'});
+        }
+      }
+      const fbNote = document.getElementById('fallback-note-' + ctype);
+      if (fbNote) fbNote.classList.toggle('hidden', mode !== 'dynamic');
+      // Price input HIDDEN (not edited) while dynamic — a live sensor prices it (Silvio 02/07:
+      // an editable spinner there invited exactly the kind of accident that raised this, a
+      // stray mouse-wheel scroll silently bumping the value). Stays in the DOM un-disabled so
+      // its stored value still posts with the form (still the offline/in-progress fallback).
+      const priceBlock = document.getElementById('price-block-' + ctype);
+      if (priceBlock) priceBlock.classList.toggle('hidden', mode === 'dynamic');
+    });
+    refreshBandAvailability();
+  }
+
+  const BAND_DISABLED_HINT = "{{ t('band_price_disabled_for_type') }}";
+
+  function applyBandRowState(row, t) {
+    const active = CURRENT_MODES[t] === 'tou';
+    const inp = row.querySelector('.band-price');
+    row.classList.toggle('opacity-40', !active);
+    inp.disabled = !active;
+    inp.title = active ? '' : BAND_DISABLED_HINT
+      .replace('{type}', TYPE_META[t].label)
+      .replace('{mode}', MODE_LABELS[CURRENT_MODES[t]] || CURRENT_MODES[t]);
+  }
+
+  function refreshBandAvailability() {
+    document.querySelectorAll('#bands-list .band-block').forEach((bl) => {
+      TOU_TYPES.forEach((t) => {
+        const row = bl.querySelector('.band-price-row[data-type="' + t + '"]');
+        if (row) applyBandRowState(row, t);
+      });
+    });
   }
 
   function mkInput(type, value, extraCls, attrs) {
@@ -310,7 +359,8 @@
     TOU_TYPES.forEach((t) => {
       const meta = TYPE_META[t];
       const lab = document.createElement('label');
-      lab.className = "flex items-center gap-1.5 text-sm";
+      lab.className = "band-price-row flex items-center gap-1.5 text-sm";
+      lab.dataset.type = t;
       const name = document.createElement('span');
       name.className = "font-semibold w-16"; name.style.color = meta.color;
       name.textContent = meta.icon + " " + meta.label;
@@ -337,6 +387,7 @@
   function addBand() {
     document.getElementById('bands-list').appendChild(buildBlock({}));
     refreshEmpty();
+    refreshBandAvailability();
   }
 
   function collectBands() {
@@ -362,6 +413,7 @@
     const list = document.getElementById('bands-list');
     (BANDS || []).forEach((b) => list.appendChild(buildBlock(b)));
     refreshEmpty();
+    refreshBandAvailability();
     // Inject the serialized bands into the htmx request right before it fires.
     document.getElementById('tou-form').addEventListener('htmx:configRequest', (e) => {
       e.detail.parameters['bands_json'] = JSON.stringify(collectBands());

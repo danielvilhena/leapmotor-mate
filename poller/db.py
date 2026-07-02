@@ -186,6 +186,26 @@ CREATE TABLE IF NOT EXISTS research_logbook (
     ts          INTEGER NOT NULL,   -- epoch ms the note was added
     note        TEXT NOT NULL       -- e.g. "engine started to charge while driving", "refueled to 100%"
 );
+
+-- Daily ledger of the car's OFFICIAL lifetime counters (cloud mileage/energy/detail: totalEnergy
+-- includes parked/standby, integer kWh) plus the getEC driving split over the window since the
+-- previous snapshot. Δ between two rows = total consumption incl. parked, error ≤ ±1 kWh at the
+-- window edges REGARDLESS of span (counter sampling — errors don't accumulate); Δ − getEC = the
+-- parked/standby share. Raw readings, stored as served, never corrected in place: counter resets
+-- and cloud gaps are handled at READ time (total_increasing-style). Silent phase-1 collector, no
+-- UI yet.
+CREATE TABLE IF NOT EXISTS energy_counter_snapshots (
+    id                INTEGER PRIMARY KEY,
+    vin               TEXT NOT NULL,
+    taken_at          TEXT NOT NULL,     -- UTC ISO
+    total_energy_kwh  INTEGER,           -- lifetime consumption counter, integer kWh as served
+    total_mileage_km  REAL,              -- from the 0.1-mile field ×1.609344 (finer than the km int)
+    ec_driving_kwh    REAL,              -- getEC over [previous snapshot's taken_at, taken_at]
+    ec_ac_kwh         REAL,
+    ec_other_kwh      REAL,
+    ec_status         TEXT               -- 'first' | 'ok' | 'empty' (no driving) | 'miss' (cloud gap)
+);
+CREATE INDEX IF NOT EXISTS idx_energy_snap_vin_taken ON energy_counter_snapshots(vin, taken_at);
 """
 
 # self.get_battery_capacity() is now stored in settings table, not hardcoded
@@ -660,6 +680,28 @@ class Database:
         cur = self._conn.execute("DELETE FROM raw_signals_log WHERE ts < ?", (cutoff_ms,))
         self._conn.commit()
         return cur.rowcount or 0
+
+    def last_energy_snapshot(self, vin: str):
+        """Most recent counter-ledger row for this VIN (None on a fresh install) — the sampler
+        uses its taken_at both as the 24h throttle and as the getEC window's begin."""
+        return self._conn.execute(
+            "SELECT * FROM energy_counter_snapshots WHERE vin = ? ORDER BY taken_at DESC LIMIT 1",
+            (vin,),
+        ).fetchone()
+
+    def insert_energy_snapshot(self, vin: str, taken_at: str, total_energy_kwh,
+                               total_mileage_km, ec_driving_kwh, ec_ac_kwh,
+                               ec_other_kwh, ec_status: str) -> int:
+        """Append one counter-ledger row, as served by the cloud (raw ledger — no correction)."""
+        cur = self._conn.execute(
+            "INSERT INTO energy_counter_snapshots (vin, taken_at, total_energy_kwh,"
+            " total_mileage_km, ec_driving_kwh, ec_ac_kwh, ec_other_kwh, ec_status)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (vin, taken_at, total_energy_kwh, total_mileage_km,
+             ec_driving_kwh, ec_ac_kwh, ec_other_kwh, ec_status),
+        )
+        self._conn.commit()
+        return cur.lastrowid
 
     def get_or_create_device_id(self) -> str:
         """One stable device_id for this Mate install, shared by poller and web.

@@ -248,6 +248,77 @@ class LeapmotorMateClient:
                         "time": int(st) if st else None}
         return {"ota": False}
 
+    def get_energy_counters(self) -> dict | None:
+        """The car's official lifetime counters from `mileage/energy/detail`: total consumed
+        energy INCLUDING parked/standby (integer kWh — the finest the cloud serves, param-probed
+        02/07) and total mileage (read from the 0.1-mile field ×1.609344, ~160 m resolution —
+        finer than the integer-km twin). The endpoint needs a SIGNED begin/end window just to
+        unlock totalEnergy; the counters themselves are window-independent, so any window works.
+        Returns {"total_energy_kwh": int, "total_mileage_km": float} or None. Never raises."""
+        import json as _json
+        import time as _time
+        from urllib.parse import quote
+        try:
+            from leapmotor_api.crypto import build_signed_headers
+            api, vin = self._api, self._vehicle.vin
+            now_ms = int(_time.time() * 1000)
+            b_ms = now_ms - 7 * 86400 * 1000
+            h = build_signed_headers(
+                sign_key=api.sign_key, device_id=api.device_id, vin=vin, language=api.language,
+                body_params={"begintime": str(b_ms), "endtime": str(now_ms)}).to_dict()
+            h.update(api._auth_headers())
+            body = f"endtime={now_ms}&begintime={b_ms}&vin={quote(vin, safe='')}"
+            resp = api._post(path="/carownerservice/oversea/drivingRecord/v1/mileage/energy/detail",
+                             headers=h, data=body, cert=api.account_cert)
+            raw = resp.get("body")
+            j = _json.loads(raw) if isinstance(raw, str) else (raw or {})
+            d = (j.get("data") or {}) if isinstance(j, dict) else {}
+            te = d.get("totalEnergy")
+            if te is None:
+                return None
+            try:
+                km = float(d.get("totalmileageMile")) * 1.609344
+            except (TypeError, ValueError):
+                km = float(d.get("totalmileage") or 0) or None
+            return {"total_energy_kwh": int(te), "total_mileage_km": round(km, 1) if km else None}
+        except Exception as e:  # noqa: BLE001
+            log.debug("Energy counters fetch failed: %s", e)
+            return None
+
+    def get_ec_range(self, begin_ts: int, end_ts: int) -> tuple:
+        """Official driving-energy split (getEC) over [begin_ts, end_ts] epoch seconds.
+        Returns ('ok', {driving,ac,other kWh}) | ('empty', None) — the cloud's genuine
+        'no driving in this window' | ('miss', None) — auth/transport/odd payload; a miss is
+        recoverable later (getEC is retro-queryable), so callers just record it. Never raises."""
+        import json as _json
+        from urllib.parse import quote
+        try:
+            from leapmotor_api.crypto import build_consumption_last_week_headers
+            api, vin = self._api, self._vehicle.vin
+            h = build_consumption_last_week_headers(
+                sign_key=api.sign_key, device_id=api.device_id, carvin=vin,
+                begintime=str(begin_ts), endtime=str(end_ts), language=api.language,
+            ).to_dict()
+            h.update(api._auth_headers())
+            body = f"endtime={end_ts}&begintime={begin_ts}&carvin={quote(vin, safe='')}"
+            resp = api._post(path="/carownerservice/oversea/drivingRecord/v1/getLastweekEC",
+                             headers=h, data=body, cert=api.account_cert)
+            raw = resp.get("body")
+            j = _json.loads(raw) if isinstance(raw, str) else (raw or {})
+            if not isinstance(j, dict):
+                return "miss", None
+            d = j.get("data") or {}
+            if d:
+                return "ok", {"driving": float(d.get("driverEC") or 0),
+                              "ac": float(d.get("acEC") or 0),
+                              "other": float(d.get("otherEC") or 0)}
+            if j.get("result") in (0, 100) or "no data" in str(j.get("message") or "").lower():
+                return "empty", None
+            return "miss", None
+        except Exception as e:  # noqa: BLE001
+            log.debug("getEC range fetch failed: %s", e)
+            return "miss", None
+
     def close(self):
         self._api.close()
 

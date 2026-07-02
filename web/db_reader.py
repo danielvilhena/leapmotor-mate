@@ -294,8 +294,22 @@ def get_charge_prices() -> dict:
 _TOU_TYPES = ["HOME", "AC", "FAST", "HPC"]
 
 
+def _mode_allowed(ctype: str, mode: str) -> bool:
+    """Dynamic (HA sensor) is HOME-ONLY (Silvio 02/07): no HA integration exposes a price for
+    public AC/DC/HPC charging — those are operator-billed, not a home tariff — so 'dynamic' on
+    an away type is never a valid choice, whatever wrote it (UI, a raw API call, or a value
+    saved before this rule existed)."""
+    return mode in ("flat", "tou") or (mode == "dynamic" and ctype == "HOME")
+
+
 def get_cost_config() -> dict:
-    """Pricing config for the Costs page: mode, calc method and the user bands."""
+    """Pricing config for the Costs page: mode, calc method and the user bands.
+
+    `modes` (#106 fix) = the pricing mode PER CHARGE TYPE {HOME,AC,FAST,HPC}, resolved from the
+    `cost_modes` JSON setting; types not explicitly set — or set to a mode `_mode_allowed`
+    rejects (dynamic on an away type) — default from the legacy global `cost_mode`, read-time
+    resolution, no write migration. The legacy-'dynamic' default is CORRECTIVE, see
+    `_default_mode_for`."""
     raw = get_setting("tou_bands", "")
     try:
         bands = json.loads(raw) if raw else []
@@ -303,11 +317,48 @@ def get_cost_config() -> dict:
             bands = []
     except (ValueError, TypeError):
         bands = []
+    legacy = get_setting("cost_mode", "flat")
+    try:
+        m = json.loads(get_setting("cost_modes", "") or "{}")
+        m = m if isinstance(m, dict) else {}
+    except (ValueError, TypeError):
+        m = {}
+    modes = {t: (m.get(t) if m.get(t) in ("flat", "tou", "dynamic") and _mode_allowed(t, m.get(t))
+                 else _default_mode_for(t, legacy))
+             for t in _TOU_TYPES}
     return {
-        "mode":   get_setting("cost_mode", "flat"),
+        "mode":   legacy,
+        "modes":  modes,
         "method": get_setting("tou_method", "split"),
         "bands":  bands,
     }
+
+
+def _default_mode_for(ctype: str, legacy: str) -> str:
+    """Per-type default when `cost_modes` doesn't name a type. Legacy global 'dynamic' was a
+    pricing BUG for away charges (the single home-tariff sensor priced public AC/DC/HPC too —
+    spot prices can sit near zero → silently wrong costs, the #106 report): the fix's migration
+    CORRECTS it rather than preserving it — dynamic carries over to HOME only, public types drop
+    to their fixed base prices. flat/tou never had the bug → they apply to every type as
+    before."""
+    if legacy == "dynamic":
+        return "dynamic" if ctype == "HOME" else "flat"
+    return legacy
+
+
+def save_cost_modes(modes: dict) -> None:
+    """Persist the per-charge-type pricing modes (#106). Values are sanitised to the three known
+    modes AND to `_mode_allowed` (dynamic is HOME-only — rejected here too, not just at read
+    time, so a raw API call can't park an away type on 'dynamic' in storage); unknown/rejected/
+    missing types fall back to the legacy global mode at read time. When all four types agree,
+    the legacy `cost_mode` is aligned too, so single-mode users keep a coherent value
+    everywhere."""
+    clean = {t: v for t, v in (modes or {}).items()
+             if t in _TOU_TYPES and v in ("flat", "tou", "dynamic") and _mode_allowed(t, v)}
+    set_setting("cost_modes", json.dumps(clean))
+    vals = set(clean.values())
+    if len(clean) == len(_TOU_TYPES) and len(vals) == 1:
+        set_setting("cost_mode", vals.pop())
 
 
 def get_dynamic_price_entity() -> str:
@@ -317,6 +368,37 @@ def get_dynamic_price_entity() -> str:
 
 def save_dynamic_price_entity(entity_id: str) -> None:
     set_setting("dynamic_price_entity_id", (entity_id or "").strip())
+
+
+def get_dynamic_price_entity_for(ctype: str) -> str:
+    """Dynamic-price sensor for ONE charge type (#106 fix): the per-type choice from the
+    `dynamic_price_entities` JSON map. Only HOME falls back to the legacy single entity (that
+    sensor IS the home tariff — a pre-fix dynamic setup keeps its home pricing with zero
+    reconfiguration). Other types get NO silent fallback: an away type explicitly set to
+    dynamic without its own sensor prices at its base — falling back to the home sensor would
+    re-introduce the very bug this fixes."""
+    try:
+        raw = get_setting("dynamic_price_entities", "")
+        m = json.loads(raw) if raw else {}
+        e = (m.get(ctype) or "").strip() if isinstance(m, dict) else ""
+    except Exception:  # noqa: BLE001 — settings table may not exist in minimal test DBs
+        e = ""
+    if e:
+        return e
+    return get_dynamic_price_entity() if ctype == "HOME" else ""
+
+
+def save_dynamic_price_entity_for(ctype: str, entity_id: str) -> None:
+    if ctype not in _TOU_TYPES:
+        return
+    try:
+        raw = get_setting("dynamic_price_entities", "")
+        m = json.loads(raw) if raw else {}
+        m = m if isinstance(m, dict) else {}
+    except (ValueError, TypeError):
+        m = {}
+    m[ctype] = (entity_id or "").strip()
+    set_setting("dynamic_price_entities", json.dumps(m))
 
 
 def save_cost_config(mode: str, method: str, bands: list) -> None:
@@ -371,42 +453,50 @@ def _time_in_window(minute: int, start_min: int, end_min: int) -> bool:
     return minute >= start_min or minute < end_min
 
 
+def _band_covers(b: dict, weekday: int, minute: int) -> bool:
+    """Does this band cover (weekday, minute-of-day)? A band crossing midnight (start > end,
+    e.g. 23:30→07:30) is anchored to the day it STARTS: its pre-midnight part [start,24:00)
+    applies when that day is in `days`; its post-midnight part [00:00,end) belongs to the
+    PREVIOUS day's membership — so a Saturday-only off-peak band also covers the early Sunday
+    hours, but a Sunday-only band does not."""
+    days = b.get("days")
+    if not isinstance(days, list) or not days:
+        days = list(range(7))
+    s, e = _parse_hhmm(b.get("start")), _parse_hhmm(b.get("end"))
+    if s is None or e is None:
+        return False
+    if s == e:                                        # whole-day band
+        return weekday in days
+    if s < e:                                         # same-day window
+        return s <= minute < e and weekday in days
+    if minute >= s and weekday in days:               # crosses midnight: pre-midnight → this day
+        return True
+    return minute < e and (weekday - 1) % 7 in days   # post-midnight → previous day
+
+
 def _match_band(bands: list, weekday: int, minute: int):
-    """First band that covers this (weekday, minute-of-day). A band crossing midnight
-    (start > end, e.g. 23:30→07:30) is anchored to the day it STARTS: its pre-midnight
-    part [start,24:00) applies when that day is in `days`; its post-midnight part
-    [00:00,end) belongs to the PREVIOUS day's membership — so a Saturday-only off-peak
-    band also covers the early Sunday hours, but a Sunday-only band does not. (This fixes
-    day-restricted midnight-crossing bands, which previously dropped the after-midnight
-    hours to the base price.)"""
+    """First band that covers this (weekday, minute-of-day), regardless of charge type."""
     for b in bands:
-        days = b.get("days")
-        if not isinstance(days, list) or not days:
-            days = list(range(7))
-        s, e = _parse_hhmm(b.get("start")), _parse_hhmm(b.get("end"))
-        if s is None or e is None:
-            continue
-        if s == e:                                        # whole-day band
-            if weekday in days:
-                return b
-        elif s < e:                                       # same-day window
-            if s <= minute < e and weekday in days:
-                return b
-        else:                                             # crosses midnight
-            if minute >= s and weekday in days:           # pre-midnight → this day
-                return b
-            if minute < e and (weekday - 1) % 7 in days:  # post-midnight → previous day
-                return b
+        if _band_covers(b, weekday, minute):
+            return b
     return None
 
 
-def _resolve_price(band, ctype: str, base: float, base_set: bool):
-    """Price for a charge type at a moment: the band's per-type price if set, else
-    the base price. is_set=False means neither provides a real price (→ not costed)."""
-    if band is not None:
-        bp = (band.get("prices") or {}).get(ctype)
-        if bp is not None:
-            return float(bp), True
+def _resolve_band_price(bands: list, ctype: str, weekday: int, minute: int,
+                        base: float, base_set: bool):
+    """TYPE-AWARE band price for a moment (#106 fix): the first band covering this moment
+    WITH a price set for this charge type wins — a blank cell means "this band is not for
+    this type", so overlapping windows can serve different types (the home 23-07 off-peak and
+    a public AC network's own 22-06 band coexist; each type reads its own). Previously the
+    first time-matching band won for every type and a blank cell dropped straight to base,
+    which silently killed any later overlapping band. No band prices this type at this
+    moment → the type's base price (is_set=False when that base isn't configured either →
+    not costed)."""
+    for b in bands:
+        if _band_covers(b, weekday, minute):
+            bp = (b.get("prices") or {}).get(ctype)
+            if bp is not None:
+                return float(bp), True
     return base, base_set
 
 
@@ -436,14 +526,15 @@ def _power_window_bounds(db, started_at, ended_at):
     return lo, hi, False
 
 
-def _dynamic_sensor_cost(charge, energy: float, base: float) -> Optional[float]:
+def _dynamic_sensor_cost(charge, energy: float, base: float, ctype: str = None) -> Optional[float]:
     """Cost from a live HA price-sensor history (Nordpool/Tibber/ENTSO-E-style dynamic
     tariffs): integrate the charge's real power curve same as TOU 'split', but price each
     interval by the sensor's value AT that instant (step-hold — these sensors update once
     an hour) instead of a static band. Falls back to the flat base price whenever the sensor
     isn't configured, HA is unreachable, or it has no history for the window (never leaves
-    a charge silently uncosted just because one live lookup failed)."""
-    entity_id = get_dynamic_price_entity()
+    a charge silently uncosted just because one live lookup failed).
+    `ctype` (#106): the charge type, to resolve its own per-type sensor; None = legacy single."""
+    entity_id = get_dynamic_price_entity_for(ctype) if ctype else get_dynamic_price_entity()
     if not entity_id or not charge["ended_at"]:
         return round(energy * base, 2) if base else None
 
@@ -525,19 +616,26 @@ def compute_cost(charge, config: Optional[dict] = None, ac_kwh: Optional[float] 
     base_set = key in prices
     base = float(prices.get(key, 0.0) or 0.0)
 
-    if config.get("mode") == "dynamic":
-        return _dynamic_sensor_cost(charge, energy, base)
+    # Pricing mode PER CHARGE TYPE (#106): this charge's type picks its own mode; a config
+    # without the per-type map (older caller / pre-#106 settings) falls back to the global one.
+    mode = (config.get("modes") or {}).get(location_type) or config.get("mode", "flat")
+    if mode == "dynamic" and not _mode_allowed(location_type, mode):
+        mode = "flat"   # defense in depth — dynamic is HOME-only, whatever handed us this config
+
+    if mode == "dynamic":
+        return _dynamic_sensor_cost(charge, energy, base, ctype=location_type)
 
     bands = config.get("bands") or []
-    if config.get("mode") != "tou" or not bands:
+    if mode != "tou" or not bands:
         return round(energy * base, 2) if base else None
 
     def _start_band_cost():
         dt = _local_dt(charge["started_at"])
         if dt is None:
             return round(energy * base, 2) if base else None
-        band = _match_band(bands, dt.weekday(), dt.hour * 60 + dt.minute)
-        price, is_set = _resolve_price(band, location_type, base, base_set)
+        price, is_set = _resolve_band_price(bands, location_type,
+                                            dt.weekday(), dt.hour * 60 + dt.minute,
+                                            base, base_set)
         if not is_set and price == 0:
             return None
         return round(energy * price, 2)
@@ -576,8 +674,9 @@ def compute_cost(charge, config: Optional[dict] = None, ac_kwh: Optional[float] 
         e = (p0 + p1) / 2.0 * hours
         if e <= 0:
             continue
-        band = _match_band(bands, dt0.weekday(), dt0.hour * 60 + dt0.minute)
-        price, is_set = _resolve_price(band, location_type, base, base_set)
+        price, is_set = _resolve_band_price(bands, location_type,
+                                            dt0.weekday(), dt0.hour * 60 + dt0.minute,
+                                            base, base_set)
         any_set = any_set or is_set
         total_e += e
         weighted += e * price

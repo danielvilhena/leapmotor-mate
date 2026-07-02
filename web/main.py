@@ -25,7 +25,7 @@ import mqtt_check
 import auth
 import update_check
 
-MATE_VERSION = "2.0.1"  # bump together with the git tag + add-on config.yaml at release
+MATE_VERSION = "2.0.2"  # bump together with the git tag + add-on config.yaml at release
 
 import diagnostics
 import demo
@@ -1107,8 +1107,8 @@ async def costs_page(request: Request):
         page="costs", vehicle=vehicle,
         settings={**settings, **prices},
         charge_types=db_reader.CHARGE_TYPES,
-        cost_mode=cfg["mode"], tou_method=cfg["method"],
-        tou_bands_json=json.dumps(cfg["bands"]),
+        cost_mode=cfg["mode"], cost_modes=cfg["modes"], tou_method=cfg["method"],
+        tou_bands_json=json.dumps(cfg["bands"]), cost_modes_json=json.dumps(cfg["modes"]),
     ))
 
 
@@ -1686,10 +1686,18 @@ async def save_prices(request: Request):
 
 @app.post("/api/costs/mode", response_class=HTMLResponse)
 async def save_cost_mode(request: Request):
-    """Switch between flat (24h) and time-of-use pricing. Bands/method untouched."""
+    """Save the pricing mode PER CHARGE TYPE (#106) — one `cost_mode_<TYPE>` select each.
+    A legacy single `cost_mode` field (older clients / tests) still works and applies to
+    every type. Bands/method untouched."""
     form = await request.form()
-    cfg = db_reader.get_cost_config()
-    db_reader.save_cost_config(form.get("cost_mode", "flat"), cfg["method"], cfg["bands"])
+    legacy = form.get("cost_mode")
+    if legacy:
+        modes = {t: legacy for t in db_reader._TOU_TYPES}
+    else:
+        cfg = db_reader.get_cost_config()
+        modes = {t: form.get(f"cost_mode_{t}") or cfg["modes"].get(t, "flat")
+                 for t in db_reader._TOU_TYPES}
+    db_reader.save_cost_modes(modes)
     return HTMLResponse("")
 
 
@@ -1709,20 +1717,29 @@ async def save_cost_tou(request: Request):
 
 
 @app.get("/api/costs/dynamic-entities", response_class=HTMLResponse)
-async def dynamic_price_entities(request: Request):
+async def dynamic_price_entities(request: Request, ctype: str = ""):
     """Lazy-loaded picker for the dynamic-pricing sensor: candidate HA entities (price
-    keyword or a per-kWh currency unit), pre-selected with the saved choice if any."""
+    keyword or a per-kWh currency unit), pre-selected with the saved choice if any.
+    `ctype` (#106) scopes the picker to ONE charge type (its own sensor, falling back to
+    the legacy single one); without it, the legacy global picker is rendered."""
     entities = ha_client.list_price_entities()
+    selected = (db_reader.get_dynamic_price_entity_for(ctype) if ctype
+                else db_reader.get_dynamic_price_entity())
     return templates.TemplateResponse(request, "partials/dynamic_price_entities.html", _ctx(
-        entities=entities, selected=db_reader.get_dynamic_price_entity(),
+        entities=entities, selected=selected, ctype=ctype,
     ))
 
 
 @app.post("/api/costs/dynamic", response_class=HTMLResponse)
 async def save_cost_dynamic(request: Request):
-    """Save the chosen dynamic-price sensor entity."""
+    """Save the chosen dynamic-price sensor entity — per charge type when `ctype` is posted
+    (#106), else the legacy single entity."""
     form = await request.form()
-    db_reader.save_dynamic_price_entity(form.get("dynamic_price_entity", ""))
+    ctype = (form.get("ctype") or "").strip()
+    if ctype:
+        db_reader.save_dynamic_price_entity_for(ctype, form.get("dynamic_price_entity", ""))
+    else:
+        db_reader.save_dynamic_price_entity(form.get("dynamic_price_entity", ""))
     t = i18n.get_t(db_reader.get_language())
     return HTMLResponse(f'<span style="color:#22c55e;font-size:13px">{t("costs_saved")}</span>')
 

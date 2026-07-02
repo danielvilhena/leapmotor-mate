@@ -9,6 +9,7 @@ import time
 _PROJECT_ROOT = pathlib.Path(__file__).parent.parent
 
 import abrp
+import energy_snapshots
 from client import (LeapmotorMateClient, set_charge_current_min, EmptyStatusError,
                     seed_coord_signs, get_coord_signs)
 from db import Database
@@ -522,6 +523,10 @@ def main():
 
             # OTA / software-update check (scans the account inbox) — throttled, best-effort.
             _maybe_check_ota(db, client)
+
+            # Daily ledger of the official lifetime energy/mileage counters + getEC split
+            # (silent phase-1 collector) — throttled to 24h, best-effort.
+            energy_snapshots.maybe_sample(db, client, v.vin, api_lock=_API_LOCK)
 
             # ABRP live telemetry (opt-in, off by default)
             if db.get_setting("abrp_enabled") == "1":
