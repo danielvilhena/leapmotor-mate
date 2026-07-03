@@ -25,7 +25,7 @@ import mqtt_check
 import auth
 import update_check
 
-MATE_VERSION = "2.1.4"  # bump together with the git tag + add-on config.yaml at release
+MATE_VERSION = "2.1.5"  # bump together with the git tag + add-on config.yaml at release
 
 import diagnostics
 import demo
@@ -1667,6 +1667,48 @@ async def add_manual_charge_api(request: Request):
     db_reader.add_manual_charge(f"{date}T{time_}:00", energy, cost, ctype)
     return HTMLResponse(f'<span style="color:#22c55e">✓ {t("manual_charge_added")}</span>',
                         headers={"HX-Trigger": "chargeAdded"})
+
+
+@app.get("/api/charges/import-template.csv")
+async def charges_import_template():
+    """The empty, self-documenting CSV the user fills in and re-imports (idea from #111)."""
+    import charge_import
+    return Response(
+        charge_import.TEMPLATE,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="leapmotor-mate-charges-template.csv"'},
+    )
+
+
+@app.post("/api/charges/import", response_class=HTMLResponse)
+async def charges_import_api(request: Request):
+    """Bulk-import historical charges from the filled-in CSV (#111). Each clean line goes in through the
+    SAME path as a manual entry; each rejected line is reported with its reason — one typo never blocks
+    the whole file, and dirty data never reaches the DB."""
+    from html import escape as _esc
+    import charge_import
+    t = i18n.get_t(db_reader.get_language())
+    form = await request.form()
+    up = form.get("file")
+    if up is None or not hasattr(up, "read"):
+        return HTMLResponse(f'<span style="color:#ef4444">✗ {t("import_no_file")}</span>', status_code=400)
+    raw = await up.read()
+    if isinstance(raw, bytes):
+        raw = raw.decode("utf-8-sig", "replace")        # utf-8-sig drops the BOM Excel prepends
+    rows, errors = charge_import.parse_charge_csv(raw)
+    for r in rows:
+        db_reader.add_manual_charge(r["started_at"], r["energy_kwh"], r["cost"], r["charge_type"])
+    parts = []
+    if rows:
+        parts.append(f'<span style="color:#22c55e">✓ {_esc(t("import_done").format(n=len(rows)))}</span>')
+    if errors:
+        shown = "".join(f"<li>{_esc(e)}</li>" for e in errors[:50])
+        more = f'<li>… (+{len(errors) - 50})</li>' if len(errors) > 50 else ""
+        parts.append(f'<div style="color:#f59e0b;margin-top:6px">⚠ {_esc(t("import_skipped").format(n=len(errors)))}'
+                     f'<ul style="margin:4px 0 0 18px;list-style:disc;font-size:12px">{shown}{more}</ul></div>')
+    if not rows and not errors:
+        parts.append(f'<span style="color:#94a3b8">{_esc(t("import_none"))}</span>')
+    return HTMLResponse("".join(parts), headers={"HX-Trigger": "chargeAdded"} if rows else {})
 
 
 @app.get("/api/charge/{charge_id}/power-chart", response_class=HTMLResponse)

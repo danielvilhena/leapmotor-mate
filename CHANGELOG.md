@@ -3,6 +3,12 @@
 All notable changes to LeapMotor Mate are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.1.5] — 2026-07-03
+
+### Added
+- **Bulk-import past charges from a CSV** (idea from #111, thanks @Wartopia). The Charges page now has an **Import from CSV** section next to "Add a past charge": download an empty, self-documenting template, fill one row per charge (date, energy, optional cost, AC/DC) in Excel/Numbers/any editor, and upload it. Every line is validated strictly — a bad date, future date, non-numeric or absurd energy, negative cost or unknown type is rejected and reported with its line number, while the good lines still import — so one typo never blocks the file and nothing dirty reaches the database. Both `,`+`.` (US) and `;`+`,` (European Excel) CSV formats are auto-detected.
+- **Diagnostics: the car's declared abilities.** The diagnostics bundle now lists the ability codes the vehicle itself reports (`VehicleAbility`), with the comfort features called out (seat heating/ventilation, heated steering). This is ground truth for what a given model actually supports — so remote-control gaps (like the T03's fan/off, #67) can be told apart from "the car doesn't have that feature," and a new model (e.g. the B05) is understood the moment it connects rather than assumed. Read-only; all models. The poller stores the abilities on start, so restart the add-on once on this version before downloading a fresh diagnostic.
+
 ## [2.1.4] — 2026-07-03
 
 ### Fixed

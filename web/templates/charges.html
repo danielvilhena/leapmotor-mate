@@ -154,6 +154,28 @@ document.body.addEventListener('htmx:afterSwap', function (e) {
       <span id="mc-result" class="text-sm font-medium"></span>
     </form>
   </div>
+  <!-- Bulk import from CSV (#111) -->
+  <div class="mt-3 pt-3 border-t border-slate-700/60">
+    <button type="button" onclick="document.getElementById('csv-import-form').classList.toggle('hidden')"
+            class="flex items-center gap-2 text-sm font-medium text-brand hover:opacity-80">
+      <span class="text-lg">📥</span> {{ t('import_title') }}
+    </button>
+    <div id="csv-import-form" class="hidden mt-3">
+      <p class="text-[11px] text-slate-500 mb-2" style="white-space:pre-line">{{ t('import_hint') }}</p>
+      <a href="api/charges/import-template.csv" download
+         class="inline-flex items-center gap-1 text-xs text-brand hover:opacity-80 mb-3">⬇ {{ t('import_template') }}</a>
+      <form hx-post="api/charges/import" hx-encoding="multipart/form-data"
+            hx-target="#import-result" hx-swap="innerHTML" hx-indicator="#import-spin"
+            hx-on::after-request="if(event.detail.successful && !(event.detail.xhr.response||'').includes('⚠')){setTimeout(function(){location.reload();},1500);}"
+            class="flex flex-wrap items-center gap-3">
+        <input type="file" name="file" accept=".csv,text/csv" required
+               class="text-xs text-slate-300 file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:bg-slate-700 file:text-white file:text-xs file:cursor-pointer">
+        <button type="submit" class="px-4 py-2 rounded-lg bg-brand text-white text-sm font-semibold hover:opacity-90 active:scale-95 transition">{{ t('import_btn') }}</button>
+        <span id="import-spin" class="htmx-indicator text-brand text-xs">⏳</span>
+      </form>
+      <div id="import-result" class="text-sm mt-2"></div>
+    </div>
+  </div>
 </div>
 
 <!-- AC vs DC distribution (donut) -->

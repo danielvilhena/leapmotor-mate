@@ -1,4 +1,5 @@
 """SQLite database layer. Switch DATABASE_URL to postgresql://... for production."""
+import json
 import logging
 import math
 import sqlite3
@@ -344,6 +345,13 @@ class Database:
             self._conn.execute("ALTER TABLE positions ADD COLUMN recirculation INTEGER DEFAULT NULL")
         if "climate_mode" not in cols:
             self._conn.execute("ALTER TABLE positions ADD COLUMN climate_mode INTEGER DEFAULT NULL")
+        # migration: the car's DECLARED ability codes (VehicleAbility ints, stored as a JSON list) —
+        # lets the diagnostic + future capability-gating show ONLY what a model actually supports,
+        # instead of assuming every car has the same commands (#67; also covers models we don't own
+        # yet, e.g. the B05). Refreshed by ensure_vehicle on every poller start.
+        vcols = {r[1] for r in self._conn.execute("PRAGMA table_info(vehicles)").fetchall()}
+        if "abilities" not in vcols:
+            self._conn.execute("ALTER TABLE vehicles ADD COLUMN abilities TEXT DEFAULT NULL")
         # migration: per-charge wallbox AC energy (the "wallbox, to pay" figure) on existing DBs
         ccols = {r[1] for r in self._conn.execute("PRAGMA table_info(charges)").fetchall()}
         if "ac_energy_kwh" not in ccols:
@@ -775,11 +783,20 @@ class Database:
 
     # ── Vehicles ─────────────────────────────────────────────────────────────
 
-    def ensure_vehicle(self, vin: str, car_type: str, year: Optional[int] = None) -> int:
+    def ensure_vehicle(self, vin: str, car_type: str, year: Optional[int] = None,
+                       abilities: Optional[list] = None) -> int:
         self._conn.execute(
             "INSERT OR IGNORE INTO vehicles (vin, car_type, year) VALUES (?, ?, ?)",
             (vin, car_type, year),
         )
+        # Persist the car's DECLARED ability codes (VehicleAbility ints) so the diagnostic and future
+        # capability-gating know what this model really supports (#67). Refreshed every start; a None
+        # (lib didn't report any) leaves the stored value untouched rather than wiping it.
+        if abilities:
+            self._conn.execute(
+                "UPDATE vehicles SET abilities = ? WHERE vin = ?",
+                (json.dumps(sorted({int(a) for a in abilities})), vin),
+            )
         self._conn.commit()
         row = self._conn.execute("SELECT id FROM vehicles WHERE vin = ?", (vin,)).fetchone()
         return row["id"]

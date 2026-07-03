@@ -425,7 +425,8 @@ def main():
     # Vehicle is known after login; register it in the DB
     from leapmotor_api import LeapmotorApiClient
     v = client._vehicle
-    vehicle_id = db.ensure_vehicle(v.vin, v.car_type, getattr(v, "year", None))
+    vehicle_id = db.ensure_vehicle(v.vin, v.car_type, getattr(v, "year", None),
+                                   abilities=getattr(v, "abilities", None))
 
     # First run: set battery capacity from per-model default
     # (will be overridable via setup wizard / settings UI)

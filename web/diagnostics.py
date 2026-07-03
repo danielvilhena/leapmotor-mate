@@ -288,6 +288,59 @@ def _cost_wallbox_section() -> str:
     return "\n".join(lines)
 
 
+def _abilities_section() -> str:
+    """The car's DECLARED ability codes (leapmotor_api VehicleAbility) — the ground truth for what
+    THIS model actually supports, so we stop assuming every car has the same commands (#67). Shows the
+    raw codes + names and calls out the climate/seat features that differ across models (the T03 lacks
+    several the B10/C10 have; also lets us learn a new model like the B05 the moment it connects)."""
+    vehicle, _ = db_reader.get_vehicle()
+    raw = (vehicle or {}).get("abilities")
+    if not raw:
+        return ("(not reported yet — restart the add-on once on this version so the poller stores the "
+                "car's abilities, then re-download this diagnostic)")
+    try:
+        codes = sorted({int(c) for c in json.loads(raw)})
+    except (ValueError, TypeError):
+        return f"(unparseable abilities value: {raw!r})"
+    known = None
+    try:
+        from leapmotor_api.models import VehicleAbility
+        known = {int(m) for m in VehicleAbility}     # the codes the library can actually name
+
+        def _name(c: int) -> str:
+            try:
+                return VehicleAbility(c).name
+            except ValueError:
+                return f"CODE{c}"
+    except Exception:  # noqa: BLE001 — never let a lib change break the diagnostic
+        def _name(c: int) -> str:
+            return f"CODE{c}"
+
+    present = set(codes)
+
+    def _flags(pairs) -> str:
+        return "  ".join(f"{label}={'✓' if code in present else '✗'}" for label, code in pairs)
+
+    # Comfort features that RELIABLY differ model-to-model — verified against a real B10, which declares
+    # all of these. We deliberately do NOT flag "fan/auto climate": the ability codes don't map to it
+    # (the B10's fan works yet it declares neither CLIMATE_ADVANCED nor AC_PRESET), so a T03-vs-B10
+    # climate gap must be read from the raw `codes` diff + on-car behaviour, not inferred from one flag.
+    comfort = _flags([("SEAT_HEAT", 14), ("FRONT_SEAT_HEAT", 21),
+                      ("SEAT_VENT_DRV", 42), ("SEAT_VENT_PAS", 43), ("STEERING_HEAT", 15)])
+    out = [
+        f"codes  : {','.join(str(c) for c in codes)}",
+        f"named  : {', '.join(_name(c) for c in codes)}",
+        f"comfort: {comfort}",
+    ]
+    # Codes the car DECLARES but this library version can't name yet (newer than the enum). Surfaced on
+    # their own line so these unknowns pop out — they're exactly the leads worth diffing across models
+    # and investigating on-car. Omitted when the enum isn't importable (we then can't tell mapped apart).
+    if known is not None:
+        unmapped = [c for c in codes if c not in known]
+        out.append(f"unmapped: {','.join(str(c) for c in unmapped) if unmapped else '(none)'}")
+    return "\n".join(out)
+
+
 def build_bundle(version: str, parts=_BUNDLE_PARTS, lines: int = 300, signals: dict | None = None) -> str:
     """One redacted text blob to attach to an issue. `parts` selects which sections to include
     (any of 'info', 'poller', 'web', 'signals'); a one-line version header is always present. The
@@ -317,6 +370,7 @@ def build_bundle(version: str, parts=_BUNDLE_PARTS, lines: int = 300, signals: d
         out += ["", "----- battery standby / vampire-drain (computed) -----", _vampire_section()]
         out += ["", "----- SoC by day (last 14d · hi→lo · km driven) -----", _soc_daily_section()]
         out += ["", "----- cost & wallbox config -----", _cost_wallbox_section()]
+        out += ["", "----- vehicle abilities (what the car DECLARES it can do) -----", _abilities_section()]
     if "poller" in want:
         out += ["", "----- poller log (recent) -----", read_log_tail("poller", lines)]
     if "web" in want:
