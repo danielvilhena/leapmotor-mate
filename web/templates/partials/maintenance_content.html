@@ -29,8 +29,13 @@
   <form hx-post="api/maintenance/baseline" hx-target="#maint-content" hx-swap="innerHTML" class="flex flex-wrap items-end gap-2">
     <input type="date" name="date" value="{{ maint.baseline_date or today }}" max="{{ today }}" required
            class="bg-slate-900 border border-slate-600 rounded px-2 py-1.5 text-sm text-slate-100">
+    <label class="text-xs text-slate-400 flex flex-col">{{ m.baseline_km }}
+      <input type="number" name="km" value="{{ maint.baseline_km_input }}" min="0" step="1"
+             class="mt-1 w-32 bg-slate-900 border border-slate-600 rounded px-2 py-1.5 text-sm text-slate-100">
+    </label>
     <button class="bg-brand/20 text-brand border border-brand/40 rounded px-3 py-1.5 text-sm font-medium hover:bg-brand/30">{{ m.baseline_save }}</button>
   </form>
+  <p class="text-[11px] text-slate-500 mt-2">{{ m.baseline_km_hint }}</p>
 </div>
 {% else %}
 {# Already set → still editable (a wrong registration/delivery date must be correctable): a
@@ -40,8 +45,13 @@
   <form hx-post="api/maintenance/baseline" hx-target="#maint-content" hx-swap="innerHTML" class="flex flex-wrap items-end gap-2 mt-2">
     <input type="date" name="date" value="{{ maint.baseline_date }}" max="{{ today }}" required
            class="bg-slate-900 border border-slate-600 rounded px-2 py-1.5 text-sm text-slate-100">
+    <label class="text-xs text-slate-400 flex flex-col">{{ m.baseline_km }}
+      <input type="number" name="km" value="{{ maint.baseline_km_input }}" min="0" step="1"
+             class="mt-1 w-32 bg-slate-900 border border-slate-600 rounded px-2 py-1.5 text-sm text-slate-100">
+    </label>
     <button class="bg-brand/20 text-brand border border-brand/40 rounded px-3 py-1.5 text-sm font-medium hover:bg-brand/30">{{ m.baseline_save }}</button>
   </form>
+  <p class="text-[11px] text-slate-500 mt-2">{{ m.baseline_km_hint }}</p>
 </details>
 {% endif %}
 

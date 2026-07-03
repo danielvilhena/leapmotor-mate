@@ -3,6 +3,11 @@
 All notable changes to LeapMotor Mate are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.1.7] — 2026-07-03
+
+### Fixed
+- **Maintenance: the km bars now start from the real delivery odometer** (#112, thanks @Wartopia). The delivery editor gained an **"Odometer at delivery (km)"** field — set it (0 for a car bought new) so a first-service progress bar reflects the car's actual odometer, not just the kilometres driven since Mate was installed.
+
 ## [2.1.6] — 2026-07-03
 
 ### Added

@@ -25,7 +25,7 @@ import mqtt_check
 import auth
 import update_check
 
-MATE_VERSION = "2.1.6"  # bump together with the git tag + add-on config.yaml at release
+MATE_VERSION = "2.1.7"  # bump together with the git tag + add-on config.yaml at release
 
 import diagnostics
 import demo
@@ -719,8 +719,16 @@ async def maintenance_baseline(request: Request):
     form = await request.form()
     dt = (form.get("date") or "").strip()
     if dt:
-        _, bkm, _explicit = maintenance.get_baseline()   # anchor km = earliest odometer Mate saw
-        maintenance.set_baseline(dt, bkm)
+        # #112 (@Wartopia): the user now sets the delivery ODOMETER too (in their unit → store km), so a
+        # first-service bar can start from the real odometer (0 for a new car) instead of the odometer
+        # Mate happened to see on install. Blank → keep the current value.
+        try:
+            km = units.dist_to_km(float(form.get("km"))) if (form.get("km") or "").strip() != "" else None
+        except (TypeError, ValueError):
+            km = None
+        if km is None:
+            _, km, _explicit = maintenance.get_baseline()   # fall back to the current anchor km
+        maintenance.set_baseline(dt, km)
     return templates.TemplateResponse(request, "partials/maintenance_content.html", _maint_ctx(request))
 
 
