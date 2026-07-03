@@ -983,7 +983,8 @@ def ac_on():
     st = _dr.get_latest_status() or {}
     try: temp = max(18, min(int(float(st.get("climate_target_temp") or 24)), 32))
     except (TypeError, ValueError): temp = 24
-    body = json.dumps({"circle": "in", "mode": "nohotcold", "operate": "auto", "position": "all",
+    operate, mode = _t03_force_manual("auto", "nohotcold")   # T03 ignores operate=auto (#67) → manual+cold
+    body = json.dumps({"circle": "in", "mode": mode, "operate": operate, "position": "all",
                        "temperature": str(temp), "windlevel": "5", "wshld": "0"}, separators=(",", ":"))
     return _session.execute(lambda api, vin: api._remote_control(vin=vin, action="ac_on", cmd_content=body))
 # A/C full-OFF is MODEL-SPECIFIC — the B10 and T03 want OPPOSITE payloads:
@@ -1046,6 +1047,7 @@ def set_climate_temp(temp, inside=None):
     st = _dr.get_latest_status() or {}
     mode_tok = {1: "cold", 3: "hot", 4: "wind"}.get(st.get("climate_mode"))
     operate, mode = ("manual", mode_tok) if mode_tok else ("auto", "nohotcold")   # AUTO(0)/unknown → AUTO
+    operate, mode = _t03_force_manual(operate, mode)   # T03 ignores operate=auto (#67) → manual+cold
     circle = "in" if st.get("recirculation") else "out"
     try:
         fan = max(1, min(int(st.get("fan_level") or 5), 7))
@@ -1069,6 +1071,7 @@ def _climate_ctx():
     st = _dr.get_latest_status() or {}
     tok = _MODE_TOKEN.get(st.get("climate_mode"))
     operate, mode = ("manual", tok) if tok else ("auto", "nohotcold")
+    operate, mode = _t03_force_manual(operate, mode)   # T03 ignores operate=auto (#67) → manual+cold
     circle = "in" if st.get("recirculation") else "out"
     try: fan = max(1, min(int(st.get("fan_level") or 3), 7))
     except (TypeError, ValueError): fan = 3
@@ -1107,6 +1110,19 @@ _WINDOWS_SCALE = {"B10": 10, "C10": 10, "B05": 10}   # car_type → native value
 def _session_car_type() -> str:
     v = getattr(_session, "_vehicle", None)
     return (getattr(v, "car_type", "") or "").upper() if v else ""
+def _t03_force_manual(operate: str, mode: str) -> tuple[str, str]:
+    """T03-ONLY climate fix (#67). The T03 firmware silently IGNORES operate=auto climate writes — the
+    A/C button, temperature, fan and recirc all no-op (the cloud still returns code:0, so the ACK is
+    meaningless; the car simply does nothing) — while it HONORS operate=manual (the Raffredda/quick_cool
+    path is the one that works on-car, confirmed in rossiadobe + Gr1m214 logs). So on the T03 ONLY, rewrite
+    an auto write to manual. A bare 'nohotcold' has no manual equivalent, so fall back to 'cold' — the one
+    mode confirmed to start the T03's A/C on-car (quick_cool). B10/C10/B05 are UNAFFECTED: they keep
+    operate=auto, which they honor (deliberately unchanged). NOTE: not verified on-car by us (we have no
+    T03); it is the direct consequence of the works-vs-fails diff in the #67 logs. Off is separate (neither
+    operate=off nor operate=close switches the T03 off — needs the real T03 off cmd, markoceri #9)."""
+    if operate == "auto" and _session_car_type() == "T03":
+        return "manual", ("cold" if mode == "nohotcold" else mode)
+    return operate, mode
 def _windows_native(pct) -> str:
     try: pct = max(0, min(int(pct), 100))
     except (TypeError, ValueError): pct = 0

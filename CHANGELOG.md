@@ -3,6 +3,11 @@
 All notable changes to LeapMotor Mate are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.1.4] — 2026-07-03
+
+### Fixed
+- **T03: A/C on, temperature, fan and recirculation now take effect** (#67, thanks @rossiadobe for the live logs). On the T03 these controls were sent as an `operate=auto` climate command, which the car accepts (the cloud returns success) but silently ignores — so the **A/C** button didn't start it, and the **temperature**, **fan** and **recirculation** changes did nothing. On the **T03 only** they now send the `operate=manual` command the car actually honors (the same path the working **Cool** button already uses); when no manual mode is active, the A/C button starts in cooling. **B10/C10/B05 are completely unchanged.** (The separate **A/C Off** button is still under investigation — the T03 ignores the off command too, which needs the car's real off command.)
+
 ## [2.1.3] — 2026-07-03
 
 ### Changed
