@@ -31,6 +31,22 @@
         {% endfor %}
       </select>
       <p class="text-[11px] text-slate-500 leading-snug mt-1">{{ t('wb_role_' + role + '_hint') }}</p>
+      {% if role == 'max_power' %}
+      <!-- #111 (@Wartopia): static fallback for wallboxes that expose no "max available" sensor — the
+           tile fills from this fixed value when no sensor is mapped. Display-only, never feeds cost. -->
+      <div class="mt-2 flex items-center gap-2">
+        <span class="text-[11px] text-slate-500">{{ t('wb_max_power_static') }}</span>
+        <input type="number" name="max_power_static" step="0.1" min="0" value="{{ wb_max_power_static }}"
+               placeholder="—" inputmode="decimal"
+               class="w-24 px-2 py-1 rounded-lg bg-slate-800 border border-slate-600 text-white text-xs focus:outline-none focus:border-brand">
+        <select name="max_power_static_unit"
+                class="px-2 py-1 rounded-lg bg-slate-800 border border-slate-600 text-white text-xs cursor-pointer">
+          <option value="kW" {% if wb_max_power_unit != 'A' %}selected{% endif %}>kW</option>
+          <option value="A" {% if wb_max_power_unit == 'A' %}selected{% endif %}>A</option>
+        </select>
+      </div>
+      <p class="text-[11px] text-slate-500 leading-snug mt-1">{{ t('wb_max_power_static_hint') }}</p>
+      {% endif %}
     </div>
     {% endfor %}
     </div>

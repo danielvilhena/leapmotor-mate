@@ -9,8 +9,9 @@ from datetime import datetime
 import csv
 import io
 
-# The template columns, in order. `date` + `energy_kwh` are required; `cost` + `type` are optional.
-COLUMNS = ("date", "energy_kwh", "cost", "type")
+# The template columns, in order. `date` + `energy_kwh` are required; the rest are optional. New optional
+# columns go at the END so existing files/positions never shift.
+COLUMNS = ("date", "energy_kwh", "cost", "type", "start_soc", "end_soc", "end")
 _HEADER_ALIASES = {"date", "data", "datum", "date_time", "datetime"}   # first-cell values that mean "header row"
 MAX_KWH = 250.0            # a single session above this is almost certainly a typo (biggest pack here ~100 kWh)
 
@@ -24,11 +25,14 @@ TEMPLATE = (
     "# energy_kwh (required) : kWh added, e.g. 42.5              - 0 to 250, dot or comma decimal\n"
     "# cost       (optional) : amount paid, e.g. 8.10            - leave blank if unknown\n"
     "# type       (optional) : AC or DC                          - leave blank to default to AC\n"
+    "# start_soc  (optional) : battery % at start, e.g. 23       - 0-100, blank if unknown\n"
+    "# end_soc    (optional) : battery % at end, e.g. 80         - 0-100, blank if unknown\n"
+    "# end        (optional) : end date/time, YYYY-MM-DD HH:MM   - for the duration; blank = no duration\n"
     "#\n"
     "# Example (delete these two lines before importing):\n"
-    "# 2025-11-03 21:30,42.5,8.10,AC\n"
-    "# 2026-01-15,18,9.5,DC\n"
-    "date,energy_kwh,cost,type\n"
+    "# 2025-11-03 21:30,42.5,8.10,AC,23,80,2025-11-04 01:37\n"
+    "# 2026-01-15,18,9.5,DC,,,\n"
+    "date,energy_kwh,cost,type,start_soc,end_soc,end\n"
 )
 
 _DATE_FORMATS = ("%Y-%m-%d %H:%M", "%Y-%m-%dT%H:%M", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d")
@@ -47,6 +51,17 @@ def _parse_dt(s: str):
 def _num(s: str) -> float:
     # accept both "42.5" and the European "42,5" (in a ';'-delimited file the comma is the decimal)
     return float(str(s).strip().replace(",", "."))
+
+
+def _opt_soc(s: str):
+    """Parse an optional SoC %: blank → None, else a 0-100 number (raises ValueError otherwise)."""
+    s = (s or "").strip()
+    if not s:
+        return None
+    v = _num(s)                              # raises ValueError if not a number
+    if not (0.0 <= v <= 100.0):
+        raise ValueError("SoC out of 0-100")
+    return v
 
 
 def _sniff_delimiter(text: str) -> str:
@@ -121,14 +136,44 @@ def parse_charge_csv(text: str, *, today=None):
             errors.append(f"line {i}: type '{cells[3]}' must be AC or DC")
             continue
 
+        # Optional start/end SoC % (0-100) → the card's SoC-gain tile (#67 @rossiadobe). Imported charges
+        # have no power curve, so they stay excluded from the SoH estimate whether or not SoC is given.
+        try:
+            start_soc = _opt_soc(cells[4] if len(cells) > 4 else "")
+        except ValueError:
+            errors.append(f"line {i}: start_soc '{cells[4]}' must be a number 0-100")
+            continue
+        try:
+            end_soc = _opt_soc(cells[5] if len(cells) > 5 else "")
+        except ValueError:
+            errors.append(f"line {i}: end_soc '{cells[5]}' must be a number 0-100")
+            continue
+
         # Noon default when no time given → the charge never day-shifts on display across time zones,
         # matching the manual-entry form's own 12:00 default.
-        started_at = dt.strftime("%Y-%m-%dT%H:%M:%S") if (dt.hour or dt.minute) \
-            else dt.strftime("%Y-%m-%dT12:00:00")
+        start_final = dt if (dt.hour or dt.minute) else dt.replace(hour=12)
+
+        # Optional end date/time → the charge's duration (#67 @rossiadobe). Full 'YYYY-MM-DD HH:MM' (or
+        # date); must not be before the start. Blank → None (add_manual_charge then makes end == start).
+        ended_at = None
+        end_s = cells[6] if len(cells) > 6 else ""
+        if end_s:
+            end_dt = _parse_dt(end_s)
+            if end_dt is None:
+                errors.append(f"line {i}: end '{end_s}' — use YYYY-MM-DD HH:MM")
+                continue
+            if end_dt < start_final:
+                errors.append(f"line {i}: end '{end_s}' is before the start")
+                continue
+            ended_at = end_dt.strftime("%Y-%m-%dT%H:%M:%S")
+
         rows.append({
-            "started_at": started_at,
+            "started_at": start_final.strftime("%Y-%m-%dT%H:%M:%S"),
+            "ended_at": ended_at,
             "energy_kwh": round(energy, 3),
             "cost": round(cost, 2) if cost is not None else None,
             "charge_type": ctype,
+            "start_soc": round(start_soc, 1) if start_soc is not None else None,
+            "end_soc": round(end_soc, 1) if end_soc is not None else None,
         })
     return rows, errors

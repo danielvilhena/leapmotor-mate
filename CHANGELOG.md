@@ -3,6 +3,13 @@
 All notable changes to LeapMotor Mate are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.1.6] — 2026-07-03
+
+### Added
+- **CSV charge import now takes start/end SoC and an end time** (#67, thanks @rossiadobe). The import template has three new **optional** columns — `start_soc`, `end_soc` and `end` (end date/time) — so imported historical charges show their **SoC gain and duration** just like live ones. Still SoH-safe: manual charges stay out of the battery-health estimate.
+- **Wallbox "max available" can be a fixed value** (#111, thanks @Wartopia). If your wallbox exposes no sensor for its maximum power/current, you can now type a **static value** (kW or A) in the wallbox mapping and the live tile fills from it. A mapped sensor still wins; display-only, it never affects cost.
+- **T03: an experimental "A/C off" test page** (#67). The T03's remote A/C-off is unsolved across the whole ecosystem, so — **for T03 owners only** — a card in Settings opens a page to try candidate off commands (plus fan/heat/recirculation probes) on the real car and report what works. Temporary; it'll be removed once the command is found.
+
 ## [2.1.5] — 2026-07-03
 
 ### Added

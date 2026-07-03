@@ -364,6 +364,21 @@ def _state_num(st: dict | None):
         return None, unit
 
 
+def _static_max_power():
+    """User-typed fallback for the wallbox 'max available' tile when no HA sensor exposes it (#111,
+    @Wartopia: knows the wallbox max, e.g. 11 kW / 16 A, but the PlugChoice integration has no sensor
+    for it). Returns (value, unit) or (None, ''). Display-only — it never feeds the cost."""
+    raw = (db_reader.get_setting("wb_max_power_static", "") or "").strip().replace(",", ".")
+    if not raw:
+        return None, ""
+    try:
+        val = float(raw)
+    except (TypeError, ValueError):
+        return None, ""
+    unit = db_reader.get_setting("wb_max_power_unit", "kW") or "kW"
+    return val, (unit if unit in ("kW", "A") else "kW")
+
+
 def get_live() -> dict:
     """Live wallbox data + session stats, from a single bulk /api/states fetch."""
     out = {"configured": False, "power_kw": None, "energy_kwh": None, "status": None,
@@ -405,6 +420,8 @@ def get_live() -> dict:
 
     out["speed"], out["speed_unit"] = _state_num(resolve("speed"))
     out["max_power"], out["max_power_unit"] = _state_num(resolve("max_power"))
+    if out["max_power"] is None:                         # no sensor → user's static value (#111)
+        out["max_power"], out["max_power_unit"] = _static_max_power()
 
     out["charging"] = out["power_kw"] is not None and out["power_kw"] > 0.05
     return out

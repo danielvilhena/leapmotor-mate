@@ -932,12 +932,14 @@ def update_charge_price(key: str, value: float) -> None:
 
 
 def add_manual_charge(started_at: str, energy_kwh: float, cost: Optional[float] = None,
-                      charge_type: str = "AC", ended_at: Optional[str] = None) -> int:
+                      charge_type: str = "AC", ended_at: Optional[str] = None,
+                      start_soc: Optional[float] = None, end_soc: Optional[float] = None) -> int:
     """Insert a user-entered historical charge — e.g. sessions from before Mate was installed —
-    so the lifetime totals / monthly report reflect them (#87). Manual charges carry only the
-    essentials (date, energy, cost, AC/DC) and deliberately have NO telemetry: start/end SoC are
-    left NULL, so they're excluded from the SoH estimate and have no power curve, and
-    location_type='MANUAL' keeps the automatic costers from overwriting the cost the user typed."""
+    so the lifetime totals / monthly report reflect them (#87). Date + energy are the essentials;
+    cost, AC/DC and — optionally — start/end SoC can be given (the latter drives the card's SoC-gain
+    tile, requested by @rossiadobe on #67). It stays SoH-safe either way: a manual charge has no power
+    curve, so get_battery_health integrates ~0 energy and skips it regardless of SoC. location_type=
+    'MANUAL' keeps the automatic costers from overwriting the cost the user typed."""
     db = _conn_rw()
     try:
         vrow = db.execute("SELECT id FROM vehicles ORDER BY id LIMIT 1").fetchone()
@@ -945,9 +947,9 @@ def add_manual_charge(started_at: str, energy_kwh: float, cost: Optional[float] 
         ct = "DC" if str(charge_type).upper() in ("DC", "FAST", "HPC") else "AC"
         cur = db.execute(
             "INSERT INTO charges (vehicle_id, started_at, ended_at, energy_added_kwh, "
-            "charge_type, location_type, cost, reconstructed) "
-            "VALUES (?, ?, ?, ?, ?, 'MANUAL', ?, 0)",
-            (vehicle_id, started_at, ended_at or started_at, energy_kwh, ct, cost))
+            "charge_type, location_type, cost, start_soc, end_soc, reconstructed) "
+            "VALUES (?, ?, ?, ?, ?, 'MANUAL', ?, ?, ?, 0)",
+            (vehicle_id, started_at, ended_at or started_at, energy_kwh, ct, cost, start_soc, end_soc))
         db.commit()
         return cur.lastrowid
     finally:

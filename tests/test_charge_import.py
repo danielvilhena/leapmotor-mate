@@ -21,9 +21,11 @@ def test_valid_rows_with_header_comments_and_blanks():
     )
     assert errors == []
     assert len(rows) == 2
-    assert rows[0] == {"started_at": "2025-11-03T21:30:00", "energy_kwh": 42.5, "cost": 8.1, "charge_type": "AC"}
+    assert rows[0] == {"started_at": "2025-11-03T21:30:00", "ended_at": None, "energy_kwh": 42.5,
+                       "cost": 8.1, "charge_type": "AC", "start_soc": None, "end_soc": None}
     # no time given → noon default (no day-shift), DC preserved
-    assert rows[1] == {"started_at": "2026-01-15T12:00:00", "energy_kwh": 18.0, "cost": 9.5, "charge_type": "DC"}
+    assert rows[1] == {"started_at": "2026-01-15T12:00:00", "ended_at": None, "energy_kwh": 18.0,
+                       "cost": 9.5, "charge_type": "DC", "start_soc": None, "end_soc": None}
 
 
 def test_optional_fields_blank():
@@ -41,8 +43,51 @@ def test_european_semicolon_csv_with_comma_decimals():
         "2025-06-02;12;;DC\n"
     )
     assert errors == []
-    assert rows[0] == {"started_at": "2025-05-01T08:00:00", "energy_kwh": 30.5, "cost": 8.1, "charge_type": "AC"}
+    assert rows[0] == {"started_at": "2025-05-01T08:00:00", "ended_at": None, "energy_kwh": 30.5,
+                       "cost": 8.1, "charge_type": "AC", "start_soc": None, "end_soc": None}
     assert rows[1]["energy_kwh"] == 12.0 and rows[1]["cost"] is None and rows[1]["charge_type"] == "DC"
+
+
+def test_optional_end_time_gives_duration():
+    rows, errors = _parse(
+        "date,energy_kwh,cost,type,start_soc,end_soc,end\n"
+        "2025-11-03 23:35,42.5,8.10,AC,23,60,2025-11-04 03:42\n"   # crosses midnight
+        "2025-06-02 10:00,20,,DC,,,\n"                             # no end → None
+    )
+    assert errors == []
+    assert rows[0]["started_at"] == "2025-11-03T23:35:00" and rows[0]["ended_at"] == "2025-11-04T03:42:00"
+    assert rows[1]["ended_at"] is None
+
+
+def test_end_before_start_and_bad_end_rejected():
+    rows, errors = _parse(
+        "2025-11-03 20:00,30,,AC,,,2025-11-03 18:00\n"   # end before start
+        "2025-11-04 10:00,30,,AC,,,notadate\n"           # bad end
+    )
+    assert rows == []
+    assert len(errors) == 2
+    assert "before the start" in errors[0] and "end" in errors[1]
+
+
+def test_optional_soc_columns():
+    rows, errors = _parse(
+        "date,energy_kwh,cost,type,start_soc,end_soc\n"
+        "2025-05-01,30,5,AC,23,80\n"       # both SoC
+        "2025-05-02,20,,DC,,\n"            # blank SoC → None
+    )
+    assert errors == []
+    assert rows[0]["start_soc"] == 23.0 and rows[0]["end_soc"] == 80.0
+    assert rows[1]["start_soc"] is None and rows[1]["end_soc"] is None
+
+
+def test_soc_out_of_range_and_nonnumeric_rejected():
+    rows, errors = _parse(
+        "2025-05-01,30,,AC,120,80\n"       # start_soc > 100
+        "2025-05-02,30,,AC,10,pieno\n"     # end_soc not a number
+    )
+    assert rows == []
+    assert len(errors) == 2
+    assert "start_soc" in errors[0] and "end_soc" in errors[1]
 
 
 def test_comma_csv_keeps_dot_decimals():

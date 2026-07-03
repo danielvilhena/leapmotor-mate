@@ -25,7 +25,7 @@ import mqtt_check
 import auth
 import update_check
 
-MATE_VERSION = "2.1.5"  # bump together with the git tag + add-on config.yaml at release
+MATE_VERSION = "2.1.6"  # bump together with the git tag + add-on config.yaml at release
 
 import diagnostics
 import demo
@@ -1241,6 +1241,8 @@ async def wallbox_entities(request: Request, show_all: int = 0):
                          for role in ha_client.WB_ROLES}
     return templates.TemplateResponse(request, "partials/wallbox_entities.html", _ctx(
         role_entities=role_entities, mapping=mapping, roles=ha_client.WB_ROLES, show_all=advanced,
+        wb_max_power_static=db_reader.get_setting("wb_max_power_static", ""),
+        wb_max_power_unit=db_reader.get_setting("wb_max_power_unit", "kW") or "kW",
     ))
 
 
@@ -1250,6 +1252,10 @@ async def save_wallbox_entities(request: Request):
     mapping = {role: form.get(role, "").strip()
                for role in ha_client.WB_ROLES if form.get(role, "").strip()}
     db_reader.set_setting("wallbox_entities", json.dumps(mapping))
+    # #111: optional static "max available" value — used only when no sensor is mapped for it (display).
+    static_unit = (form.get("max_power_static_unit", "kW") or "kW").strip()
+    db_reader.set_setting("wb_max_power_static", (form.get("max_power_static", "") or "").strip())
+    db_reader.set_setting("wb_max_power_unit", static_unit if static_unit in ("kW", "A") else "kW")
     db_reader.set_setting("wallbox_active_profile", "")  # settings edited directly → stale
     t = i18n.get_t(db_reader.get_language())
     return HTMLResponse(f'<span style="color:#22c55e;font-size:13px">{t("wallbox_saved")}</span>')
@@ -1264,6 +1270,41 @@ async def save_wallbox_keywords(request: Request):
     db_reader.set_setting("wallbox_active_profile", "")  # settings edited directly → stale
     t = i18n.get_t(db_reader.get_language())
     return HTMLResponse(f'<span style="color:#22c55e;font-size:13px">{t("wallbox_saved")}</span>')
+
+
+# ── TEMPORARY (#67): T03-only A/C-off command hunt — remove with web/t03_offtest.py once cracked ──
+def _is_t03() -> bool:
+    vehicle, _ = db_reader.get_vehicle()
+    return (vehicle or {}).get("car_type", "").upper() == "T03"
+
+
+@app.get("/t03-offtest", response_class=HTMLResponse)
+async def t03_offtest_page(request: Request):
+    """Unlinked, T03-only page to fire candidate A/C-off payloads at a real T03 (#67). Reached from a
+    car-type-gated card in Settings; inert (redirect) for every other model."""
+    if not _is_t03():
+        return RedirectResponse(request.headers.get("x-ingress-path", "") + "/")
+    import t03_offtest
+    return templates.TemplateResponse(request, "t03_offtest.html",
+                                      _ctx(page="t03_offtest", sections=t03_offtest.SECTIONS))
+
+
+@app.post("/api/t03-offtest", response_class=HTMLResponse)
+async def t03_offtest_fire(request: Request):
+    if not _is_t03():
+        return HTMLResponse("", status_code=403)
+    import t03_offtest
+    form = await request.form()
+    try:
+        cid = int(form.get("id", ""))
+    except (TypeError, ValueError):
+        return HTMLResponse("bad id", status_code=400)
+    ok, msg = t03_offtest.fire(cid)
+    if ok:
+        return HTMLResponse(
+            f'<span style="color:#22c55e">✓ #{cid} inviato — <b>guarda l\'auto</b>: si è spenta? '
+            f'Se sì è il <b>#{cid}</b>, scrivicelo su GitHub!</span>')
+    return HTMLResponse(f'<span style="color:#ef4444">✗ #{cid} non inviato ({msg})</span>')
 
 
 @app.post("/api/settings/wallbox-auto-home", response_class=HTMLResponse)
@@ -1697,7 +1738,9 @@ async def charges_import_api(request: Request):
         raw = raw.decode("utf-8-sig", "replace")        # utf-8-sig drops the BOM Excel prepends
     rows, errors = charge_import.parse_charge_csv(raw)
     for r in rows:
-        db_reader.add_manual_charge(r["started_at"], r["energy_kwh"], r["cost"], r["charge_type"])
+        db_reader.add_manual_charge(r["started_at"], r["energy_kwh"], r["cost"], r["charge_type"],
+                                    ended_at=r.get("ended_at"),
+                                    start_soc=r.get("start_soc"), end_soc=r.get("end_soc"))
     parts = []
     if rows:
         parts.append(f'<span style="color:#22c55e">✓ {_esc(t("import_done").format(n=len(rows)))}</span>')
