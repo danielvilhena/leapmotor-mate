@@ -264,14 +264,23 @@ def _cost_wallbox_section() -> str:
     try:
         db = db_reader._get()
         rows = db.execute(
-            "SELECT started_at, location_type, energy_added_kwh, ac_energy_kwh, cost "
-            "FROM charges WHERE ended_at IS NOT NULL ORDER BY started_at DESC LIMIT 6").fetchall()
+            "SELECT started_at, location_type, energy_added_kwh, ac_energy_kwh, cost, "
+            "wallbox_energy_start_kwh, reconstructed FROM charges WHERE ended_at IS NOT NULL "
+            "ORDER BY started_at DESC LIMIT 8").fetchall()
         lines.append("")
-        lines.append("Last charges — type · DC kWh (battery) · AC kWh (wallbox) · cost:")
+        lines.append("Last charges — DC (battery) · AC (wallbox) · cost · wb baseline · "
+                     "show_wb=does-the-card-show-AC · raw ac_energy value (#109 diagnosis):")
         for r in (rows or []):
-            lines.append(f"  {(r['started_at'] or '')[:16]}  {(r['location_type'] or '-'):6} "
-                         f"DC={_num(r['energy_added_kwh'])}  AC={_num(r['ac_energy_kwh'])}  "
-                         f"cost={_num(r['cost'])}")
+            ac_raw = r["ac_energy_kwh"]
+            # EXACT card condition (charges.html `show_wb`): a truthy AC energy on a HOME charge.
+            # If show_wb is False here but cost was billed on AC, ac_energy was lost between billing
+            # and render — the smoking gun for "cost on AC, card shows DC".
+            show_wb = bool(ac_raw) and r["location_type"] == "HOME"
+            lines.append(
+                f"  {(r['started_at'] or '')[:16]} {(r['location_type'] or '-'):5} "
+                f"DC={_num(r['energy_added_kwh'])} AC={_num(ac_raw)} cost={_num(r['cost'])} "
+                f"wb_start={_num(r['wallbox_energy_start_kwh'])} show_wb={show_wb} "
+                f"raw_ac={ac_raw!r} recon={r['reconstructed']}")
         if not rows:
             lines.append("  (no charges)")
     except Exception as e:  # noqa: BLE001
