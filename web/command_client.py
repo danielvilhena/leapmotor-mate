@@ -998,7 +998,10 @@ def ac_on():
 #  • B05: stays on the B10/C10 path (no data either way — don't change what we can't verify).
 def ac_off():
     def _do(api, vin):
+        # ONLY the T03 diverges (logged for #67 validation). B10/C10/B05 keep the EXACT original
+        # behaviour below — not even a log line added to their path.
         if _session_car_type() == "T03":
+            log.info("A/C-off (web, T03) → api.ac_off() [RemoteActionCtlClimate operate=close]")
             return api.ac_off(vin)
         return api.ac_switch(vin, params={"operate": "off"})
     return _session.execute(_do)

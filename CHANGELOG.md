@@ -3,6 +3,15 @@
 All notable changes to LeapMotor Mate are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.1.2] — 2026-07-03
+
+### Fixed
+- **T03: an explicit "A/C Off" button** (#67, thanks @rossiadobe for the live logs). On the T03 the car reports its climate as "off" even when it's actually running, so the climate tiles could never switch it off. A dedicated **A/C Off** button now appears **on the T03 only** and sends the off command directly, bypassing that unreliable state. B10/C10/B05 are completely unchanged.
+- **Charges: removed the "actual charge" time window** (#109, thanks @riri19). It was derived from the last sample with live power, which under-reports the end time whenever the car sleeps mid-charge (the cloud stops reporting power) — showing a confusing, wrong end time. Removed.
+
+### Added
+- **Diagnostics: cost & wallbox section** — the shareable diagnostics bundle now includes the pricing mode per charge type, base prices, the wallbox entity mapping and the last few charges (DC / AC / cost), so cost questions can be diagnosed from a single file.
+
 ## [2.1.1] — 2026-07-02
 
 ### Fixed

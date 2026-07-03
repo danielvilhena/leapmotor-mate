@@ -25,7 +25,7 @@ import mqtt_check
 import auth
 import update_check
 
-MATE_VERSION = "2.1.1"  # bump together with the git tag + add-on config.yaml at release
+MATE_VERSION = "2.1.2"  # bump together with the git tag + add-on config.yaml at release
 
 import diagnostics
 import demo
@@ -851,6 +851,7 @@ async def commands(request: Request):
     return templates.TemplateResponse(request, "commands.html", _ctx(
         page="commands", vehicle=vehicle, status=status, comfort=comfort, **_wins_ctx(),
         ac_off_shown=capability_profile.command_shown(vehicle.get("vin") if vehicle else None, "climate_off"),
+        is_t03=(vehicle.get("car_type") or "").upper() == "T03" if vehicle else False,
     ))
 
 
@@ -2330,6 +2331,7 @@ async def cmd_grid(request: Request):
     return templates.TemplateResponse(request, "partials/cmd_grid.html", _ctx(
         status=status, comfort=comfort, **_wins_ctx(),
         ac_off_shown=capability_profile.command_shown(vin, "climate_off"),
+        is_t03=(vehicle.get("car_type") or "").upper() == "T03" if vehicle else False,
     ))
 
 

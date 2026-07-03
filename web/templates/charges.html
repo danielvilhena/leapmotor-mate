@@ -321,9 +321,6 @@ document.body.addEventListener('htmx:afterSwap', function (e) {
                       {{ c.started_at[11:16] if c.started_at else '—' }}
                       <span class="text-slate-500 font-normal">→ {{ c.ended_at[11:16] if c.ended_at else '' }}</span>
                     </div>
-                    {% if c.active_window and c.active_window.differs %}
-                    <div class="text-[11px] text-emerald-400/90 mt-0.5">⚡ {{ t('charge_actual_window') }} {{ c.active_window.real_start }} → {{ c.active_window.real_end }}</div>
-                    {% endif %}
                     <div class="text-slate-500 text-xs mt-0.5">
                       ⏱ {{ fmt_dur(c.duration_min) }}
                       {% if c.max_power_kw %}· {{ "%.1f"|format(c.max_power_kw) }} kW peak{% endif %}

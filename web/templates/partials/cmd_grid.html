@@ -259,6 +259,13 @@
       {{ climate_tile("quick_vent",         t('clim_vent'),    ico.mdi('fan'),               clim_vent, tone='vent') }}
       {{ climate_tile("windshield_defrost", t('clim_defrost'), ico.mdi('car-defrost-front'), clim_defrost, tone='heat') }}
       {{ climate_tile("recirc_toggle",      t('recirculation'),ico.mdi('air-conditioner'),   clim_recirc, tone='vent', editable=clim_recirc_ed) }}
+      {% if is_t03 %}
+      {# Explicit A/C-OFF — T03 ONLY. A plain action (not a toggle tile) so it fires regardless of the
+         reported climate_on: on the T03 that signal (1938) stays false even with the A/C on (#67), so
+         the toggle tiles can never turn it off. B10/C10/B05 keep their toggle tiles unchanged and never
+         see this button. Payload chosen in command_client.ac_off (T03 → api.ac_off). #}
+      {{ action_tile("ac_off", ico.mdi('air-conditioner'), t('clim_off'), t('clim_off_btn')) }}
+      {% endif %}
     </div>
     {% else %}
     <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
@@ -267,6 +274,13 @@
       {{ climate_tile("quick_vent",         t('clim_vent'),    ico.mdi('fan'),               clim_vent, tone='vent') }}
       {{ climate_tile("windshield_defrost", t('clim_defrost'), ico.mdi('car-defrost-front'), clim_defrost, tone='heat') }}
       {{ climate_tile("recirc_toggle",      t('recirculation'),ico.mdi('air-conditioner'),   clim_recirc, tone='vent', editable=clim_recirc_ed) }}
+      {% if is_t03 %}
+      {# Explicit A/C-OFF — T03 ONLY. A plain action (not a toggle tile) so it fires regardless of the
+         reported climate_on: on the T03 that signal (1938) stays false even with the A/C on (#67), so
+         the toggle tiles can never turn it off. B10/C10/B05 keep their toggle tiles unchanged and never
+         see this button. Payload chosen in command_client.ac_off (T03 → api.ac_off). #}
+      {{ action_tile("ac_off", ico.mdi('air-conditioner'), t('clim_off'), t('clim_off_btn')) }}
+      {% endif %}
     </div>
     {% endif %}
 

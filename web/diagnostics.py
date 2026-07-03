@@ -228,6 +228,57 @@ def _soc_daily_section() -> str:
     return "\n".join(out) or "(no SoC samples in the last 14 days)"
 
 
+def _cost_wallbox_section() -> str:
+    """Pricing config (mode per type + base prices + dynamic sensors), wallbox entity mapping, and the
+    last few charges (type · DC · AC/wallbox · cost) — so a 'why is my cost X, kWh Y' report (#109)
+    can be diagnosed without guessing. No credentials: entity names + kWh/cost figures only."""
+    def _num(x):
+        try:
+            return f"{float(x):.2f}"
+        except (TypeError, ValueError):
+            return "—"
+    lines = []
+    try:
+        cfg = db_reader.get_cost_config()
+        prices = db_reader.get_charge_prices()
+        modes = cfg.get("modes") or {}
+        lines.append(f"Cost method  : {cfg.get('method', '-')} · legacy mode {cfg.get('mode', '-')} "
+                     f"· TOU bands {len(cfg.get('bands') or [])}")
+        lines.append("Mode / type  : " + ", ".join(
+            f"{t}={modes.get(t, cfg.get('mode', 'flat'))}" for t in ("HOME", "AC", "FAST", "HPC")))
+        lines.append("Base €/kWh   : " + (", ".join(f"{k}={v}" for k, v in sorted(prices.items()))
+                                          or "(none set)"))
+        for t in ("HOME", "AC", "FAST", "HPC"):
+            if modes.get(t, cfg.get("mode", "flat")) == "dynamic":
+                lines.append(f"Dynamic sensor ({t}): "
+                             f"{db_reader.get_dynamic_price_entity_for(t) or '(none)'}")
+    except Exception as e:  # noqa: BLE001
+        lines.append(f"(cost config unavailable: {e})")
+    try:
+        we = db_reader.get_setting("wallbox_entities", "")
+        lines.append("Wallbox map  : "
+                     + (we or "(no entities mapped → no AC energy → HOME cost billed on DC/SoC)"))
+        lines.append(f"Auto-HOME    : {db_reader.get_setting('wallbox_auto_home', '0')}")
+    except Exception as e:  # noqa: BLE001
+        lines.append(f"(wallbox config unavailable: {e})")
+    try:
+        db = db_reader._get()
+        rows = db.execute(
+            "SELECT started_at, location_type, energy_added_kwh, ac_energy_kwh, cost "
+            "FROM charges WHERE ended_at IS NOT NULL ORDER BY started_at DESC LIMIT 6").fetchall()
+        lines.append("")
+        lines.append("Last charges — type · DC kWh (battery) · AC kWh (wallbox) · cost:")
+        for r in (rows or []):
+            lines.append(f"  {(r['started_at'] or '')[:16]}  {(r['location_type'] or '-'):6} "
+                         f"DC={_num(r['energy_added_kwh'])}  AC={_num(r['ac_energy_kwh'])}  "
+                         f"cost={_num(r['cost'])}")
+        if not rows:
+            lines.append("  (no charges)")
+    except Exception as e:  # noqa: BLE001
+        lines.append(f"(charges unavailable: {e})")
+    return "\n".join(lines)
+
+
 def build_bundle(version: str, parts=_BUNDLE_PARTS, lines: int = 300, signals: dict | None = None) -> str:
     """One redacted text blob to attach to an issue. `parts` selects which sections to include
     (any of 'info', 'poller', 'web', 'signals'); a one-line version header is always present. The
@@ -256,6 +307,7 @@ def build_bundle(version: str, parts=_BUNDLE_PARTS, lines: int = 300, signals: d
         ]
         out += ["", "----- battery standby / vampire-drain (computed) -----", _vampire_section()]
         out += ["", "----- SoC by day (last 14d · hi→lo · km driven) -----", _soc_daily_section()]
+        out += ["", "----- cost & wallbox config -----", _cost_wallbox_section()]
     if "poller" in want:
         out += ["", "----- poller log (recent) -----", read_log_tail("poller", lines)]
     if "web" in want:

@@ -155,16 +155,17 @@ def _handle_mqtt_command(client, service, db, vin: str, cmd: str, value):
             elif cmd == "climate_defrost":
                 api.windshield_defrost(vin); optimistic = ("climate_on", True)
             elif cmd == "climate_off":
-                # A/C full-OFF, MODEL-SPECIFIC (mirrors command_client.ac_off): the B10/T03 want
-                # OPPOSITE payloads. B10/C10 use ac_switch operate=off (1938→0, confirmed on-car; the
-                # B10 ignores operate=close); the T03 is the reverse — it ignores ac_switch operate=off
-                # (#67) and switches off via api.ac_off() = operate=close, as markoceri's own T03 app
-                # does. B05 stays on the B10/C10 path. Guarded so an off-when-already-off no-ops.
-                if getattr(service, "last_climate_on", None) is False:
-                    return
+                # A/C full-OFF. ONLY the T03 diverges (#67): its climate_on signal (1938) stays false
+                # even with the A/C on, so the "already-off" guard would block every off, and it ignores
+                # ac_switch operate=off — it switches off via the dedicated api.ac_off() (operate=close,
+                # as markoceri's own T03 app does; not a toggle, so sending it when already off is safe).
+                # B10/C10/B05 keep the EXACT original path below (guard + ac_switch operate=off), untouched.
                 if (getattr(getattr(client, "_vehicle", None), "car_type", "") or "").upper() == "T03":
+                    log.info("A/C-off (MQTT, T03) → api.ac_off() [operate=close]")
                     api.ac_off(vin)
                 else:
+                    if getattr(service, "last_climate_on", None) is False:
+                        return
                     api.ac_switch(vin, params={"operate": "off"})
                 optimistic = ("climate_on", False)
             elif cmd == "climate_vent":
