@@ -96,6 +96,23 @@ COMMAND_FEATURE = {
     "seat_vent_passenger_off": "seat_vent_cmd",
 }
 
+# Optional features KNOWN ABSENT on a given model — hardware/right the car simply does not have,
+# confirmed from RELIABLE ability evidence (seats + prepare), never a guess. Hidden on that model so
+# its owner sees only what actually works. Extend one line per model as new EVs (B05, …) are
+# characterised on-car. ⚠️ CLIMATE IS DELIBERATELY EXCLUDED: the T03's climate ability codes are
+# misleading (declares CLIMATE_ADVANCED yet ignores some writes; lacks AC_ON yet cools — #67), so
+# climate is never gated from this table — only on direct empirical proof, elsewhere.
+MODEL_ABSENT: dict[str, tuple[str, ...]] = {
+    # T03: no ventilated seats (ability 42/43 absent), no PREPARE right (38) → prepare-car is inert.
+    "T03": ("seat_vent", "seat_vent_cmd", "prepare_car"),
+}
+
+
+def model_hidden(car_type: str, feature: str) -> bool:
+    """True if `feature` is known-absent on this model → hide it. Pure/stateless (safe for web +
+    poller, no db). Unknown model or feature → False (show). Case-insensitive on car_type."""
+    return feature in MODEL_ABSENT.get((car_type or "").upper(), ())
+
 
 def is_core(feature: str) -> bool:
     return bool(FEATURES.get(feature, {}).get("core"))
@@ -158,12 +175,17 @@ def verdict(vin: str, feature: str, default: str = "untested",
     return load(vin, get_setting).get(feature, default)
 
 
-def is_shown(vin: str, feature: str, get_setting: Optional[Callable] = None) -> bool:
-    """Show everything EXCEPT what is confirmed 'broken'. CORE features are NEVER hidden
-    (they power Mate's own reports/charts). Unknown/'untested' features are shown — we
-    never hide on a guess."""
+def is_shown(vin: str, feature: str, get_setting: Optional[Callable] = None,
+             *, car_type: str = "") -> bool:
+    """Show everything EXCEPT what is confirmed 'broken' or known-absent on this model. CORE
+    features are NEVER hidden (they power Mate's own reports/charts). Unknown/'untested' features
+    are shown — we never hide on a guess. Pass `car_type` to enable per-model hiding via
+    MODEL_ABSENT; omit it and behaviour is byte-for-byte unchanged (so callers that don't know the
+    model, and every non-listed model, are unaffected)."""
     if is_core(feature):
         return True
+    if car_type and model_hidden(car_type, feature):
+        return False
     return load(vin, get_setting).get(feature, "untested") != "broken"
 
 

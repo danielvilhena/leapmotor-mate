@@ -216,8 +216,15 @@ def _ctx(**kwargs):
             if _match:
                 wb_active_profile_name = _match["name"]
                 wb_active_profile_id   = _pid
+    # Per-model nav gating: hide links to pages the car physically can't use (e.g. T03 has no
+    # prepare-car — no PREPARE right). Reuse a vehicle already in the context, else a cheap lookup.
+    _veh = kwargs.get("vehicle")
+    if _veh is None:
+        _veh, _ = db_reader.get_vehicle()
+    _car_type = (_veh or {}).get("car_type", "")
     return {**kwargs, "lang": lang, "t": t, "version": MATE_VERSION, "demo": _IS_DEMO,
             "update": update_check.get_update_status(MATE_VERSION),
+            "prepare_car_shown": not capability_profile.model_hidden(_car_type, "prepare_car"),
             "wallbox_enabled": wallbox_enabled,
             "is_reev": db_reader.get_setting("is_reev", "0") == "1",
             "research": research.research_enabled(),
@@ -766,10 +773,11 @@ _COMFORT_TOGGLE = {
 }
 
 
-def _comfort_rows(vin):
+def _comfort_rows(vin, car_type=""):
     """Read-only comfort STATE sensors for the Commands page. The poller writes the live
     values to settings as `comfort_state_<vin>`; we show only the ones not confirmed broken
-    on this car (the remote command may be broken even when the state sensor works)."""
+    on this car (the remote command may be broken even when the state sensor works), and drop
+    what this model physically lacks (e.g. T03 has no ventilated seats — MODEL_ABSENT)."""
     if not vin:
         return []
     raw = db_reader.get_setting(f"comfort_state_{vin.lower()}", "")
@@ -779,7 +787,7 @@ def _comfort_rows(vin):
         state = {}
     rows = []
     for skey, feat, label_key, icon, accent in _COMFORT_ROWS:
-        if not capability_profile.is_shown(vin, feat):
+        if not capability_profile.is_shown(vin, feat, car_type=car_type):
             continue
         v = int(state.get(skey) or 0)
         row = {"icon": icon, "accent": accent, "label_key": label_key, "value": v,
@@ -787,12 +795,12 @@ def _comfort_rows(vin):
         # Seats → level slider (0–3); steering/mirror → on/off toggle. Gated by the command capability.
         if skey.startswith("seat_"):
             _, func, side = skey.split("_", 2)        # func: heat|vent, side: driver|passenger
-            if capability_profile.is_shown(vin, f"seat_{func}_cmd"):
+            if capability_profile.is_shown(vin, f"seat_{func}_cmd", car_type=car_type):
                 row.update(control="slider", func=func,
                            position=("driver" if side == "driver" else "copilot"))
         elif skey in _COMFORT_TOGGLE:
             cfeat, cmd_on, cmd_off = _COMFORT_TOGGLE[skey]
-            if capability_profile.is_shown(vin, cfeat):
+            if capability_profile.is_shown(vin, cfeat, car_type=car_type):
                 row.update(control="toggle", cmd_on=cmd_on, cmd_off=cmd_off)
         rows.append(row)
     return rows
@@ -855,7 +863,7 @@ def _wins_ctx() -> dict:
 async def commands(request: Request):
     vehicle, _ = db_reader.get_vehicle()
     status = db_reader.get_latest_status()
-    comfort = _comfort_rows(vehicle.get("vin") if vehicle else None)
+    comfort = _comfort_rows(vehicle.get("vin") if vehicle else None, (vehicle or {}).get("car_type", ""))
     return templates.TemplateResponse(request, "commands.html", _ctx(
         page="commands", vehicle=vehicle, status=status, comfort=comfort, **_wins_ctx(),
         ac_off_shown=capability_profile.command_shown(vehicle.get("vin") if vehicle else None, "climate_off"),
@@ -947,6 +955,9 @@ async def prepare_car_page(request: Request):
     """One-touch vehicle preparation (cmd 360 immediate / 361 schedule). Mirrors the official app:
     bundle A/C + seats + steering + mirror + destination, run now or on a schedule. B10/C10 only."""
     vehicle, _ = db_reader.get_vehicle()
+    # Inert on models without the PREPARE right (e.g. T03) — hide the page like its nav link.
+    if capability_profile.model_hidden((vehicle or {}).get("car_type", ""), "prepare_car"):
+        return RedirectResponse(request.headers.get("x-ingress-path", "") + "/")
     ready_cfg = db_reader.get_ready_automation_config()
     wins_stops = _wins_stops()
     return templates.TemplateResponse(request, "prepare_car.html", _ctx(
@@ -2420,7 +2431,7 @@ async def cmd_grid(request: Request):
     status = db_reader.get_latest_status()
     vehicle, _ = db_reader.get_vehicle()
     vin = vehicle.get("vin") if vehicle else None
-    comfort = _comfort_rows(vin)
+    comfort = _comfort_rows(vin, (vehicle or {}).get("car_type", ""))
     return templates.TemplateResponse(request, "partials/cmd_grid.html", _ctx(
         status=status, comfort=comfort, **_wins_ctx(),
         ac_off_shown=capability_profile.command_shown(vin, "climate_off"),

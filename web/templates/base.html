@@ -270,9 +270,11 @@
       <a href="scheduling"  class="nav-link {% if page=='scheduling'  %}active{% endif %}">
         <span class="text-lg">📅</span> {{ t('nav_scheduling') }}
       </a>
+      {% if prepare_car_shown %}
       <a href="prepare-car" class="nav-link {% if page=='prepare_car' %}active{% endif %}">
         <span class="text-lg">🔧</span> {{ t('nav_prepare_car') }}
       </a>
+      {% endif %}
       <a href="navigation"  class="nav-link {% if page=='navigation'  %}active{% endif %}">
         <span class="text-lg">🧭</span> {{ t('nav_navigation') }}
       </a>
