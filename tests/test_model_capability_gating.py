@@ -5,6 +5,9 @@ so new EVs (B05, …) are one line away. HARD CONSTRAINTS proven here:
   • CLIMATE is never gated from this table (its T03 ability codes lie — see #67).
   • Other models (B10/C10/B05) and callers that pass no car_type are byte-for-byte unchanged.
 CI-safe: pure helpers + _comfort_rows with db_reader.get_setting stubbed (no DB, no network)."""
+import pytest
+
+pytest.importorskip("fastapi", reason="web.main needs fastapi (absent in the minimal CI test env)")
 import capability_profile as cp
 import main
 
