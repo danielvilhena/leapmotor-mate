@@ -25,5 +25,7 @@
   </form>
 </div>
 {% else %}
-<div class="wb-ctl-tile bg-slate-800 rounded-xl p-4 border border-slate-700 text-xs text-slate-500">—</div>
+{# #114 (@Wartopia): no controllable max-current entity on this wallbox → render NOTHING (was a
+   label-less "—" tile that read as broken on read-only wallboxes like PlugChoice). The slider branch
+   above is untouched, so wallboxes that DO expose a controllable max-current are unchanged. #}
 {% endif %}
