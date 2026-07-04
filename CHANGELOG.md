@@ -3,6 +3,11 @@
 All notable changes to LeapMotor Mate are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.1.9] — 2026-07-04
+
+### Fixed
+- **Scheduled preparation: saving no longer fails with "Request failed"** (#116, thanks @riri19). A one-time ("once") prepare-car appointment that has already fired used to linger in the list, and since saving *any* schedule re-sends the **whole** list to the car (the cloud only supports full-list replacement), a single spent "once" entry made the car reject the entire batch — so no schedule could be saved or deleted. Mate now drops already-fired "once" appointments from the write: saving works again, and those dead entries get cleared from the car in the process. Recurring (weekday) schedules are untouched — they were never the problem, and the car re-anchors them on its own. These stale "once" entries are typically left over from the official app, since schedules live on the shared Leapmotor cloud.
+
 ## [2.1.8] — 2026-07-04
 
 ### Changed

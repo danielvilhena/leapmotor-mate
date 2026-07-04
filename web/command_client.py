@@ -879,11 +879,44 @@ def get_prepare_car_schedule() -> list | None:
     return _session.get_prepare_car_schedule()
 
 
+def _drop_past_oneshots(controls: list) -> list:
+    """Drop spent one-shot entries before a full-state cmd-361 write, so one of them can't
+    -2-reject the whole batch (#116).
+
+    A 361 write ships EVERY entry (the save/delete routes read the current list, change one, and
+    write them ALL back). Isolated on-car, exactly ONE combination makes the cloud reject the batch
+    with -2 ("Request failed"): a ONE-SHOT entry (no weekday, days=[]) whose start_time has already
+    passed — a "once" appointment that already fired and can't be re-registered. Recurring entries
+    (weekday set) save fine even with a stale anchor (the cloud recomputes the next occurrence from
+    the weekday), and still-pending one-shots are fine too — so we touch NOTHING else. Omitting the
+    spent one-shots from the full-state write both unblocks the save AND clears them from the cloud.
+    These stale one-shots are typically inherited from the official Leapmotor app (schedules live on
+    the shared cloud), not created by Mate. Model-agnostic — only the 361 payload is filtered, never
+    a live command path, so B10/C10/B05/T03 behaviour is unchanged."""
+    import datetime
+    now = datetime.datetime.now()
+    out: list = []
+    for e in controls:
+        if isinstance(e, dict) and not (e.get("days") or []):        # one-shot: no weekday set
+            try:
+                if datetime.datetime.strptime(str(e.get("start_time") or ""),
+                                              "%Y-%m-%d %H:%M:%S") <= now:
+                    log.info("prepare 361: dropping spent one-shot %s (fired at %s)",
+                             e.get("set_id"), e.get("start_time"))
+                    continue                                         # already fired → drop
+            except ValueError:
+                pass                                                 # unparseable → keep verbatim
+        out.append(e)
+    return out
+
+
 def set_prepare_car_schedule(controls: list) -> tuple:
     """Write the FULL prepare-car schedule list (cmd 361, full-state replacement — pass every entry
     you want to keep; [] cancels all). The lib has no setter for 361, so we drive the proven lower-level
     PIN/signing path directly with cmd_id=361 and the same {"controls":[...]} envelope as the climate
-    schedule (verified gateway-recognised; PrepareCarT01)."""
+    schedule (verified gateway-recognised; PrepareCarT01). Spent one-shot entries are dropped first so
+    one already-fired 'once' appointment can't -2-reject the whole batch (#116)."""
+    controls = _drop_past_oneshots(controls)
     body = json.dumps({"controls": controls}, separators=(",", ":"))
     return _session.execute(lambda api, vin: api._remote_control_raw(
         vin=vin, cmd_id="361", cmd_content=body, action_label="prepare_car_alarm"))
