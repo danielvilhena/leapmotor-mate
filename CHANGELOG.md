@@ -3,6 +3,14 @@
 All notable changes to LeapMotor Mate are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.1.8] — 2026-07-04
+
+### Changed
+- **T03: Mate now shows only what the car actually has.** The T03 has no ventilated seats and no one-touch "Prepare car", so those controls — the seat-ventilation tiles and the Prepare-car page/menu entry — are now hidden on a T03 instead of sitting there inert. It's driven by a small per-model table, so a future model can be tuned the same way in one line. Climate is deliberately left untouched (the T03's climate is handled empirically, #67). **B10/C10/B05 are unchanged.**
+
+### Fixed
+- **Wallbox: no more blank, label-less tile** (#114, thanks @Wartopia). On the Wallbox page the "max current" control drew an empty "—" with no label when the wallbox exposes no controllable current entity (e.g. PlugChoice), which read as a broken box. It's now simply hidden in that case; the slider is unchanged for wallboxes that do expose a controllable current. (The other tiles that look empty during a live first session — Wallbox/Battery kWh, Efficiency, Car-vs-Wallbox — are lifetime/comparison values that fill in once the charge completes.)
+
 ## [2.1.7] — 2026-07-03
 
 ### Fixed
