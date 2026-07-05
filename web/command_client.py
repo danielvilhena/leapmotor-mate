@@ -566,11 +566,30 @@ class LeapmotorSession:
         raw = resp.get("body")
         return _json.loads(raw) if isinstance(raw, str) else (raw or {})
 
+    def _raw_getplugin(self):
+        """Raw, UNMAPPED getPlugInLastNweeks100kmEC response (research probe helper) — the REEV twin
+        of the weekly rank: same drivingRecord/v1 family + weekly-rank signature, but the payload
+        also carries the FUEL split (oc100km per 100km / ocMpg) alongside the electric one. On our
+        BEV every fuel field is 0; on a range-extender this is the cloud's own L/100km, which is what
+        we're here to CONFIRM. Raw on purpose — captures any fuel field the BEV mapping would drop."""
+        import json as _json
+        from urllib.parse import quote
+        from leapmotor_api.crypto import build_consumption_weekly_rank_headers
+        api, vin = self._api, self._vehicle.vin
+        headers = build_consumption_weekly_rank_headers(
+            sign_key=api.sign_key, device_id=api.device_id, carvin=vin, language=api.language).to_dict()
+        headers.update(api._auth_headers())
+        resp = api._post(path="/carownerservice/oversea/drivingRecord/v1/getPlugInLastNweeks100kmEC",
+                         headers=headers, data=f"carvin={quote(vin, safe='')}", cert=api.account_cert)
+        raw = resp.get("body")
+        return _json.loads(raw) if isinstance(raw, str) else (raw or {})
+
     def get_consumption_probe_raw(self) -> dict | None:
         """Research/beta ONLY: UNMAPPED raw JSON of the cloud consumption endpoints, for REEV field
         discovery — e.g. a fuel L/100km field the BEV mapping (driverEC/acEC/otherEC, hundredKmEC)
-        would silently drop. Captures getEC over the last 24h and last 7d, plus the 6-week 100km
-        rank. Returns {label: raw_json} or None. Called only from the research-gated export."""
+        would silently drop. Captures getEC over the last 24h and last 7d, the 6-week 100km rank,
+        plus the REEV plug-in split (getPlugInLastNweeks100kmEC — carries oc100km fuel). Returns
+        {label: raw_json} or None. Called only from the research-gated export."""
         import time as _time
         with self._lock:
             try:
@@ -581,6 +600,7 @@ class LeapmotorSession:
                     "getEC_last24h":  self._raw_getec(now - 86400, now),
                     "getEC_last7d":   self._raw_getec(now - 7 * 86400, now),
                     "weekly_rank_6w": self._raw_weekly_rank(),
+                    "getplugin_100km_6w": self._raw_getplugin(),
                 }
             except Exception as e:  # noqa: BLE001
                 log.warning("consumption probe (research) failed: %s", e)
