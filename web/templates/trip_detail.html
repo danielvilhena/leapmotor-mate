@@ -11,12 +11,19 @@
     {{ trip.started_at | localdate if trip.started_at else 'Trip' }}
     <span class="text-slate-400 font-normal text-base ml-1">{{ trip.started_at[11:16] if trip.started_at else '' }}</span>
   </h1>
+  {% if trip.reconstructed %}
+  <span class="text-[11px] text-amber-400/90 border border-amber-400/40 rounded-full px-2 py-0.5"
+        title="{{ t('trip_reconstructed_hint') }}">✨ {{ t('trip_reconstructed') }}</span>
+  {% endif %}
+  {% set has_route = trip.positions and trip.positions|length > 1 %}
+  {% if has_route %}
   <a href="trips/{{ trip.id }}/route.gpx" download
      class="ml-auto border border-slate-600 text-slate-300 text-xs font-medium rounded-lg px-3 py-1.5 hover:border-brand flex-shrink-0">↓ {{ t('export_gpx') }}</a>
+  {% endif %}
   {# full path: relative URLs resolve against <base href> (the app root), so a bare
      "{{ trip.id }}" became DELETE /<id> → 404 and the button silently did nothing #}
   <button hx-delete="trips/{{ trip.id }}" hx-confirm="{{ t('trip_delete_confirm') }}"
-          class="border border-red-900/60 text-red-400 text-xs font-medium rounded-lg px-3 py-1.5 hover:border-red-500 hover:bg-red-500/10 flex-shrink-0">
+          class="{% if not has_route %}ml-auto {% endif %}border border-red-900/60 text-red-400 text-xs font-medium rounded-lg px-3 py-1.5 hover:border-red-500 hover:bg-red-500/10 flex-shrink-0">
     🗑 {{ t('trip_delete') }}</button>
 </div>
 
@@ -83,9 +90,10 @@
         <span id="ec-convert-msg" class="ml-2"></span>
       </div>
       {% endif %}
-      {% if trip.ec_stable %}
+      {% if trip.ec_stable and not trip.reconstructed %}
       <!-- Revert this trip's official-data conversion back to the SoC estimate (the value backed up
-           at convert time). Recovery path if a conversion landed on incomplete cloud data (#96). -->
+           at convert time). Recovery path if a conversion landed on incomplete cloud data (#96).
+           Reconstructed trips are ec_stable=1 to skip enrichment but were never converted → no revert. -->
       <div class="mt-3">
         <button type="button"
                 class="inline-flex items-center gap-1.5 rounded-lg border border-slate-600 text-slate-300 px-3 py-1.5 text-xs font-medium hover:border-slate-400 hover:text-white"
@@ -367,9 +375,12 @@
 
     {% else %}
     <div class="flex items-center justify-center h-64 text-slate-500">
-      <div class="text-center">
-        <div class="text-4xl mb-2">📍</div>
-        <div>{{ t('not_enough_gps') }}</div>
+      <div class="text-center px-4">
+        <div class="text-4xl mb-2">{% if trip.reconstructed %}✨{% else %}📍{% endif %}</div>
+        <div>{{ t('trip_no_route') if trip.reconstructed else t('not_enough_gps') }}</div>
+        {% if trip.reconstructed %}
+        <div class="text-xs text-slate-600 mt-1 max-w-xs mx-auto">{{ t('trip_reconstructed_hint') }}</div>
+        {% endif %}
       </div>
     </div>
     {% endif %}

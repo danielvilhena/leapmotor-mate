@@ -37,6 +37,15 @@ _WB_FLOOR_KWH = 1.0
 # is never rejected.
 _RECONSTRUCT_MAX_KW = 250.0
 
+# Robustness for flaky car↔cloud links (#118): a reconstructed TRIP above this distance is an odometer
+# glitch, not a drive — reject it so it can't poison the (now stats-counted) history. And a
+# reconstructed trip's duration is only the offline GAP (an upper bound); keep it only when it implies a
+# plausible average speed — a gap padded with parked/offline time, or a glitch, gets a NULL duration so
+# it never skews the duration/avg-speed stats (distance + energy + efficiency still count).
+_RECONSTRUCT_MAX_TRIP_KM = 1500.0
+_RECONSTRUCT_TRIP_MIN_KMH = 8.0
+_RECONSTRUCT_TRIP_MAX_KMH = 160.0
+
 
 def _wb_energy_ceiling(max_power_kw: Optional[float], hours: Optional[float]) -> float:
     """Max plausible wallbox energy for a session of `hours` at peak `max_power_kw`."""
@@ -384,6 +393,10 @@ class Database:
         tcols = {r[1] for r in self._conn.execute("PRAGMA table_info(trips)").fetchall()}
         if "merged_into_id" not in tcols:
             self._conn.execute("ALTER TABLE trips ADD COLUMN merged_into_id INTEGER DEFAULT NULL")
+        # migration: flag trips RECONSTRUCTED from an odometer jump (car offline/asleep to the cloud —
+        # or poller down — for the whole drive, so no DRIVING poll ever fired). Twin of charges.reconstructed.
+        if "reconstructed" not in tcols:
+            self._conn.execute("ALTER TABLE trips ADD COLUMN reconstructed INTEGER DEFAULT 0")
         # migration: per-trip EC (driving) energy split from the cloud getEC endpoint (Phase 2).
         # efficiency_soc backs up the original SoC-derived efficiency so the EC override is fully
         # reversible; ec_tried counts enrichment attempts (cloud aggregation lags a fresh trip).
@@ -952,6 +965,15 @@ class Database:
             return None, None
         return float(row["soc"]), row["recorded_at"]
 
+    def get_last_odometer(self, vehicle_id: int):
+        """The most recent recorded odometer (km) for this vehicle, or None. Seeds the recorder's
+        odometer baseline across a poller restart so a drive that happened while the poller was DOWN is
+        still caught (odometer-jump trip reconstruction). Ignores 0/glitch readings."""
+        row = self._conn.execute(
+            "SELECT odometer_km FROM positions WHERE vehicle_id = ? AND odometer_km > 0 "
+            "ORDER BY id DESC LIMIT 1", (vehicle_id,)).fetchone()
+        return float(row["odometer_km"]) if row and row["odometer_km"] else None
+
     # ── Trip ─────────────────────────────────────────────────────────────────
 
     def create_trip(self, vehicle_id: int, data) -> int:
@@ -965,6 +987,49 @@ class Database:
         self._conn.commit()
         trip_id = cur.lastrowid
         log.info("Trip #%d started — SOC %.1f%% @ (%.4f, %.4f)", trip_id, data.soc, data.latitude, data.longitude)
+        return trip_id
+
+    def create_reconstructed_trip(self, vehicle_id: int, start_soc: float, start_odo: float,
+                                  started_at: str, data) -> Optional[int]:
+        """Record a DRIVE never seen live — the trip twin of create_reconstructed_charge (#29). The car
+        was offline/asleep to the cloud (or the poller was down) for the WHOLE drive, so not a single
+        DRIVING poll fired and the live state machine never opened a trip. The only trace is the ODOMETER
+        that jumped while the car looked parked. Reconstruct distance from the odometer delta and
+        energy/efficiency from the SoC delta. NO GPS exists (nothing was polled mid-drive) → start/end
+        coordinates stay NULL and the map shows no route. Timing is approximate (start = last online,
+        end = now). Marked reconstructed=1; ec_stable=1 pins it as un-enrichable — the cloud has NO record
+        of a trip it never saw, so getEC can never convert it (get_trips_needing_ec also skips reconstructed)."""
+        distance_km = round((data.odometer_km or 0) - (start_odo or 0), 1)
+        if distance_km < 1.0 or distance_km > _RECONSTRUCT_MAX_TRIP_KM:   # sub-1 km blip / odometer glitch
+            return None
+        end_soc = data.soc
+        energy = max((start_soc - end_soc) / 100.0 * self.get_battery_capacity(vehicle_id), 0)
+        efficiency = round(energy / distance_km * 100, 2) if (distance_km > 0.5 and energy > 0) else None
+        ended_at = _now_iso()
+        try:
+            duration_min = round(
+                (datetime.fromisoformat(ended_at) - datetime.fromisoformat(started_at)).total_seconds() / 60, 1)
+        except (TypeError, ValueError):
+            duration_min = None
+        # The gap is only an UPPER BOUND on the real drive time (the car may have been parked-offline
+        # before/after driving). Trust the duration only if it implies a plausible average speed; a gap
+        # padded with parked time (too slow) or a timestamp glitch (too fast) → NULL, so the now-counted
+        # stats keep a clean avg-speed/duration while distance + energy + efficiency still contribute.
+        if duration_min and duration_min > 0:
+            kmh = distance_km / (duration_min / 60.0)
+            if kmh < _RECONSTRUCT_TRIP_MIN_KMH or kmh > _RECONSTRUCT_TRIP_MAX_KMH:
+                duration_min = None
+        cur = self._conn.execute(
+            """INSERT INTO trips
+               (vehicle_id, started_at, ended_at, start_soc, end_soc, start_odometer_km, end_odometer_km,
+                distance_km, duration_min, efficiency_kwh_100km, efficiency_soc, ec_stable, reconstructed)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,1,1)""",
+            (vehicle_id, started_at, ended_at, start_soc, end_soc, start_odo, data.odometer_km,
+             distance_km, duration_min, efficiency, efficiency))
+        self._conn.commit()
+        trip_id = cur.lastrowid
+        log.info("Trip #%d reconstructed — %.1f km | SOC %.1f→%.1f%% | ~%.2f kWh (car was offline, no GPS)",
+                 trip_id, distance_km, start_soc, end_soc, energy)
         return trip_id
 
     def add_trip_position(self, trip_id: int, data) -> None:

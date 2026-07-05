@@ -1429,6 +1429,7 @@ def get_trips_needing_ec(cutoff_iso: str, limit: int = 5, min_age_s: int = 600,
            WHERE vehicle_id = COALESCE(?, vehicle_id) AND merged_into_id IS NULL AND ended_at IS NOT NULL
              AND started_at >= ? AND ended_at <= ? AND ended_at >= ?
              AND COALESCE(ec_stable, 0) = 0 AND COALESCE(ec_tried, 0) < 80 AND distance_km > 0
+             AND COALESCE(reconstructed, 0) = 0
            ORDER BY started_at DESC LIMIT ?""",
         (_current_vehicle_id(), cutoff_iso, not_after, not_before, int(limit))).fetchall()
     return [dict(r) for r in rows]

@@ -184,9 +184,14 @@
                  data-trip-id="{{ trip.id }}"
                  class="trip-row">
 
-                <!-- Route thumbnail (browser-lazy, served as SVG) -->
+                <!-- Route thumbnail (browser-lazy, served as SVG); reconstructed trips have no GPS -->
+                {% if trip.reconstructed %}
+                <div class="trip-thumb flex items-center justify-center text-amber-400/70 text-lg"
+                     title="{{ t('trip_reconstructed_hint') }}">✨</div>
+                {% else %}
                 <img class="trip-thumb" loading="lazy" alt=""
                      src="trips/{{ trip.id }}/route.svg">
+                {% endif %}
 
                 <!-- Time + duration -->
                 <div class="min-w-0 flex-1">
@@ -196,6 +201,7 @@
                       → {{ trip.ended_at[11:16] if trip.ended_at else '' }}
                     </span>
                     {% if trip.is_merged %}<span style="font-size:10px" class="text-yellow-400" title="{{ trip.merged_count }} {{ t('merge_segments') }}">🔗</span>{% endif %}
+                    {% if trip.reconstructed %}<span style="font-size:10px" class="text-amber-400/90 ml-1" title="{{ t('trip_reconstructed_hint') }}">✨ {{ t('trip_reconstructed') }}</span>{% endif %}
                   </div>
                   <div class="text-slate-500 text-xs">{{ fmt_dur(trip.duration_min) }}{% if trip.is_merged %} · {{ t('driving_only') }}{% endif %}</div>
                 </div>

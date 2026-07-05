@@ -3,6 +3,17 @@
 All notable changes to LeapMotor Mate are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.3.0] — 2026-07-05
+
+### Added
+- **Trips driven while the car was offline are now recovered (#118, thanks @riri19).** When your car's modem goes silent during a drive — no live data reaches the cloud, so the trip used to be lost entirely — Mate now rebuilds it from the odometer jump the moment the car comes back online, exactly like it already does for charges missed while the car was asleep. The reconstructed trip **counts in your statistics** (distance, energy, consumption) and is clearly marked **"auto-detected" (✨)**.
+
+  **Please note the limits:**
+  - **From now on only.** It catches offline trips from this update onward; trips already lost *before* it are not recovered.
+  - **No map/route.** The car sent nothing during the drive, so there's no GPS track — the trip shows distance and consumption but **no route on the map** ("Route not available").
+  - **Approximate on unstable connections.** On a flaky car↔cloud link the **duration may be blank** when the offline gap is much longer than the drive, and **several drives inside one long offline gap merge into a single trip** (the totals stay correct, the per-trip split doesn't).
+  - **Estimate, not official.** Energy/consumption come from the battery-level drop, not the cloud's official per-trip figure — a reconstructed trip **can't be "converted to official data"** (the cloud never saw it).
+
 ## [2.2.0] — 2026-07-05
 
 ### Internal — no change if you have a single car

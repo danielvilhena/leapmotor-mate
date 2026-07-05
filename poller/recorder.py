@@ -25,6 +25,10 @@ class Recorder:
         self._last_soc: Optional[float] = None
         self._last_soc_ts: Optional[str] = None
         self._reconstruct_min_pct: float = 2.0   # min SoC rise to call it a (missed) charge
+        # Odometer-jump TRIP reconstruction (#118): baseline odometer. A parked car's odometer never
+        # moves, so any jump while parked = a drive we missed offline. Whole-km signal → 1 km floor.
+        self._last_odometer: Optional[float] = None
+        self._reconstruct_min_km: float = 1.0
 
     @property
     def state(self) -> State:
@@ -85,6 +89,9 @@ class Recorder:
                 self._last_soc, self._last_soc_ts = prev_soc, prev_ts
             else:                                   # fresh DB → no baseline; skip first-poll reconstruct
                 self._last_soc, self._last_soc_ts = data.soc, _now_iso()
+            # Seed the odometer baseline too, so a DRIVE during poller downtime is caught on the first
+            # poll back (odometer-jump trip reconstruction, #118). None on a fresh DB → first poll just seeds it.
+            self._last_odometer = self._db.get_last_odometer(self._vehicle_id)
 
         self._db.save_position(self._vehicle_id, data)
 
@@ -114,7 +121,35 @@ class Recorder:
                 self._db.accumulate_wallbox_energy(self._active_charge_id, wb)
                 log.debug("Charge #%d: wallbox counter %.3f kWh", self._active_charge_id, wb)
 
+        # Order matters: trip reconstruction reads the SoC baseline (for the energy delta) BEFORE the
+        # charge reconstruction advances it. Trip advances its OWN odometer baseline.
+        self._maybe_reconstruct_trip(data)
         self._maybe_reconstruct_charge(data)
+
+    def _maybe_reconstruct_trip(self, data: VehicleData) -> None:
+        """Catch a DRIVE that was never seen live — the trip twin of _maybe_reconstruct_charge (#118).
+        While the car is offline to the cloud the poller gets no live signals (or only stale ones), so a
+        whole trip can happen without a single DRIVING poll: the live state machine never opens a trip and
+        it's lost (same root as the missed-charge case #29). The one trace left is the ODOMETER that jumped
+        while the car looks parked. Detect that jump and reconstruct the trip from the odometer delta.
+
+        Runs every poll; the odometer baseline advances each poll, so a LIVE trip (odometer rising while
+        state == DRIVING) is skipped here — the live path records those, with GPS. We only reconstruct when
+        parked, with no trip open, the odometer clearly advanced (≥1 km, both readings valid — the 0-glitch
+        guard), and the SoC did NOT rise (a rise means a charge, which _maybe_reconstruct_charge owns)."""
+        prev_odo, prev_soc, prev_ts = self._last_odometer, self._last_soc, self._last_soc_ts
+        self._last_odometer = data.odometer_km                  # advance the odometer baseline every poll
+        if prev_odo is None or prev_soc is None or prev_ts is None:
+            return
+        if self._sm.state not in _PARKED_STATES or self._active_trip_id is not None:
+            return                                              # a live trip owns this drive
+        if not (prev_odo > 0 and (data.odometer_km or 0) > prev_odo):
+            return                                              # no advance / 0-glitch reading → skip
+        if (data.odometer_km - prev_odo) < self._reconstruct_min_km:
+            return                                              # sub-1 km blip, not a trip
+        if data.soc - prev_soc > 0.5:
+            return                                              # SoC rose → a charge, not a pure drive
+        self._db.create_reconstructed_trip(self._vehicle_id, prev_soc, prev_odo, prev_ts, data)
 
     def _maybe_reconstruct_charge(self, data: VehicleData) -> None:
         """Catch a charge that was never seen live. While the car is asleep/offline to the cloud
