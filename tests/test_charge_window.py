@@ -11,6 +11,7 @@ def _con(samples):
     con.row_factory = sqlite3.Row
     con.execute("CREATE TABLE positions (recorded_at TEXT, charging INT)")
     con.executemany("INSERT INTO positions VALUES (?,?)", samples)
+    con.execute("ALTER TABLE positions ADD COLUMN vehicle_id INTEGER DEFAULT 1")
     con.commit()
     return con
 

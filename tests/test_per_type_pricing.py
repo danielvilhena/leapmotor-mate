@@ -22,12 +22,13 @@ def _db():
     con = sqlite3.connect(":memory:")
     con.row_factory = sqlite3.Row
     con.execute("CREATE TABLE charges (id INT, location_type TEXT, energy_added_kwh REAL, "
-                "cost REAL, ac_energy_kwh REAL, started_at TEXT, ended_at TEXT)")
+                "cost REAL, ac_energy_kwh REAL, started_at TEXT, ended_at TEXT, vehicle_id INTEGER DEFAULT 1)")
     con.execute("CREATE TABLE positions (recorded_at TEXT, charging INT, "
                 "charge_voltage_v REAL, charge_current_a REAL)")
     for i in range(9):   # 0..120 min every 15 min → 8 intervals @ 1.25 kWh = 10 kWh
         t = (T0 + timedelta(minutes=15 * i)).isoformat()
         con.execute("INSERT INTO positions VALUES (?,1,250,20)", (t,))
+    con.execute("ALTER TABLE positions ADD COLUMN vehicle_id INTEGER DEFAULT 1")
     con.commit()
     return con
 

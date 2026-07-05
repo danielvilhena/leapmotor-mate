@@ -16,6 +16,7 @@ def _setup(monkeypatch, rows):
     con.execute("CREATE TABLE positions (recorded_at TEXT, soc REAL, charge_current_a REAL, "
                 "charge_voltage_v REAL, ac_port_mode INT)")
     con.executemany("INSERT INTO positions VALUES (?,?,?,?,?)", rows)
+    con.execute("ALTER TABLE positions ADD COLUMN vehicle_id INTEGER DEFAULT 1")
     con.commit()
     monkeypatch.setattr(db_reader, "_get", lambda: con)
 

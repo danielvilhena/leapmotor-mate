@@ -3,6 +3,12 @@
 All notable changes to LeapMotor Mate are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.2.0] — 2026-07-05
+
+### Internal — no change if you have a single car
+- **Multi-vehicle groundwork.** Mate now stores battery capacity **per vehicle** and scopes every page's data (trips, charges, statistics, battery health, maps, diagnostics) to a specific car. This lets a future release show and manage more than one vehicle on the same account without ever mixing their data. On a single-car setup it is completely invisible: the database migration is a no-op that leaves your existing trips and charges untouched, and every screen shows exactly what it did before — verified end-to-end against the full data set. A one-time safety pass also guarantees no historical row can be hidden by the new scoping.
+- **REEV research capture (beta build only).** The beta/research build additionally records the cloud's per-100 km electric **and fuel** consumption split, to validate range-extender support from real REEV cars. Inert in the normal build.
+
 ## [2.1.9] — 2026-07-04
 
 ### Fixed

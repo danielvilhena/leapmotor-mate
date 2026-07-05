@@ -352,6 +352,15 @@ class Database:
         vcols = {r[1] for r in self._conn.execute("PRAGMA table_info(vehicles)").fetchall()}
         if "abilities" not in vcols:
             self._conn.execute("ALTER TABLE vehicles ADD COLUMN abilities TEXT DEFAULT NULL")
+        # migration: PER-VEHICLE battery capacity (usable + as-new nominal for SoH). Capacity is a
+        # vehicle attribute — energy is written as ΔSoC×capacity — so with >1 car per account each
+        # needs its OWN (a B10's ~65 kWh vs a T03's ~36 kWh is ~80% off, and it corrupts the STORED
+        # trip/charge energy, not just the display). _backfill_vehicle_capacity() then seeds existing
+        # rows from the legacy global so a single-car install stays byte-identical.
+        if "capacity_kwh" not in vcols:
+            self._conn.execute("ALTER TABLE vehicles ADD COLUMN capacity_kwh REAL DEFAULT NULL")
+        if "capacity_nominal_kwh" not in vcols:
+            self._conn.execute("ALTER TABLE vehicles ADD COLUMN capacity_nominal_kwh REAL DEFAULT NULL")
         # migration: per-charge wallbox AC energy (the "wallbox, to pay" figure) on existing DBs
         ccols = {r[1] for r in self._conn.execute("PRAGMA table_info(charges)").fetchall()}
         if "ac_energy_kwh" not in ccols:
@@ -390,6 +399,8 @@ class Database:
             if _c not in tcols:
                 self._conn.execute(f"ALTER TABLE trips ADD COLUMN {_c} {_t}")
         self._conn.commit()
+        self._backfill_vehicle_capacity()
+        self._backfill_null_vehicle_id()
         self._repair_odometer_trips()
         self._repair_quantized_trip_distance()
         self._repair_snap_to_full_charges()
@@ -444,13 +455,12 @@ class Database:
         if self.get_setting("trips_odo_repair_v1") == "1":
             return
         bad = self._conn.execute(
-            """SELECT id, start_soc, end_soc, end_odometer_km
+            """SELECT id, start_soc, end_soc, end_odometer_km, vehicle_id
                FROM trips
                WHERE (start_odometer_km IS NULL OR start_odometer_km = 0)
                  AND end_odometer_km > 1
                  AND distance_km >= end_odometer_km - 1"""
         ).fetchall()
-        cap = self.get_battery_capacity()
         fixed = deleted = cleared = 0
         for t in bad:
             rows = self._conn.execute(
@@ -469,7 +479,7 @@ class Database:
                         (t["id"],))
                     cleared += 1
                 continue
-            energy = ((t["start_soc"] or 0) - (t["end_soc"] or 0)) / 100.0 * cap
+            energy = ((t["start_soc"] or 0) - (t["end_soc"] or 0)) / 100.0 * self.get_battery_capacity(t["vehicle_id"])
             eff = (energy / gps_km * 100) if energy > 0 else None
             self._conn.execute(
                 "UPDATE trips SET distance_km = ?, efficiency_kwh_100km = ? WHERE id = ?",
@@ -506,7 +516,7 @@ class Database:
             if last is None or last >= c["end_soc"]:
                 continue
             old_e = c["energy_added_kwh"]
-            new_e = round(max((last - c["start_soc"]) / 100.0 * self.get_battery_capacity(), 0), 3)
+            new_e = round(max((last - c["start_soc"]) / 100.0 * self.get_battery_capacity(c["vehicle_id"]), 0), 3)
             if old_e is None or abs(new_e - old_e) < 0.001:
                 continue
             new_cost = c["cost"]
@@ -742,12 +752,83 @@ class Database:
             did = self.get_setting("mate_device_id")
         return did
 
-    def get_battery_capacity(self) -> float:
+    def get_battery_capacity(self, vehicle_id: Optional[int] = None) -> float:
+        """Usable pack size in kWh. PER-VEHICLE when a vehicle_id is given (vehicles.capacity_kwh):
+        energy is computed as ΔSoC × capacity, and a B10's ~65 kWh vs a T03's ~36 kWh differ ~80% —
+        so once >1 car shares an account each MUST use its own, or every trip/charge kWh written for
+        the second car is wrong at the source. Falls back to the legacy global setting (then the
+        constant) when the id is absent or the row has none, so single-car callers are unchanged."""
+        if vehicle_id is not None:
+            row = self._conn.execute(
+                "SELECT capacity_kwh FROM vehicles WHERE id = ?", (vehicle_id,)).fetchone()
+            if row and row["capacity_kwh"] is not None:
+                return float(row["capacity_kwh"])
         return float(self.get_setting("battery_capacity_kwh", str(BATTERY_CAPACITY_FALLBACK)))
 
     def set_battery_capacity(self, kwh: float) -> None:
         self.set_setting("battery_capacity_kwh", str(kwh))
+        # Keep the single car's own row in sync so the per-vehicle write paths track the global.
+        # Only mirror when there's exactly ONE vehicle: multi-car uses the per-vehicle setters, and
+        # the shared global must never overwrite a second car's own capacity.
+        rows = self._conn.execute("SELECT id FROM vehicles").fetchall()
+        if len(rows) == 1:
+            self._conn.execute("UPDATE vehicles SET capacity_kwh = ? WHERE id = ?",
+                               (float(kwh), rows[0]["id"]))
+            self._conn.commit()
         log.info("Battery capacity set to %.1f kWh", kwh)
+
+    def _capacity_for_new_vehicle(self, car_type: str) -> float:
+        """Pack size for a vehicle that has none stored yet. The FIRST/only car inherits the legacy
+        global (it holds the setup-wizard value or a user override); an ADDITIONAL car gets its model
+        default — the shared global belongs to the first car, never to a newcomer."""
+        g = self.get_setting("battery_capacity_kwh")
+        only = self._conn.execute("SELECT COUNT(*) AS c FROM vehicles").fetchone()["c"] <= 1
+        if g and only:
+            try:
+                return float(g)
+            except ValueError:
+                pass
+        return default_capacity_for(car_type or "")
+
+    def _backfill_vehicle_capacity(self) -> None:
+        """Seed every vehicle that predates the per-vehicle columns with its own capacity, so the
+        per-vehicle write paths reproduce today's single-car numbers EXACTLY (no-op on upgrade).
+        Idempotent — only fills NULLs. nominal (the SoH baseline) mirrors the legacy global nominal."""
+        gn = self.get_setting("battery_capacity_nominal_kwh")
+        for v in self._conn.execute(
+                "SELECT id, car_type, capacity_kwh, capacity_nominal_kwh FROM vehicles").fetchall():
+            if v["capacity_kwh"] is None:
+                self._conn.execute("UPDATE vehicles SET capacity_kwh = ? WHERE id = ?",
+                                   (self._capacity_for_new_vehicle(v["car_type"]), v["id"]))
+            if v["capacity_nominal_kwh"] is None and gn:
+                try:
+                    self._conn.execute("UPDATE vehicles SET capacity_nominal_kwh = ? WHERE id = ?",
+                                       (float(gn), v["id"]))
+                except ValueError:
+                    pass
+        self._conn.commit()
+
+    def _backfill_null_vehicle_id(self) -> None:
+        """Safety net for the per-vehicle read scoping: any row with a NULL vehicle_id would be hidden
+        by `WHERE vehicle_id = COALESCE(?, vehicle_id)` (NULL never equals the current id). No insert
+        path writes NULL and vehicle_id has always been in the schema, so this normally finds NOTHING —
+        but it GUARANTEES no trip/charge can silently vanish on upgrade. One-time (gated); assigns any
+        orphan to the first (single) vehicle. Skipped until a vehicle exists (fresh install has no data
+        to orphan anyway)."""
+        if self.get_setting("null_vehicle_id_backfill_v1") == "1":
+            return
+        row = self._conn.execute("SELECT id FROM vehicles ORDER BY id LIMIT 1").fetchone()
+        if row is None:
+            return                                   # no vehicle yet → retry on a later start
+        vid, n = row["id"], 0
+        for t in ("positions", "trips", "charges", "maintenance_logs"):   # fixed table names, never input
+            n += self._conn.execute(
+                f"UPDATE {t} SET vehicle_id = ? WHERE vehicle_id IS NULL", (vid,)).rowcount
+        self._conn.commit()
+        if n:
+            log.warning("Backfilled %d orphan row(s) with NULL vehicle_id → vehicle #%d "
+                        "(per-vehicle scoping safety net)", n, vid)
+        self.set_setting("null_vehicle_id_backfill_v1", "1")
 
     def is_setup_complete(self) -> bool:
         return self.get_setting("setup_complete") == "1"
@@ -797,6 +878,14 @@ class Database:
                 "UPDATE vehicles SET abilities = ? WHERE vin = ?",
                 (json.dumps(sorted({int(a) for a in abilities})), vin),
             )
+        # Seed this car's own battery capacity the first time we see it (NULL = never set). Fills only
+        # NULLs, so a user override is never clobbered; the first car inherits the global (setup-wizard
+        # value), an additional shared car gets its model default.
+        vrow = self._conn.execute(
+            "SELECT id, capacity_kwh FROM vehicles WHERE vin = ?", (vin,)).fetchone()
+        if vrow and vrow["capacity_kwh"] is None:
+            self._conn.execute("UPDATE vehicles SET capacity_kwh = ? WHERE id = ?",
+                               (self._capacity_for_new_vehicle(car_type), vrow["id"]))
         self._conn.commit()
         row = self._conn.execute("SELECT id FROM vehicles WHERE vin = ?", (vin,)).fetchone()
         return row["id"]
@@ -905,7 +994,7 @@ class Database:
                                        trip["start_odometer_km"] or 0, data.odometer_km or 0)
 
         start_soc = trip["start_soc"]
-        energy_used_kwh = (start_soc - data.soc) / 100.0 * self.get_battery_capacity()
+        energy_used_kwh = (start_soc - data.soc) / 100.0 * self.get_battery_capacity(trip["vehicle_id"])
         # Withhold efficiency when net energy is <= 0 (SOC rose over the trip — regen
         # or a cloud SOC blip): a negative kWh/100km is meaningless, don't store it.
         efficiency = (energy_used_kwh / distance_km * 100) if (distance_km and distance_km > 0.5 and energy_used_kwh > 0) else None
@@ -966,7 +1055,7 @@ class Database:
         are home AC — DC fast-charging keeps the car awake and reporting). max_power_kw is left
         NULL (unknown) and cost stays NULL until the user confirms the charge type, exactly like a
         live charge."""
-        energy_added = max((data.soc - start_soc) / 100.0 * self.get_battery_capacity(), 0)
+        energy_added = max((data.soc - start_soc) / 100.0 * self.get_battery_capacity(vehicle_id), 0)
         ended_at = _now_iso()
         try:
             duration_min = round(
@@ -1073,7 +1162,7 @@ class Database:
             last = self._last_charging_soc(charge["vehicle_id"], charge["started_at"])
             if last is not None:
                 soc_for_energy = last
-        energy_added = max((soc_for_energy - start_soc) / 100.0 * self.get_battery_capacity(), 0)
+        energy_added = max((soc_for_energy - start_soc) / 100.0 * self.get_battery_capacity(charge["vehicle_id"]), 0)
 
         # Phantom-charge guard: a brief plug / charge-state blip — e.g. the car re-evaluating after
         # a charge SCHEDULE is changed, or signal 1149 flicking 0→2→0 — can open+close a "charge"
@@ -1167,7 +1256,7 @@ class Database:
                 distance_km = _gps_track_km(positions)
                 start_soc = trip["start_soc"] or 0
                 end_soc   = float(last_pos["soc"] or start_soc)
-                energy    = (start_soc - end_soc) / 100.0 * self.get_battery_capacity()
+                energy    = (start_soc - end_soc) / 100.0 * self.get_battery_capacity(vehicle_id)
                 # Withhold efficiency when net energy is <= 0 (SoC rose over the trip — e.g. a
                 # window mis-bounded across a charge); a negative value poisons the Stats best/avg.
                 efficiency = (energy / distance_km * 100) if (distance_km > 0.5 and energy > 0) else None
@@ -1238,7 +1327,7 @@ class Database:
 
             end_soc      = float((last_pos["soc"] if last_pos else None) or charge["start_soc"] or 0)
             ended_at_iso = (last_pos["recorded_at"] if last_pos else None) or next_start or _now_iso()
-            energy_added = max((end_soc - charge["start_soc"]) / 100.0 * self.get_battery_capacity(), 0)
+            energy_added = max((end_soc - charge["start_soc"]) / 100.0 * self.get_battery_capacity(vehicle_id), 0)
 
             started_at   = datetime.fromisoformat(charge["started_at"])
             ended_at_dt  = datetime.fromisoformat(ended_at_iso)

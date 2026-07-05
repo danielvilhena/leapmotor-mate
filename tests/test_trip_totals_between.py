@@ -12,7 +12,8 @@ def _db(trips):
     con = sqlite3.connect(":memory:")
     con.row_factory = sqlite3.Row
     con.execute(
-        "CREATE TABLE trips (id INT, started_at TEXT, ended_at TEXT, distance_km REAL, duration_min REAL)"
+        "CREATE TABLE trips (id INT, started_at TEXT, ended_at TEXT, distance_km REAL, duration_min REAL, "
+        "vehicle_id INTEGER DEFAULT 1)"
     )
     con.executemany(
         "INSERT INTO trips (id, started_at, ended_at, distance_km, duration_min) VALUES (?,?,?,?,?)",

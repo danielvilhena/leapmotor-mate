@@ -9,7 +9,7 @@ import db_reader
 def _db(charges):
     con = sqlite3.connect(":memory:")
     con.row_factory = sqlite3.Row
-    con.execute("CREATE TABLE charges (id INT, started_at TEXT, ended_at TEXT)")
+    con.execute("CREATE TABLE charges (id INT, started_at TEXT, ended_at TEXT, vehicle_id INTEGER DEFAULT 1)")
     con.executemany("INSERT INTO charges (id, started_at, ended_at) VALUES (?,?,?)", charges)
     con.commit()
     return con

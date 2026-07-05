@@ -92,6 +92,19 @@ def _get():
     return _conn(DB_PATH)
 
 
+def _current_vehicle_id():
+    """The vehicle every read is scoped to (multi-car prep). Single-car = the only/first vehicle;
+    the multi-car step swaps this for the user-selected VIN. Returns None only before the first
+    vehicle is registered — the `vehicle_id = COALESCE(?, vehicle_id)` scope then no-ops (matches
+    every row), so a fresh/vehicle-less DB behaves exactly as before. On a single car, filtering by
+    its one id is a no-op too, so this whole pass is invisible until a second car exists."""
+    try:
+        row = _get().execute("SELECT id FROM vehicles ORDER BY id LIMIT 1").fetchone()
+    except sqlite3.OperationalError:      # a partial/minimal DB with no vehicles table → don't scope
+        return None
+    return row["id"] if row else None
+
+
 def _conn_rw() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     conn.row_factory = sqlite3.Row
@@ -107,6 +120,21 @@ def get_setting(key: str, default: str = "") -> str:
 def set_setting(key: str, value: str) -> None:
     db = _conn_rw()
     db.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?,?)", (key, str(value)))
+    db.commit()
+
+
+def set_vehicle_capacity_current(kwh: float, nominal: float = None) -> None:
+    """Mirror a capacity override onto the CURRENT vehicle's own row (vehicles.capacity_kwh), so the
+    poller's per-vehicle energy math honours it — the poller reads the vehicle column, not the global
+    setting, so writing only the global would leave the override ignored. Single-car today = the only
+    row; the multi-car step will resolve 'current' to the selected vehicle instead of the first."""
+    db = _conn_rw()
+    row = db.execute("SELECT id FROM vehicles ORDER BY id LIMIT 1").fetchone()
+    if not row:
+        return
+    db.execute("UPDATE vehicles SET capacity_kwh = ? WHERE id = ?", (float(kwh), row["id"]))
+    if nominal is not None:
+        db.execute("UPDATE vehicles SET capacity_nominal_kwh = ? WHERE id = ?", (float(nominal), row["id"]))
     db.commit()
 
 
@@ -602,7 +630,8 @@ def _next_charge_start_utc(db, started_at) -> Optional[str]:
     must NOT absorb the next charge's power samples into its own window or cost."""
     try:
         row = db.execute(
-            "SELECT MIN(started_at) AS s FROM charges WHERE started_at > ?", (started_at,)
+            "SELECT MIN(started_at) AS s FROM charges WHERE vehicle_id = COALESCE(?, vehicle_id) AND started_at > ?",
+            (_current_vehicle_id(), started_at)
         ).fetchone()
     except sqlite3.Error:
         return None   # no charges table (isolated unit tests) → no cap
@@ -638,9 +667,10 @@ def _dynamic_sensor_cost(charge, energy: float, base: float, ctype: str = None) 
     lo, hi, excl = _power_window_bounds(db, charge["started_at"], charge["ended_at"])
     rows = db.execute(
         "SELECT recorded_at, charge_voltage_v, charge_current_a FROM positions "
-        "WHERE charging = 1 AND recorded_at >= ? AND recorded_at " + ("<" if excl else "<=")
+        "WHERE vehicle_id = COALESCE(?, vehicle_id) AND charging = 1 AND recorded_at >= ? AND recorded_at "
+        + ("<" if excl else "<=")
         + " ? ORDER BY recorded_at",
-        (lo, hi),
+        (_current_vehicle_id(), lo, hi),
     ).fetchall()
     samples = []
     for r in rows:
@@ -749,9 +779,10 @@ def compute_cost(charge, config: Optional[dict] = None, ac_kwh: Optional[float] 
     lo, hi, excl = _power_window_bounds(db, charge["started_at"], charge["ended_at"])
     rows = db.execute(
         "SELECT recorded_at, charge_voltage_v, charge_current_a FROM positions "
-        "WHERE charging = 1 AND recorded_at >= ? AND recorded_at " + ("<" if excl else "<=")
+        "WHERE vehicle_id = COALESCE(?, vehicle_id) AND charging = 1 AND recorded_at >= ? AND recorded_at "
+        + ("<" if excl else "<=")
         + " ? ORDER BY recorded_at",
-        (lo, hi),
+        (_current_vehicle_id(), lo, hi),
     ).fetchall()
     samples = []
     for r in rows:
@@ -835,8 +866,10 @@ def auto_confirm_home_charges() -> int:
         if get_setting("wallbox_auto_home", "0") != "1":
             return 0
         rows = _get().execute(
-            "SELECT id FROM charges WHERE location_type IS NULL AND ended_at IS NOT NULL "
-            "AND COALESCE(reconstructed, 0) = 0 AND COALESCE(ac_energy_kwh, 0) > 0.05"
+            "SELECT id FROM charges WHERE vehicle_id = COALESCE(?, vehicle_id) "
+            "AND location_type IS NULL AND ended_at IS NOT NULL "
+            "AND COALESCE(reconstructed, 0) = 0 AND COALESCE(ac_energy_kwh, 0) > 0.05",
+            (_current_vehicle_id(),)
         ).fetchall()
     except sqlite3.Error:   # fresh install — settings/charges tables not created yet
         return 0
@@ -861,7 +894,8 @@ _LOCATION_CANDIDATES_WHERE = (
 def has_location_lookup_candidates() -> bool:
     try:
         return _get().execute(
-            f"SELECT 1 FROM charges WHERE {_LOCATION_CANDIDATES_WHERE} LIMIT 1"
+            f"SELECT 1 FROM charges WHERE vehicle_id = COALESCE(?, vehicle_id) AND {_LOCATION_CANDIDATES_WHERE} LIMIT 1",
+            (_current_vehicle_id(),)
         ).fetchone() is not None
     except sqlite3.Error:  # fresh install — column not migrated by the poller yet
         return False
@@ -870,8 +904,9 @@ def has_location_lookup_candidates() -> bool:
 def get_location_lookup_candidates(limit: int = 40) -> list[dict]:
     try:
         rows = _get().execute(
-            f"SELECT id, latitude, longitude FROM charges WHERE {_LOCATION_CANDIDATES_WHERE} "
-            "ORDER BY started_at DESC LIMIT ?", (limit,)).fetchall()
+            f"SELECT id, latitude, longitude FROM charges WHERE vehicle_id = COALESCE(?, vehicle_id) "
+            f"AND {_LOCATION_CANDIDATES_WHERE} "
+            "ORDER BY started_at DESC LIMIT ?", (_current_vehicle_id(), limit)).fetchall()
     except sqlite3.Error:
         return []
     return [dict(r) for r in rows]
@@ -883,7 +918,9 @@ def get_labelled_locations() -> list[tuple]:
     try:
         rows = _get().execute(
             "SELECT latitude, longitude, location_name FROM charges "
-            "WHERE location_name IS NOT NULL AND latitude IS NOT NULL AND longitude IS NOT NULL"
+            "WHERE vehicle_id = COALESCE(?, vehicle_id) "
+            "AND location_name IS NOT NULL AND latitude IS NOT NULL AND longitude IS NOT NULL",
+            (_current_vehicle_id(),)
         ).fetchall()
     except sqlite3.Error:
         return []
@@ -998,7 +1035,10 @@ def write_optimistic_status(overrides: dict) -> None:
     """
     global _opt_overrides, _opt_expiry
     db = _conn_rw()
-    row = db.execute("SELECT * FROM positions ORDER BY id DESC LIMIT 1").fetchone()
+    # Clone the CURRENT vehicle's latest row (scoped) — an unscoped "latest" could clone another
+    # car's position and insert the optimistic override under the wrong vehicle_id. No-op single-car.
+    row = db.execute("SELECT * FROM positions WHERE vehicle_id = COALESCE(?, vehicle_id) ORDER BY id DESC LIMIT 1",
+                     (_current_vehicle_id(),)).fetchone()
     if not row:
         return
     d = dict(row)
@@ -1136,7 +1176,8 @@ def save_fresh_signals(signals: dict) -> None:
 def get_latest_status() -> Optional[dict]:
     db = _get()
     row = db.execute(
-        "SELECT * FROM positions ORDER BY id DESC LIMIT 1"
+        "SELECT * FROM positions WHERE vehicle_id = COALESCE(?, vehicle_id) ORDER BY id DESC LIMIT 1",
+        (_current_vehicle_id(),)
     ).fetchone()
     if not row:
         return None
@@ -1152,9 +1193,10 @@ def get_latest_status() -> Optional[dict]:
     if _lat is None or _lon is None or (abs(_lat) < 1e-6 and abs(_lon) < 1e-6):
         last = db.execute(
             "SELECT latitude, longitude FROM positions "
-            "WHERE latitude IS NOT NULL AND longitude IS NOT NULL "
+            "WHERE vehicle_id = COALESCE(?, vehicle_id) "
+            "AND latitude IS NOT NULL AND longitude IS NOT NULL "
             "AND NOT (ABS(latitude) < 1e-6 AND ABS(longitude) < 1e-6) "
-            "ORDER BY id DESC LIMIT 1").fetchone()
+            "ORDER BY id DESC LIMIT 1", (_current_vehicle_id(),)).fetchone()
         if last:
             d["latitude"], d["longitude"] = last["latitude"], last["longitude"]
             d["position_stale"] = True
@@ -1279,8 +1321,9 @@ def trip_ec_window(trip: dict, pad_s: int = 120):
     db = _get()
     begin = b - pad_s
     prev = db.execute(
-        "SELECT MAX(ended_at) AS m FROM trips WHERE merged_into_id IS NULL "
-        "AND ended_at IS NOT NULL AND ended_at < ?", (trip.get("started_at"),)).fetchone()
+        "SELECT MAX(ended_at) AS m FROM trips WHERE vehicle_id = COALESCE(?, vehicle_id) "
+        "AND merged_into_id IS NULL "
+        "AND ended_at IS NOT NULL AND ended_at < ?", (_current_vehicle_id(), trip.get("started_at"))).fetchone()
     if prev and prev["m"]:
         pe = _trip_epoch(prev["m"])
         if pe:
@@ -1308,8 +1351,9 @@ def ready_session(trip: dict):
     lo = datetime.fromtimestamp(t0 - _READY_LOOKBACK_S, timezone.utc).isoformat()
     hi = datetime.fromtimestamp(t1 + _READY_LOOKBACK_S, timezone.utc).isoformat()
     rows = db.execute(
-        "SELECT recorded_at, ready FROM positions WHERE recorded_at >= ? AND recorded_at <= ? "
-        "ORDER BY recorded_at", (lo, hi)).fetchall()
+        "SELECT recorded_at, ready FROM positions WHERE vehicle_id = COALESCE(?, vehicle_id) "
+        "AND recorded_at >= ? AND recorded_at <= ? "
+        "ORDER BY recorded_at", (_current_vehicle_id(), lo, hi)).fetchall()
     samples, last = [], None
     for r in rows:
         e = _trip_epoch(r["recorded_at"])
@@ -1354,9 +1398,10 @@ def ready_session(trip: dict):
     olo = datetime.fromtimestamp(on - _READY_DEBOUNCE_S, timezone.utc).isoformat()
     ohi = datetime.fromtimestamp(off + _READY_DEBOUNCE_S, timezone.utc).isoformat()
     trs = db.execute(
-        "SELECT id, started_at, ended_at FROM trips WHERE merged_into_id IS NULL "
+        "SELECT id, started_at, ended_at FROM trips WHERE vehicle_id = COALESCE(?, vehicle_id) "
+        "AND merged_into_id IS NULL "
         "AND ended_at IS NOT NULL AND ended_at >= ? AND started_at <= ? ORDER BY started_at",
-        (olo, ohi)).fetchall()
+        (_current_vehicle_id(), olo, ohi)).fetchall()
     ids = []
     for tr in trs:
         ts0, ts1 = _trip_epoch(tr["started_at"]), _trip_epoch(tr["ended_at"])
@@ -1381,11 +1426,11 @@ def get_trips_needing_ec(cutoff_iso: str, limit: int = 5, min_age_s: int = 600,
     rows = db.execute(
         """SELECT id, started_at, ended_at, distance_km, ec_kwh,
                   efficiency_kwh_100km, efficiency_soc, start_soc, end_soc FROM trips
-           WHERE merged_into_id IS NULL AND ended_at IS NOT NULL
+           WHERE vehicle_id = COALESCE(?, vehicle_id) AND merged_into_id IS NULL AND ended_at IS NOT NULL
              AND started_at >= ? AND ended_at <= ? AND ended_at >= ?
              AND COALESCE(ec_stable, 0) = 0 AND COALESCE(ec_tried, 0) < 80 AND distance_km > 0
            ORDER BY started_at DESC LIMIT ?""",
-        (cutoff_iso, not_after, not_before, int(limit))).fetchall()
+        (_current_vehicle_id(), cutoff_iso, not_after, not_before, int(limit))).fetchall()
     return [dict(r) for r in rows]
 
 
@@ -1547,19 +1592,22 @@ def _gap_minutes(end_iso, start_iso):
 def _children_by_parent(db) -> dict:
     """All merged child trips grouped by parent id (one query)."""
     out: dict = {}
-    for r in db.execute("SELECT * FROM trips WHERE merged_into_id IS NOT NULL").fetchall():
+    for r in db.execute("SELECT * FROM trips WHERE vehicle_id = COALESCE(?, vehicle_id) AND merged_into_id IS NOT NULL",
+                        (_current_vehicle_id(),)).fetchall():
         out.setdefault(r["merged_into_id"], []).append(dict(r))
     return out
 
 
 def _segment_ids(db, trip_id: int) -> list:
     """Every trip id in the merge-group containing trip_id (parent + children); [trip_id] if none."""
-    row = db.execute("SELECT id, merged_into_id FROM trips WHERE id=?", (trip_id,)).fetchone()
+    row = db.execute("SELECT id, merged_into_id FROM trips WHERE id=? AND vehicle_id = COALESCE(?, vehicle_id)",
+                     (trip_id, _current_vehicle_id())).fetchone()
     if not row:
         return [trip_id]
     parent = row["merged_into_id"] or row["id"]
     return [parent] + [r["id"] for r in
-            db.execute("SELECT id FROM trips WHERE merged_into_id=?", (parent,)).fetchall()]
+            db.execute("SELECT id FROM trips WHERE vehicle_id = COALESCE(?, vehicle_id) AND merged_into_id=?",
+                       (_current_vehicle_id(), parent)).fetchall()]
 
 
 def _trip_group_stats(parent: dict, children: list) -> dict:
@@ -1608,8 +1656,9 @@ def get_mergeable_pairs(gap_min: int = TRIP_MERGE_GAP_DEFAULT) -> list:
     db = _get()
     kids = _children_by_parent(db)
     tops = [dict(r) for r in db.execute(
-        "SELECT * FROM trips WHERE merged_into_id IS NULL AND ended_at IS NOT NULL "
-        "ORDER BY started_at").fetchall()]
+        "SELECT * FROM trips WHERE vehicle_id = COALESCE(?, vehicle_id) AND merged_into_id IS NULL "
+        "AND ended_at IS NOT NULL "
+        "ORDER BY started_at", (_current_vehicle_id(),)).fetchall()]
     groups = [_trip_group_stats(t, kids.get(t["id"], [])) for t in tops]
     pairs = []
     for a, b in zip(groups, groups[1:]):
@@ -1676,8 +1725,10 @@ def unmerge_trip(parent_id: int) -> dict:
 def preview_merge(parent_id: int, child_id: int) -> Optional[dict]:
     """Group stats the merge WOULD produce (for the confirm dialog), without committing."""
     db = _get()
-    a = db.execute("SELECT * FROM trips WHERE id=?", (parent_id,)).fetchone()
-    b = db.execute("SELECT * FROM trips WHERE id=?", (child_id,)).fetchone()
+    a = db.execute("SELECT * FROM trips WHERE id=? AND vehicle_id = COALESCE(?, vehicle_id)",
+                   (parent_id, _current_vehicle_id())).fetchone()
+    b = db.execute("SELECT * FROM trips WHERE id=? AND vehicle_id = COALESCE(?, vehicle_id)",
+                   (child_id, _current_vehicle_id())).fetchone()
     if not a or not b:
         return None
     a, b = dict(a), dict(b)
@@ -1716,10 +1767,10 @@ def get_trips(limit: int = 500) -> list[dict]:
     kids = _children_by_parent(db)
     rows = db.execute(
         """SELECT * FROM trips
-           WHERE ended_at IS NOT NULL AND merged_into_id IS NULL
+           WHERE vehicle_id = COALESCE(?, vehicle_id) AND ended_at IS NOT NULL AND merged_into_id IS NULL
            ORDER BY started_at DESC
            LIMIT ?""",
-        (limit,),
+        (_current_vehicle_id(), limit),
     ).fetchall()
     return [_trip_group_stats(dict(r), kids.get(r["id"], [])) for r in rows]
 
@@ -1759,8 +1810,9 @@ def get_trips_grouped() -> list[dict]:
     _seen_ch: dict = {}
     for _c in _get().execute(
             "SELECT vehicle_id, ended_at, start_soc, end_soc, cost, ac_energy_kwh, location_type, "
-            "energy_added_kwh FROM charges WHERE ended_at IS NOT NULL AND cost IS NOT NULL "
-            "AND energy_added_kwh > 0 ORDER BY vehicle_id, ended_at").fetchall():
+            "energy_added_kwh FROM charges WHERE vehicle_id = COALESCE(?, vehicle_id) "
+            "AND ended_at IS NOT NULL AND cost IS NOT NULL "
+            "AND energy_added_kwh > 0 ORDER BY vehicle_id, ended_at", (_current_vehicle_id(),)).fetchall():
         _seen_ch.setdefault(_c["vehicle_id"], []).append(dict(_c))
         _cost_bp.setdefault(_c["vehicle_id"], []).append(
             (_c["ended_at"], _wac_blend(_seen_ch[_c["vehicle_id"]])))
@@ -1836,7 +1888,8 @@ def get_trips_summary() -> dict:
                   SUM(distance_km * efficiency_kwh_100km)    AS eff_wsum,
                   SUM(CASE WHEN efficiency_kwh_100km IS NOT NULL
                            THEN distance_km END)             AS eff_wdist
-           FROM trips WHERE ended_at IS NOT NULL"""
+           FROM trips WHERE vehicle_id = COALESCE(?, vehicle_id) AND ended_at IS NOT NULL""",
+        (_current_vehicle_id(),)
     ).fetchone()
     return {
         "count":    r["n"],
@@ -1850,7 +1903,8 @@ def get_first_trip_date() -> Optional[str]:
     """Earliest trip date (YYYY-MM-DD, local) — the lower bound for the 'all-time' EC window on the
     Trips page. None if there are no trips yet."""
     db = _get()
-    r = db.execute("SELECT MIN(started_at) AS m FROM trips WHERE started_at IS NOT NULL").fetchone()
+    r = db.execute("SELECT MIN(started_at) AS m FROM trips WHERE vehicle_id = COALESCE(?, vehicle_id) "
+                   "AND started_at IS NOT NULL", (_current_vehicle_id(),)).fetchone()
     if not r or not r["m"]:
         return None
     return (_local_iso(r["m"]) or r["m"])[:10]
@@ -1862,7 +1916,8 @@ def get_first_trip_ts() -> Optional[int]:
     installed), so callers pairing local trip totals with a getEC total use this to detect when
     the two do NOT cover the same span (GitHub #105). None if there are no trips yet."""
     db = _get()
-    r = db.execute("SELECT MIN(started_at) AS m FROM trips WHERE started_at IS NOT NULL").fetchone()
+    r = db.execute("SELECT MIN(started_at) AS m FROM trips WHERE vehicle_id = COALESCE(?, vehicle_id) "
+                   "AND started_at IS NOT NULL", (_current_vehicle_id(),)).fetchone()
     dt = _local_dt(r["m"]) if r else None
     return int(dt.timestamp()) if dt else None
 
@@ -1916,12 +1971,14 @@ def blended_price_at(vehicle_id: int, ts: str) -> Optional[float]:
 
 def get_trip_detail(trip_id: int) -> Optional[dict]:
     db = _get()
-    row = db.execute("SELECT * FROM trips WHERE id = ?", (trip_id,)).fetchone()
+    row = db.execute("SELECT * FROM trips WHERE id = ? AND vehicle_id = COALESCE(?, vehicle_id)",
+                     (trip_id, _current_vehicle_id())).fetchone()
     if not row:
         return None
     # A merged child resolves to (and shows) its parent group.
     parent_id = row["merged_into_id"] or row["id"]
-    trip = db.execute("SELECT * FROM trips WHERE id = ?", (parent_id,)).fetchone()
+    trip = db.execute("SELECT * FROM trips WHERE id = ? AND vehicle_id = COALESCE(?, vehicle_id)",
+                      (parent_id, _current_vehicle_id())).fetchone()
     children = _children_by_parent(db).get(parent_id, [])
     seg_ids = _segment_ids(db, parent_id)
     ph = ",".join("?" * len(seg_ids))
@@ -2018,8 +2075,8 @@ def get_trip_route(trip_id: int, max_points: int = 80) -> list[dict]:
 def get_charges(limit: int = 50) -> list[dict]:
     db = _get()
     rows = db.execute(
-        "SELECT * FROM charges WHERE ended_at IS NOT NULL ORDER BY started_at DESC LIMIT ?",
-        (limit,),
+        "SELECT * FROM charges WHERE vehicle_id = COALESCE(?, vehicle_id) AND ended_at IS NOT NULL ORDER BY started_at DESC LIMIT ?",
+        (_current_vehicle_id(), limit),
     ).fetchall()
     out = []
     for r in rows:
@@ -2035,7 +2092,9 @@ def get_last_charge_end() -> Optional[datetime]:
     charge has ever finished. Used to bound the "since last charge" getEC window."""
     db = _get()
     row = db.execute(
-        "SELECT ended_at FROM charges WHERE ended_at IS NOT NULL ORDER BY ended_at DESC LIMIT 1"
+        "SELECT ended_at FROM charges WHERE vehicle_id = COALESCE(?, vehicle_id) "
+        "AND ended_at IS NOT NULL ORDER BY ended_at DESC LIMIT 1",
+        (_current_vehicle_id(),)
     ).fetchone()
     return _local_dt(row["ended_at"]) if row else None
 
@@ -2052,8 +2111,9 @@ def get_trip_totals_between(begin_ts: int, end_ts: int) -> dict:
         """SELECT COUNT(*) AS trip_count,
                   ROUND(SUM(distance_km), 2) AS distance_km,
                   ROUND(SUM(duration_min), 0) AS duration_min
-           FROM trips WHERE ended_at IS NOT NULL AND started_at >= ? AND started_at <= ?""",
-        (b, e),
+           FROM trips WHERE vehicle_id = COALESCE(?, vehicle_id) AND ended_at IS NOT NULL
+             AND started_at >= ? AND started_at <= ?""",
+        (_current_vehicle_id(), b, e),
     ).fetchone()
     return dict(row) if row else {}
 
@@ -2065,7 +2125,8 @@ def get_charge_power_curve(charge_id: int) -> dict:
     curve); kept at 3 decimals so the real variation shows. Samples come from the
     general `positions` log (may be pruned over time → empty for very old sessions)."""
     db = _get()
-    ch = db.execute("SELECT started_at, ended_at FROM charges WHERE id = ?", (charge_id,)).fetchone()
+    ch = db.execute("SELECT started_at, ended_at FROM charges WHERE id = ? AND vehicle_id = COALESCE(?, vehicle_id)",
+                    (charge_id, _current_vehicle_id())).fetchone()
     if not ch:
         return {"labels": [], "power": [], "soc": []}
     start, end = ch["started_at"], ch["ended_at"]
@@ -2079,15 +2140,16 @@ def get_charge_power_curve(charge_id: int) -> dict:
         lo, hi, excl = _power_window_bounds(db, start, end)
         rows = db.execute(
             "SELECT recorded_at, charge_voltage_v, charge_current_a, soc FROM positions "
-            "WHERE charging = 1 AND recorded_at >= ? AND recorded_at " + ("<" if excl else "<=")
+            "WHERE vehicle_id = COALESCE(?, vehicle_id) AND charging = 1 AND recorded_at >= ? AND recorded_at "
+            + ("<" if excl else "<=")
             + " ? ORDER BY recorded_at",
-            (lo, hi),
+            (_current_vehicle_id(), lo, hi),
         ).fetchall()
     else:  # charge still in progress — open upper bound
         rows = db.execute(
             "SELECT recorded_at, charge_voltage_v, charge_current_a, soc FROM positions "
-            "WHERE charging = 1 AND recorded_at >= ? ORDER BY recorded_at",
-            (start,),
+            "WHERE vehicle_id = COALESCE(?, vehicle_id) AND charging = 1 AND recorded_at >= ? ORDER BY recorded_at",
+            (_current_vehicle_id(), start),
         ).fetchall()
     labels, power, soc, times = [], [], [], []
     for r in rows:
@@ -2104,11 +2166,12 @@ def latest_charge_id_with_power() -> int | None:
     """Most recent charge that still has per-sample data (for the Wallbox page chart)."""
     db = _get()
     row = db.execute(
-        "SELECT c.id FROM charges c WHERE EXISTS ("
-        "  SELECT 1 FROM positions p WHERE p.charging = 1"
+        "SELECT c.id FROM charges c WHERE c.vehicle_id = COALESCE(?, c.vehicle_id) AND EXISTS ("
+        "  SELECT 1 FROM positions p WHERE p.vehicle_id = c.vehicle_id AND p.charging = 1"
         "  AND p.recorded_at >= c.started_at"
         "  AND (c.ended_at IS NULL OR p.recorded_at <= c.ended_at)"
-        ") ORDER BY c.started_at DESC LIMIT 1"
+        ") ORDER BY c.started_at DESC LIMIT 1",
+        (_current_vehicle_id(),)
     ).fetchone()
     return row["id"] if row else None
 
@@ -2121,12 +2184,12 @@ def charges_with_power(limit: int = 30) -> list[dict]:
     db = _get()
     rows = db.execute(
         "SELECT c.id, c.started_at, c.energy_added_kwh FROM charges c "
-        "WHERE c.location_type = 'HOME' AND EXISTS ("
-        "  SELECT 1 FROM positions p WHERE p.charging = 1"
+        "WHERE c.vehicle_id = COALESCE(?, c.vehicle_id) AND c.location_type = 'HOME' AND EXISTS ("
+        "  SELECT 1 FROM positions p WHERE p.vehicle_id = c.vehicle_id AND p.charging = 1"
         "  AND p.recorded_at >= c.started_at"
         "  AND (c.ended_at IS NULL OR p.recorded_at <= c.ended_at)"
         ") ORDER BY c.started_at DESC LIMIT ?",
-        (limit,),
+        (_current_vehicle_id(), limit),
     ).fetchall()
     return [dict(r) for r in rows]
 
@@ -2134,7 +2197,8 @@ def charges_with_power(limit: int = 30) -> list[dict]:
 def is_home_charge(charge_id: int) -> bool:
     """True only when the charge is tagged HOME (= the wallbox)."""
     db = _get()
-    row = db.execute("SELECT location_type FROM charges WHERE id = ?", (charge_id,)).fetchone()
+    row = db.execute("SELECT location_type FROM charges WHERE id = ? AND vehicle_id = COALESCE(?, vehicle_id)",
+                     (charge_id, _current_vehicle_id())).fetchone()
     return bool(row) and row["location_type"] == "HOME"
 
 
@@ -2144,7 +2208,9 @@ def unconfirmed_charges_count() -> int:
     confirmed until they end, otherwise the banner would never clear while charging."""
     db = _get()
     row = db.execute(
-        "SELECT COUNT(*) n FROM charges WHERE location_type IS NULL AND ended_at IS NOT NULL"
+        "SELECT COUNT(*) n FROM charges WHERE vehicle_id = COALESCE(?, vehicle_id) "
+        "AND location_type IS NULL AND ended_at IS NOT NULL",
+        (_current_vehicle_id(),)
     ).fetchone()
     return row["n"] if row else 0
 
@@ -2154,8 +2220,10 @@ def latest_home_charge_cost():
     records, so the Wallbox page reuses it instead of a separate HA cost sensor."""
     db = _get()
     row = db.execute(
-        "SELECT cost FROM charges WHERE location_type = 'HOME' AND cost IS NOT NULL "
-        "ORDER BY started_at DESC LIMIT 1"
+        "SELECT cost FROM charges WHERE vehicle_id = COALESCE(?, vehicle_id) "
+        "AND location_type = 'HOME' AND cost IS NOT NULL "
+        "ORDER BY started_at DESC LIMIT 1",
+        (_current_vehicle_id(),)
     ).fetchone()
     return row["cost"] if row else None
 
@@ -2179,10 +2247,10 @@ def get_stats_grouped() -> list[dict]:
             ) AS avg_efficiency,
             ROUND(SUM(regen_kwh), 2) AS total_regen_kwh
         FROM trips
-        WHERE ended_at IS NOT NULL
+        WHERE vehicle_id = COALESCE(?, vehicle_id) AND ended_at IS NOT NULL
         GROUP BY year, month_key, day_key
         ORDER BY started_at DESC
-    """).fetchall()
+    """, (_current_vehicle_id(),)).fetchall()
 
     lang = get_language()
     years: dict = OrderedDict()
@@ -2237,7 +2305,9 @@ def get_stats_grouped() -> list[dict]:
     db2 = _get()
     trip_rows = db2.execute(
         """SELECT id, started_at, distance_km, efficiency_kwh_100km, regen_kwh
-           FROM trips WHERE ended_at IS NOT NULL ORDER BY started_at ASC"""
+           FROM trips WHERE vehicle_id = COALESCE(?, vehicle_id) AND ended_at IS NOT NULL
+           ORDER BY started_at ASC""",
+        (_current_vehicle_id(),)
     ).fetchall()
     for r in trip_rows:
         t = dict(r)
@@ -2266,10 +2336,11 @@ def get_monthly_stats() -> list[dict]:
                ROUND(SUM(distance_km * COALESCE(efficiency_kwh_100km,0) / 100), 2) AS total_kwh,
                ROUND(AVG(efficiency_kwh_100km), 1) AS avg_efficiency
            FROM trips
-           WHERE ended_at IS NOT NULL
+           WHERE vehicle_id = COALESCE(?, vehicle_id) AND ended_at IS NOT NULL
            GROUP BY month
            ORDER BY month DESC
            LIMIT 12""",
+        (_current_vehicle_id(),)
     ).fetchall()
     return [dict(r) for r in rows]
 
@@ -2303,8 +2374,9 @@ def _charge_active_window(db, started_at, ended_at):
     lo, hi, excl = _power_window_bounds(db, started_at, ended_at)
     row = db.execute(
         "SELECT MIN(recorded_at) AS s, MAX(recorded_at) AS e FROM positions "
-        "WHERE charging = 1 AND recorded_at >= ? AND recorded_at " + ("<" if excl else "<=") + " ?",
-        (lo, hi),
+        "WHERE vehicle_id = COALESCE(?, vehicle_id) AND charging = 1 AND recorded_at >= ? AND recorded_at "
+        + ("<" if excl else "<=") + " ?",
+        (_current_vehicle_id(), lo, hi),
     ).fetchone()
     return (row["s"], row["e"]) if (row and row["s"]) else (None, None)
 
@@ -2416,14 +2488,16 @@ def get_stats_summary() -> dict:
                               THEN efficiency_kwh_100km END), 1) AS best_efficiency,
                ROUND(SUM(regen_kwh), 2)                                      AS total_regen_kwh,
                ROUND(AVG(regen_kwh), 2)                                      AS avg_regen_kwh
-           FROM trips WHERE ended_at IS NOT NULL"""
+           FROM trips WHERE vehicle_id = COALESCE(?, vehicle_id) AND ended_at IS NOT NULL""",
+        (_current_vehicle_id(),)
     ).fetchone()
     charges = db.execute(
         """SELECT
                COUNT(*)                         AS charge_count,
                ROUND(SUM(energy_added_kwh), 2)  AS total_kwh_charged,
                ROUND(SUM(cost), 2)              AS total_cost
-           FROM charges WHERE ended_at IS NOT NULL"""
+           FROM charges WHERE vehicle_id = COALESCE(?, vehicle_id) AND ended_at IS NOT NULL""",
+        (_current_vehicle_id(),)
     ).fetchone()
     t = dict(trips) if trips else {}
     c = dict(charges) if charges else {}
@@ -2446,7 +2520,8 @@ def get_charge_stats() -> dict:
                ROUND(AVG(end_soc - start_soc), 1) AS avg_soc_delta,
                ROUND(MAX(max_power_kw), 2)        AS peak_power_kw
            FROM charges
-           WHERE ended_at IS NOT NULL"""
+           WHERE vehicle_id = COALESCE(?, vehicle_id) AND ended_at IS NOT NULL""",
+        (_current_vehicle_id(),)
     ).fetchone()
     return dict(row) if row else {}
 
@@ -2456,7 +2531,9 @@ def get_ac_dc_stats() -> dict:
     set) a measured peak power above 11 kW (AC tops out at ~11 kW; DC is faster)."""
     db = _get()
     rows = db.execute(
-        "SELECT charge_type, max_power_kw, energy_added_kwh FROM charges WHERE ended_at IS NOT NULL"
+        "SELECT charge_type, max_power_kw, energy_added_kwh FROM charges "
+        "WHERE vehicle_id = COALESCE(?, vehicle_id) AND ended_at IS NOT NULL",
+        (_current_vehicle_id(),)
     ).fetchall()
     ac = {"count": 0, "kwh": 0.0}
     dc = {"count": 0, "kwh": 0.0}
@@ -2734,15 +2811,16 @@ def _integrate_charge_energy_kwh(db, start: str, end: str | None) -> float:
         lo, hi, excl = _power_window_bounds(db, start, end)
         rows = db.execute(
             "SELECT recorded_at, charge_voltage_v, charge_current_a FROM positions "
-            "WHERE charging = 1 AND recorded_at >= ? AND recorded_at " + ("<" if excl else "<=")
+            "WHERE vehicle_id = COALESCE(?, vehicle_id) AND charging = 1 AND recorded_at >= ? AND recorded_at "
+            + ("<" if excl else "<=")
             + " ? ORDER BY recorded_at",
-            (lo, hi),
+            (_current_vehicle_id(), lo, hi),
         ).fetchall()
     else:
         rows = db.execute(
             "SELECT recorded_at, charge_voltage_v, charge_current_a FROM positions "
-            "WHERE charging = 1 AND recorded_at >= ? ORDER BY recorded_at",
-            (start,),
+            "WHERE vehicle_id = COALESCE(?, vehicle_id) AND charging = 1 AND recorded_at >= ? ORDER BY recorded_at",
+            (_current_vehicle_id(), start),
         ).fetchall()
     energy = 0.0
     prev_t = None
@@ -2775,9 +2853,10 @@ def _charge_has_soc_jump(db, start: str, end: str | None,
     clause = "recorded_at >= ? AND recorded_at <= ?" if end else "recorded_at >= ?"
     params = (start, end) if end else (start,)
     rows = db.execute(
-        f"SELECT recorded_at, soc FROM positions WHERE {clause} AND charging = 1 "
+        f"SELECT recorded_at, soc FROM positions WHERE vehicle_id = COALESCE(?, vehicle_id) AND {clause} "
+        "AND charging = 1 "
         "AND soc IS NOT NULL ORDER BY recorded_at",
-        params,
+        (_current_vehicle_id(), *params),
     ).fetchall()
     prev_soc, prev_t = None, None
     for r in rows:
@@ -2804,9 +2883,9 @@ def _charge_has_active_use(db, start: str, end: str | None) -> bool:
     clause = "recorded_at >= ? AND recorded_at <= ?" if end else "recorded_at >= ?"
     params = (start, end) if end else (start,)
     row = db.execute(
-        f"SELECT 1 FROM positions WHERE {clause} "
+        f"SELECT 1 FROM positions WHERE vehicle_id = COALESCE(?, vehicle_id) AND {clause} "
         "AND (climate_cooling = 1 OR climate_heating = 1) LIMIT 1",
-        params,
+        (_current_vehicle_id(), *params),
     ).fetchone()
     return row is not None
 
@@ -2817,12 +2896,15 @@ def _charge_temp_odo(db, start: str, end: str | None):
     odometer gives the per-distance (cycle-ageing) axis of the SoH trend."""
     if end:
         rows = db.execute(
-            "SELECT battery_min_temp, odometer_km FROM positions WHERE charging = 1 "
-            "AND recorded_at >= ? AND recorded_at <= ? ORDER BY recorded_at", (start, end)).fetchall()
+            "SELECT battery_min_temp, odometer_km FROM positions "
+            "WHERE vehicle_id = COALESCE(?, vehicle_id) AND charging = 1 "
+            "AND recorded_at >= ? AND recorded_at <= ? ORDER BY recorded_at",
+            (_current_vehicle_id(), start, end)).fetchall()
     else:
         rows = db.execute(
-            "SELECT battery_min_temp, odometer_km FROM positions WHERE charging = 1 "
-            "AND recorded_at >= ? ORDER BY recorded_at", (start,)).fetchall()
+            "SELECT battery_min_temp, odometer_km FROM positions "
+            "WHERE vehicle_id = COALESCE(?, vehicle_id) AND charging = 1 "
+            "AND recorded_at >= ? ORDER BY recorded_at", (_current_vehicle_id(), start)).fetchall()
     temps = [r["battery_min_temp"] for r in rows if r["battery_min_temp"] is not None]
     odos = [r["odometer_km"] for r in rows if r["odometer_km"] is not None]
     return (min(temps) if temps else None), (max(odos) if odos else None)
@@ -2859,8 +2941,10 @@ def get_battery_health(min_soc_delta: float = 12.0, temp_min_c: float | None = N
             temp_min_c = 15.0
     rows = db.execute(
         "SELECT id, started_at, ended_at, start_soc, end_soc, charge_type "
-        "FROM charges WHERE ended_at IS NOT NULL AND start_soc IS NOT NULL "
+        "FROM charges WHERE vehicle_id = COALESCE(?, vehicle_id) AND ended_at IS NOT NULL "
+        "AND start_soc IS NOT NULL "
         "AND end_soc IS NOT NULL ORDER BY started_at",
+        (_current_vehicle_id(),)
     ).fetchall()
     points = []
     for r in rows:
@@ -2968,8 +3052,8 @@ def get_vampire_drain(min_hours: float = 1.0, min_drop_pct: float = 0.2,
     cutoff = (datetime.now(timezone.utc) - timedelta(days=lookback_days)).isoformat()
     rows = db.execute(
         "SELECT recorded_at, soc, charging, speed_kmh, odometer_km, ac_port_mode, ready FROM positions "
-        "WHERE soc IS NOT NULL AND recorded_at >= ? ORDER BY recorded_at",
-        (cutoff,),
+        "WHERE vehicle_id = COALESCE(?, vehicle_id) AND soc IS NOT NULL AND recorded_at >= ? ORDER BY recorded_at",
+        (_current_vehicle_id(), cutoff),
     ).fetchall()
 
     windows = []
@@ -3102,7 +3186,8 @@ def get_v2l_sessions(lookback_days: int = 90, limit: int = 50, vehicle_id: int |
     else:
         rows = db.execute(
             "SELECT recorded_at, soc, charge_current_a, charge_voltage_v, ac_port_mode FROM positions "
-            "WHERE recorded_at >= ? ORDER BY recorded_at", (cutoff,),
+            "WHERE vehicle_id = COALESCE(?, vehicle_id) AND recorded_at >= ? ORDER BY recorded_at",
+            (_current_vehicle_id(), cutoff),
         ).fetchall()
 
     def _close(c, ongoing=False):
@@ -3243,7 +3328,9 @@ def get_all_track(max_points: int = 12000) -> list[list[list[float]]]:
     db = _get()
     rows = db.execute(
         "SELECT trip_id, latitude, longitude FROM trip_positions "
-        "WHERE latitude IS NOT NULL AND longitude IS NOT NULL ORDER BY trip_id, id"
+        "WHERE trip_id IN (SELECT id FROM trips WHERE vehicle_id = COALESCE(?, vehicle_id)) "
+        "AND latitude IS NOT NULL AND longitude IS NOT NULL ORDER BY trip_id, id",
+        (_current_vehicle_id(),)
     ).fetchall()
     return _rows_to_segments(rows, max_points)
 
@@ -3256,7 +3343,8 @@ def get_month_track(month: str, max_points: int = 8000) -> list[list[list[float]
         return []
     db = _get()
     ids = []
-    for r in db.execute("SELECT id, started_at FROM trips WHERE started_at IS NOT NULL").fetchall():
+    for r in db.execute("SELECT id, started_at FROM trips WHERE vehicle_id = COALESCE(?, vehicle_id) "
+                        "AND started_at IS NOT NULL", (_current_vehicle_id(),)).fetchall():
         dt = _local_dt(r["started_at"])
         if dt is not None and dt.strftime("%Y-%m") == month:
             ids.append(r["id"])
@@ -3278,7 +3366,9 @@ def get_frequent_places(min_visits: int = 2, top_n: int = 15) -> list[dict]:
     stays offline and cheap."""
     db = _get()
     rows = db.execute(
-        "SELECT start_lat, start_lon, end_lat, end_lon FROM trips"
+        "SELECT start_lat, start_lon, end_lat, end_lon FROM trips "
+        "WHERE vehicle_id = COALESCE(?, vehicle_id)",
+        (_current_vehicle_id(),)
     ).fetchall()
     buckets: dict[tuple, dict] = {}
     for r in rows:

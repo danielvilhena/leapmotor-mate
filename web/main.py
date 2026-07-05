@@ -25,7 +25,7 @@ import mqtt_check
 import auth
 import update_check
 
-MATE_VERSION = "2.1.9"  # bump together with the git tag + add-on config.yaml at release
+MATE_VERSION = "2.2.0"  # bump together with the git tag + add-on config.yaml at release
 
 import diagnostics
 import demo
@@ -2611,6 +2611,11 @@ async def capacity_settings(request: Request):
         db_reader.set_setting("battery_capacity_nominal_kwh",
                               db_reader.get_setting("battery_capacity_kwh", str(kwh)))
     db_reader.set_setting("battery_capacity_kwh", str(kwh))
+    # Mirror onto the car's own row so the poller's per-vehicle energy math honours the override
+    # (it reads vehicles.capacity_kwh, not the global setting). No-op on single-car beyond keeping
+    # the two in sync; multi-car will target the selected vehicle.
+    _nom = db_reader.get_setting("battery_capacity_nominal_kwh", "")
+    db_reader.set_vehicle_capacity_current(kwh, float(_nom) if _nom else None)
     return HTMLResponse(f'<span style="color:#22c55e">✓ {kwh:g} kWh</span>')
 
 

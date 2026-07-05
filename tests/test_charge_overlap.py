@@ -29,11 +29,12 @@ def _dense(start_iso, end_iso, step_min=5, kw=5.0, volt=230.0):
 def _db(charges, positions):
     con = sqlite3.connect(":memory:")
     con.row_factory = sqlite3.Row
-    con.execute("CREATE TABLE charges (id INT, started_at TEXT, ended_at TEXT)")
+    con.execute("CREATE TABLE charges (id INT, started_at TEXT, ended_at TEXT, vehicle_id INTEGER DEFAULT 1)")
     con.executemany("INSERT INTO charges (id, started_at, ended_at) VALUES (?,?,?)", charges)
     con.execute("CREATE TABLE positions (recorded_at TEXT, charging INT, "
                 "charge_voltage_v REAL, charge_current_a REAL)")
     con.executemany("INSERT INTO positions VALUES (?,?,?,?)", positions)
+    con.execute("ALTER TABLE positions ADD COLUMN vehicle_id INTEGER DEFAULT 1")
     con.commit()
     return con
 
@@ -67,7 +68,7 @@ def test_power_curve_capped_at_next_charge_start(monkeypatch):
     # bled past a later charge would otherwise integrate that charge's wallbox AC → absurd cost.
     con = sqlite3.connect(":memory:")
     con.row_factory = sqlite3.Row
-    con.execute("CREATE TABLE charges (id INT, started_at TEXT, ended_at TEXT)")
+    con.execute("CREATE TABLE charges (id INT, started_at TEXT, ended_at TEXT, vehicle_id INTEGER DEFAULT 1)")
     con.executemany("INSERT INTO charges (id, started_at, ended_at) VALUES (?,?,?)", [
         (1, "2026-06-07T20:00:00+00:00", "2026-06-08T08:25:00+00:00"),   # A: ended_at bleeds past B
         (2, "2026-06-08T08:00:00+00:00", "2026-06-08T08:30:00+00:00"),   # B
@@ -80,6 +81,7 @@ def test_power_curve_capped_at_next_charge_start(monkeypatch):
         ("2026-06-08T08:05:00+00:00", 1, 230, 21.7, 60),   # B (belongs to charge 2)
         ("2026-06-08T08:13:00+00:00", 1, 230, 21.7, 62),   # B
     ])
+    con.execute("ALTER TABLE positions ADD COLUMN vehicle_id INTEGER DEFAULT 1")
     con.commit()
     monkeypatch.setattr(db_reader, "_get", lambda: con)
     # A's curve must stop before B's samples (08:05/08:13 are excluded by the cap)
@@ -97,6 +99,7 @@ def test_window_without_charges_table_is_unclamped():
     con.execute("CREATE TABLE positions (recorded_at TEXT, charging INT)")
     con.executemany("INSERT INTO positions VALUES (?,?)",
                     [("2026-06-02T16:48:59+00:00", 1), ("2026-06-02T21:18:36+00:00", 1)])
+    con.execute("ALTER TABLE positions ADD COLUMN vehicle_id INTEGER DEFAULT 1")
     con.commit()
     rs, re = db_reader._charge_active_window(con, "2026-06-02T16:48:39+00:00", "2026-06-02T23:53:43+00:00")
     assert rs == "2026-06-02T16:48:59+00:00" and re == "2026-06-02T21:18:36+00:00"

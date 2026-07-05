@@ -94,14 +94,18 @@ def build_system_info(version: str) -> dict:
 
     def _count(table: str) -> int:
         try:
-            return db.execute(f"SELECT COUNT(*) c FROM {table}").fetchone()["c"]
+            return db.execute(
+                f"SELECT COUNT(*) c FROM {table} WHERE vehicle_id = COALESCE(?, vehicle_id)",
+                (db_reader._current_vehicle_id(),)).fetchone()["c"]
         except Exception:  # noqa: BLE001
             return -1
 
     last = None
     try:
         last = db.execute(
-            "SELECT recorded_at, soc, gear, charging FROM positions ORDER BY id DESC LIMIT 1"
+            "SELECT recorded_at, soc, gear, charging FROM positions "
+            "WHERE vehicle_id = COALESCE(?, vehicle_id) ORDER BY id DESC LIMIT 1",
+            (db_reader._current_vehicle_id(),)
         ).fetchone()
     except Exception:  # noqa: BLE001
         pass
@@ -120,7 +124,8 @@ def build_system_info(version: str) -> dict:
     span = "—"
     try:
         r = db.execute("SELECT MIN(recorded_at) a, MAX(recorded_at) b FROM positions "
-                       "WHERE recorded_at IS NOT NULL").fetchone()
+                       "WHERE vehicle_id = COALESCE(?, vehicle_id) AND recorded_at IS NOT NULL",
+                       (db_reader._current_vehicle_id(),)).fetchone()
         if r and r["a"] and r["b"]:
             days = round((datetime.fromisoformat(r["b"]) - datetime.fromisoformat(r["a"]))
                          .total_seconds() / 86400, 1)
@@ -218,7 +223,8 @@ def _soc_daily_section() -> str:
         rows = db_reader._get().execute(
             "SELECT substr(recorded_at,1,10) d, COUNT(*) n, MIN(soc) lo, MAX(soc) hi, "
             "MIN(odometer_km) o0, MAX(odometer_km) o1 FROM positions "
-            "WHERE soc IS NOT NULL AND recorded_at >= ? GROUP BY d ORDER BY d", (cutoff,)).fetchall()
+            "WHERE vehicle_id = COALESCE(?, vehicle_id) AND soc IS NOT NULL AND recorded_at >= ? "
+            "GROUP BY d ORDER BY d", (db_reader._current_vehicle_id(), cutoff)).fetchall()
     except Exception as e:  # noqa: BLE001
         return f"(soc-daily failed: {e})"
     out = []
@@ -265,8 +271,9 @@ def _cost_wallbox_section() -> str:
         db = db_reader._get()
         rows = db.execute(
             "SELECT started_at, location_type, energy_added_kwh, ac_energy_kwh, cost, "
-            "wallbox_energy_start_kwh, reconstructed FROM charges WHERE ended_at IS NOT NULL "
-            "ORDER BY started_at DESC LIMIT 8").fetchall()
+            "wallbox_energy_start_kwh, reconstructed FROM charges "
+            "WHERE vehicle_id = COALESCE(?, vehicle_id) AND ended_at IS NOT NULL "
+            "ORDER BY started_at DESC LIMIT 8", (db_reader._current_vehicle_id(),)).fetchall()
         lines.append("")
         lines.append("Last charges — DC (battery) · AC (wallbox) · cost · wb baseline · "
                      "show_wb=does-the-card-show-AC · raw ac_energy value (#109 diagnosis):")
