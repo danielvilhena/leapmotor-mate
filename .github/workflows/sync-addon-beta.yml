@@ -1,0 +1,93 @@
+# Sync the BETA add-on repo (ProtossBlaster/MateBetaTesterOnly) on each release.
+#
+# The beta add-on runs the SAME image + SAME version as prod — the only difference is that its
+# config sets `research: true`, which run.sh turns into MATE_RESEARCH=1 (full-signal data capture).
+# So there's NO separate image and NO separate version line: the beta just needs its config.yaml
+# `version:` bumped to the release number each time, exactly like the official add-on, so Home
+# Assistant shows the update and testers stop freezing on whatever they first installed.
+#
+# NB: needs a token (ADDON_REPO_TOKEN) with WRITE access to ProtossBlaster/MateBetaTesterOnly
+# (the official sync uses the same secret for leapmotor-mate-addon — confirm its scope covers this
+# repo too, or point this at a dedicated secret).
+name: Sync beta add-on repo
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Version tag to sync into the beta add-on (e.g. v2.3.1)"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  sync-beta-addon:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve version
+        id: ver
+        run: |
+          REF="${{ github.event.release.tag_name || github.event.inputs.ref }}"
+          if [[ ! "$REF" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.]+)?$ ]]; then
+            echo "::error::'$REF' is not a vX.Y.Z tag — refusing to sync."
+            exit 1
+          fi
+          echo "tag=$REF" >> "$GITHUB_OUTPUT"
+          echo "version=${REF#v}" >> "$GITHUB_OUTPUT"   # plain semver — SAME as the official release
+          echo "Syncing BETA add-on to ${REF#v}"
+
+      - name: Checkout beta add-on repo
+        uses: actions/checkout@v4
+        with:
+          repository: ProtossBlaster/MateBetaTesterOnly
+          token: ${{ secrets.ADDON_REPO_TOKEN }}
+          path: addon
+
+      - name: Wait for the GHCR image to be published
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          owner=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          img="ghcr.io/${owner}/leapmotor-mate:${VERSION}"
+          echo "Waiting for ${img} …"
+          for i in $(seq 1 60); do
+            if docker manifest inspect "$img" >/dev/null 2>&1; then
+              echo "✓ ${img} is published."; exit 0
+            fi
+            echo "  not yet (attempt ${i}/60) — sleeping 15s"; sleep 15
+          done
+          echo "::error::Timed out after 15 min waiting for ${img} to be published by docker-publish.yml"
+          exit 1
+
+      - name: Bump beta add-on version
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          cfg=addon/leapmotor_mate_beta/config.yaml
+          # Image-based add-on: the only thing to bump is config.yaml `version:` (= the GHCR tag the
+          # Supervisor pulls). Same image as prod; the `research: true` option (already in the config)
+          # turns capture on. This is the identical mechanism as the official add-on sync.
+          sed -i -E "s|^version: .*|version: \"${VERSION}\"|" "$cfg"
+          echo "version: $(grep '^version:' "$cfg")"
+          echo "image  : $(grep '^image:'   "$cfg")"
+
+      - name: Commit and push if changed
+        env:
+          TAG: ${{ steps.ver.outputs.tag }}
+          VERSION: ${{ steps.ver.outputs.version }}
+        working-directory: addon
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet; then
+            echo "Beta add-on already at ${VERSION} — nothing to do."
+            echo "Beta add-on already at \`${VERSION}\` — nothing to do." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          git add leapmotor_mate_beta/config.yaml
+          git commit -m "release: ${TAG} (same image+version as prod, research flag on)"
+          git push
+          echo "Synced beta add-on to \`${VERSION}\`." >> "$GITHUB_STEP_SUMMARY"

@@ -14,6 +14,16 @@ fi
 export DB_PATH="${DB_PATH:-/data/leapmotor_mate.db}"
 export CERT_DIR="/app/certs"
 
+# Home Assistant add-on options → env. The MateBetaTesterOnly add-on sets `research: true` in its
+# options to turn on full-signal data capture; the official add-on doesn't set it, so it stays OFF.
+# This lets BOTH add-ons run the SAME image at the SAME version — the only difference is this flag,
+# so the beta can carry the exact prod version number instead of a static "beta" tag. Only overrides
+# MATE_RESEARCH when the key is actually present (standalone / official add-on are untouched).
+if [ -f /data/options.json ]; then
+  _research="$(python3 -c "import json;d=json.load(open('/data/options.json'));print('1' if d.get('research') else '0') if 'research' in d else None" 2>/dev/null || true)"
+  [ -n "${_research}" ] && export MATE_RESEARCH="${_research}"
+fi
+
 # Make sure the data directory exists BEFORE anything opens the DB. A standalone
 # user (especially via Docker Desktop "Run", which mounts no volume by default)
 # would otherwise hit "sqlite3: unable to open database file" and the poller would
