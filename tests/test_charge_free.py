@@ -43,10 +43,12 @@ def test_compute_cost_returns_zero_when_free():
     assert db_reader.compute_cost({"location_type": "HOME", "energy_added_kwh": 8.0, "is_free": 1}) == 0.0
 
 
-def test_compute_cost_missing_is_free_key_is_safe():
-    # a dict without the key must not raise (plain-dict callers / old rows)
+def test_compute_cost_missing_is_free_key_is_safe(tmp_path, monkeypatch):
+    # a dict WITHOUT the is_free key must not raise on the guard, and must NOT be forced free —
+    # it computes the normal cost (8 kWh × 0.25 home price).
+    _setup(tmp_path, monkeypatch)
     out = db_reader.compute_cost({"location_type": "HOME", "energy_added_kwh": 8.0})
-    assert out != 0.0    # not forced free
+    assert out == 2.0
 
 
 # ── set_charge_free on HOME ───────────────────────────────────────────────────
