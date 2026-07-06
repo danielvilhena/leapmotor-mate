@@ -1,6 +1,7 @@
 # Mirror every leapmotor-mate GitHub Release onto the MateBetaTesterOnly repo, so the beta repo's
 # Releases list always matches production and updates the moment a new prod release is published.
-# It copies the SAME tag, title and notes — no "beta" wording added.
+# It copies the SAME tag, title and notes — no "beta" wording added. Can also be run manually
+# (workflow_dispatch with a tag) to re-sync or backfill a specific release.
 #
 # NB: needs a token (ADDON_REPO_TOKEN) with `contents: write` on ProtossBlaster/MateBetaTesterOnly.
 name: Mirror release to beta repo
@@ -8,6 +9,11 @@ name: Mirror release to beta repo
 on:
   release:
     types: [published, edited]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to mirror (e.g. v2.3.0)"
+        required: true
 
 permissions:
   contents: read
@@ -16,17 +22,33 @@ jobs:
   mirror:
     runs-on: ubuntu-latest
     steps:
+      - name: Resolve the prod release details
+        id: rel
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.release.tag_name || github.event.inputs.tag }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          data=$(gh release view "$TAG" --repo "$REPO" --json name,body,isPrerelease)
+          jq -r '.body' <<<"$data" > /tmp/notes.md
+          {
+            echo "tag=$TAG"
+            echo "prerelease=$(jq -r '.isPrerelease' <<<"$data")"
+            echo "name<<__EOF__"
+            jq -r '.name' <<<"$data"
+            echo "__EOF__"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Create/update the same release on MateBetaTesterOnly
         env:
           GH_TOKEN: ${{ secrets.ADDON_REPO_TOKEN }}
-          TAG: ${{ github.event.release.tag_name }}
-          NAME: ${{ github.event.release.name }}
-          BODY: ${{ github.event.release.body }}
-          PRERELEASE: ${{ github.event.release.prerelease }}
+          TAG: ${{ steps.rel.outputs.tag }}
+          NAME: ${{ steps.rel.outputs.name }}
+          PRERELEASE: ${{ steps.rel.outputs.prerelease }}
         run: |
           set -euo pipefail
           BETA=ProtossBlaster/MateBetaTesterOnly
-          printf '%s' "${BODY}" > /tmp/notes.md
           flags=()
           [ "${PRERELEASE}" = "true" ] && flags+=(--prerelease)
           title="${NAME:-$TAG}"
