@@ -1,0 +1,39 @@
+# Mirror every leapmotor-mate GitHub Release onto the MateBetaTesterOnly repo, so the beta repo's
+# Releases list always matches production and updates the moment a new prod release is published.
+# It copies the SAME tag, title and notes — no "beta" wording added.
+#
+# NB: needs a token (ADDON_REPO_TOKEN) with `contents: write` on ProtossBlaster/MateBetaTesterOnly.
+name: Mirror release to beta repo
+
+on:
+  release:
+    types: [published, edited]
+
+permissions:
+  contents: read
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create/update the same release on MateBetaTesterOnly
+        env:
+          GH_TOKEN: ${{ secrets.ADDON_REPO_TOKEN }}
+          TAG: ${{ github.event.release.tag_name }}
+          NAME: ${{ github.event.release.name }}
+          BODY: ${{ github.event.release.body }}
+          PRERELEASE: ${{ github.event.release.prerelease }}
+        run: |
+          set -euo pipefail
+          BETA=ProtossBlaster/MateBetaTesterOnly
+          printf '%s' "${BODY}" > /tmp/notes.md
+          flags=()
+          [ "${PRERELEASE}" = "true" ] && flags+=(--prerelease)
+          title="${NAME:-$TAG}"
+          if gh release view "${TAG}" --repo "${BETA}" >/dev/null 2>&1; then
+            gh release edit "${TAG}" --repo "${BETA}" --title "${title}" --notes-file /tmp/notes.md "${flags[@]}"
+            echo "Updated ${TAG} on ${BETA}"
+          else
+            gh release create "${TAG}" --repo "${BETA}" --target main --title "${title}" --notes-file /tmp/notes.md "${flags[@]}"
+            echo "Created ${TAG} on ${BETA}"
+          fi
