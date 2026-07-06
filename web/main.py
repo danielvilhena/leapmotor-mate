@@ -25,7 +25,7 @@ import mqtt_check
 import auth
 import update_check
 
-MATE_VERSION = "2.3.0"  # bump together with the git tag + add-on config.yaml at release
+MATE_VERSION = "2.4.0"  # bump together with the git tag + add-on config.yaml at release
 
 import diagnostics
 import demo
@@ -1119,6 +1119,8 @@ async def settings_page(request: Request):
                 "vampire_min_hours": db_reader.get_setting("vampire_min_hours", "1"),
                 "charge_dc_min_kw": db_reader.get_setting("charge_dc_min_kw", "11"),
                 "wallbox_auto_home": db_reader.get_setting("wallbox_auto_home", "0"),
+                "default_drive_mode": db_reader.get_setting("default_drive_mode", ""),
+                "default_one_pedal": db_reader.get_setting("default_one_pedal", ""),
                 "db_size_mb": round(db_reader.get_db_size_bytes() / 1048576, 1)}
     # Per-card open/collapsed state for the settings accordion — saved in the DB (shared
     # across devices). Cards start collapsed so the page stays compact, EXCEPT 'vehicle': it's
@@ -1338,6 +1340,21 @@ async def save_wallbox_auto_home(request: Request):
     t = i18n.get_t(db_reader.get_language())
     msg = t("wallbox_saved") + (" · " + t("wallbox_auto_home_applied").format(n=n) if n else "")
     return HTMLResponse(f'<span style="color:#22c55e;font-size:13px">{msg}</span>')
+
+
+@app.post("/api/settings/trip-defaults", response_class=HTMLResponse)
+async def save_trip_defaults(request: Request):
+    """#119: app-level defaults that pre-fill a NEW trip's drive mode / One-Pedal. The cloud never
+    reports either (verified on-car), so they can only be tagged by hand — this spares a fixed-habit
+    driver from re-tagging every trip. "" = keep 'not set' (the historical behaviour). Existing trips
+    are left untouched: this only seeds trips created from now on."""
+    form = await request.form()
+    dm = (form.get("default_drive_mode") or "").strip().lower()
+    db_reader.set_setting("default_drive_mode", dm if dm in db_reader.DRIVE_MODES else "")
+    op = (form.get("default_one_pedal") or "").strip()
+    db_reader.set_setting("default_one_pedal", op if op in ("0", "1") else "")
+    t = i18n.get_t(db_reader.get_language())
+    return HTMLResponse(f'<span style="color:#22c55e;font-size:13px">{t("trip_defaults_saved")}</span>')
 
 
 # ── Wallbox saved profiles ───────────────────────────────────────────────────
@@ -1671,7 +1688,27 @@ async def set_charge_type(request: Request, charge_id: int):
     return templates.TemplateResponse(request, "partials/charge_type_badge.html", {
         "charge": charge,
         "charge_types": db_reader.CHARGE_TYPES,
+        "t": t,                   # the partial's #120 free toggle (HOME) needs the translator
         "cost_oob": True,         # also refresh the cost cell (it changes with the type/basis)
+        "cost_title": cost_title,
+    })
+
+
+@app.post("/api/charges/{charge_id}/free", response_class=HTMLResponse)
+async def set_charge_free(request: Request, charge_id: int):
+    """#120: toggle the FREE mark on a HOME charge (e.g. self-produced solar, or any free home
+    charge). The charge stays HOME — and on the Home side of the Home-vs-Public split — while its
+    cost is pinned to 0. HOME-only; the free-away case is the FREE location_type."""
+    form = await request.form()
+    free = str(form.get("is_free", "")).strip() in ("1", "on", "true")
+    charge = db_reader.set_charge_free(charge_id, free)
+    t = i18n.get_t(db_reader.get_language())
+    cost_title = t("cost_basis_ac") if charge.get("ac_energy_kwh") else t("cost_basis_dc")
+    return templates.TemplateResponse(request, "partials/charge_type_badge.html", {
+        "charge": charge,
+        "charge_types": db_reader.CHARGE_TYPES,
+        "t": t,                   # the partial's #120 free toggle needs the translator
+        "cost_oob": True,         # free flips the cost to 0 → refresh the cost cell too
         "cost_title": cost_title,
     })
 
@@ -2045,7 +2082,7 @@ async def test_mqtt(request: Request):
 
 # Every collapsible card on the Settings accordion. Used both to build the initial
 # open/collapsed map and as the allowlist for the ui-state save endpoint.
-_UI_CARD_KEYS = {"locale", "vehicle", "battery", "polling", "charge_detect", "advanced",
+_UI_CARD_KEYS = {"locale", "vehicle", "battery", "polling", "charge_detect", "trips", "advanced",
                  "abrp", "geocoder", "charger_locator", "wallbox", "mqtt",
                  "database", "export", "diagnostics"}
 
@@ -2053,7 +2090,7 @@ _UI_CARD_KEYS = {"locale", "vehicle", "battery", "polling", "charge_detect", "ad
 # until the user OPENS it (card_seen_<key>=1, badge never returns — so a new feature isn't missed if
 # buried in the changelog). Maintenance: add a section's key here when you SHIP that new section,
 # then drop it a release or two later. Empty = no section is "new" right now (the mechanism is idle).
-_NEW_SETTINGS_SECTIONS: set[str] = set()
+_NEW_SETTINGS_SECTIONS: set[str] = {"trips"}   # #119: trip drive-mode / One-Pedal defaults
 
 
 def _card_open(key: str, default: bool) -> bool:

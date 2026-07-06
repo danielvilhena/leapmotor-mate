@@ -3,6 +3,12 @@
 All notable changes to LeapMotor Mate are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.4.0] — 2026-07-06
+
+### Added
+- **Mark a home charge as "Free" (#120, thanks @Wartopia).** A home charge that cost you nothing — self-produced solar, or any free top-up at home — can now be flagged **🆓 Free** with a toggle right next to its **Home** badge. The charge **stays under Home**, so it still counts on the Home side of the Home-vs-Public breakdown instead of being lumped into "Public", but its cost is pinned to **0** and protected from any later recompute. It's a manual flag by design: Mate only sees what the wallbox/battery report and **can't tell solar from grid** (there's no metering behind your meter — a session is usually a mix), so whether a charge was "free" is your call, not a measurement. Free charging *away* from home stays the existing **FREE** type; this toggle is Home-only, and switching a charge to any other type clears it.
+- **Default drive mode and One-Pedal for new trips (#119, thanks @Wartopia).** Drive mode (Comfort/Normal/Sport) and One-Pedal are never reported by the Leapmotor cloud (verified on-car) and can't be inferred from speed, so they can only be tagged by hand. If you always drive the same way, you can now set your defaults once under **Settings → Trip defaults**, and every **new** trip starts pre-filled instead of "not set" — no more re-tagging each trip. Applies to new trips only (existing ones are untouched), you can still override any single trip afterwards, and the factory default stays "not set" so nothing changes unless you choose one.
+
 ## [2.3.0] — 2026-07-05
 
 ### Added

@@ -425,6 +425,21 @@ document.body.addEventListener('htmx:afterSwap', function (e) {
                       {% endfor %}
                     </div>
                   </div>
+                  {% if c.location_type == 'HOME' %}
+                  {# #120: mark a home charge as free (e.g. self-produced solar). Stays HOME, cost 0. #}
+                  <form hx-post="api/charges/{{ c.id }}/free" hx-target="#charge-type-{{ c.id }}" hx-swap="outerHTML"
+                        style="margin:0;display:inline-block;vertical-align:top;margin-left:6px">
+                    <input type="hidden" name="is_free" value="{% if c.is_free %}0{% else %}1{% endif %}">
+                    <button type="submit" title="{{ t('charge_free_hint') }}"
+                            style="background:{% if c.is_free %}#a3e63522{% else %}transparent{% endif %};
+                                   color:{% if c.is_free %}#a3e635{% else %}#64748b{% endif %};
+                                   border:1px solid {% if c.is_free %}#a3e63566{% else %}#334155{% endif %};
+                                   padding:4px 10px;border-radius:20px;font-size:12px;font-weight:700;cursor:pointer;
+                                   display:inline-flex;align-items:center;gap:5px;white-space:nowrap">
+                      🆓 {{ t('charge_free') }}{% if c.is_free %} ✓{% endif %}
+                    </button>
+                  </form>
+                  {% endif %}
                 </div>
               </div>
 

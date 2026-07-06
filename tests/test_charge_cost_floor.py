@@ -19,7 +19,8 @@ def test_home_billed_on_wallbox_meter_else_battery(monkeypatch):
     con = sqlite3.connect(":memory:")
     con.row_factory = sqlite3.Row
     con.execute("CREATE TABLE charges (id INT, location_type TEXT, energy_added_kwh REAL, "
-                "cost REAL, ac_energy_kwh REAL, started_at TEXT, ended_at TEXT)")
+                "cost REAL, ac_energy_kwh REAL, started_at TEXT, ended_at TEXT, "
+                "is_free INT DEFAULT 0)")   # #120: update_charge_type now also writes is_free
     con.execute("INSERT INTO charges (id, energy_added_kwh, ac_energy_kwh) VALUES (1, 10.0, 11.5)")
     con.commit()
     monkeypatch.setattr(db_reader, "_conn_rw", lambda: con)

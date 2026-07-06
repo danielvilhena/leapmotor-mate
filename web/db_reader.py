@@ -725,6 +725,11 @@ def compute_cost(charge, config: Optional[dict] = None, ac_kwh: Optional[float] 
     at the same times — so only the total energy differs.
     """
     location_type = charge["location_type"]
+    # #120: a charge the user marked FREE (a home solar/free charge kept under Home) costs 0, full
+    # stop — authoritative over any tariff and unconditional, so every recompute path (auto-confirm,
+    # the one-time repairs, a re-tag) that routes through here keeps it at 0.
+    if "is_free" in charge.keys() and charge["is_free"]:
+        return 0.0
     # `ac_kwh` (when given) is the wallbox energy the poller MEASURED for this charge — the counter
     # delta start→stop, an exact figure, not an estimate. HOME charges are billed on it; everything
     # else (and HOME without a wallbox) on the battery (DC/SoC) energy. The caller picks which.
@@ -836,18 +841,49 @@ def update_charge_type(charge_id: int, location_type: str,
 
     charge = dict(row)
     charge["location_type"] = location_type
+    # #120: the FREE mark is HOME-only — switching to any other type drops it (free-away is the
+    # FREE location_type). Kept as-is when the charge stays HOME.
+    free = 1 if (location_type == "HOME" and charge.get("is_free")) else 0
+    charge["is_free"] = free
     if location_type == "MANUAL":
         # Keep the existing cost if no amount was supplied (e.g. re-tagging without re-typing it).
         cost = round(manual_cost, 2) if manual_cost is not None else charge.get("cost")
     else:
         meter = charge.get("ac_energy_kwh")
         billed = meter if (location_type == "HOME" and meter and meter > 0) else None
-        cost = compute_cost(charge, ac_kwh=billed)
+        cost = compute_cost(charge, ac_kwh=billed)   # returns 0.0 when the charge is marked free
 
     db.execute(
-        "UPDATE charges SET location_type=?, cost=? WHERE id=?",
-        (location_type, cost, charge_id)
+        "UPDATE charges SET location_type=?, cost=?, is_free=? WHERE id=?",
+        (location_type, cost, free, charge_id)
     )
+    db.commit()
+    return dict(db.execute("SELECT * FROM charges WHERE id=?", (charge_id,)).fetchone())
+
+
+def set_charge_free(charge_id: int, free: bool) -> dict:
+    """#120: mark/unmark a HOME charge as FREE — a home charge that cost nothing (self-produced
+    solar, or any free charge at home). Mate can't tell solar from grid (no metering behind the
+    meter), so this is a user declaration, not a measurement. The charge KEEPS its Home location
+    (so it stays on the Home side of the Home-vs-Public split, unlike the FREE location_type which
+    is 'free away') and its cost is pinned to 0. Unmarking recomputes the normal home cost. HOME-only:
+    a no-op on any other type (free-away is the FREE type)."""
+    db = _conn_rw()
+    row = db.execute("SELECT * FROM charges WHERE id=?", (charge_id,)).fetchone()
+    if not row:
+        return {}
+    charge = dict(row)
+    if charge.get("location_type") != "HOME":
+        return charge   # the free mark lives only on HOME charges
+    flag = 1 if free else 0
+    charge["is_free"] = flag
+    if flag:
+        cost = 0.0
+    else:
+        meter = charge.get("ac_energy_kwh")
+        billed = meter if (meter and meter > 0) else None
+        cost = compute_cost(charge, ac_kwh=billed)
+    db.execute("UPDATE charges SET is_free=?, cost=? WHERE id=?", (flag, cost, charge_id))
     db.commit()
     return dict(db.execute("SELECT * FROM charges WHERE id=?", (charge_id,)).fetchone())
 

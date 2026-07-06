@@ -217,6 +217,35 @@
       </form>
     {% endcall %}
 
+    <!-- Trip defaults (drive mode / One-Pedal) — #119 -->
+    {% call scard('trips', '🚗 ' + t('trip_defaults_section'), card_open.get('trips'), new_badge=(t('badge_new') if 'trips' in new_sections else '')) %}
+      <div class="text-xs text-slate-400 mb-4">{{ t('trip_defaults_desc') }}</div>
+      <form hx-post="api/settings/trip-defaults" hx-trigger="change" hx-target="#trip-def-result" hx-swap="innerHTML"
+            class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="block text-xs text-slate-400 mb-1">{{ t('drive_mode') }}</label>
+          <select name="default_drive_mode"
+                  class="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-sm text-slate-200 focus:border-brand focus:outline-none">
+            <option value=""        {% if not settings.get('default_drive_mode') %}selected{% endif %}>{{ t('opt_not_set') }}</option>
+            <option value="comfort" {% if settings.get('default_drive_mode') == 'comfort' %}selected{% endif %}>{{ t('mode_comfort') }}</option>
+            <option value="normal"  {% if settings.get('default_drive_mode') == 'normal'  %}selected{% endif %}>{{ t('mode_normal') }}</option>
+            <option value="sport"   {% if settings.get('default_drive_mode') == 'sport'   %}selected{% endif %}>{{ t('mode_sport') }}</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs text-slate-400 mb-1">{{ t('one_pedal') }}</label>
+          <select name="default_one_pedal"
+                  class="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-sm text-slate-200 focus:border-brand focus:outline-none">
+            <option value=""  {% if not settings.get('default_one_pedal') %}selected{% endif %}>{{ t('opt_not_set') }}</option>
+            <option value="1" {% if settings.get('default_one_pedal') == '1' %}selected{% endif %}>{{ t('opt_on') }}</option>
+            <option value="0" {% if settings.get('default_one_pedal') == '0' %}selected{% endif %}>{{ t('opt_off') }}</option>
+          </select>
+        </div>
+        <div id="trip-def-result" class="col-span-2 text-xs h-4"></div>
+      </form>
+      <div class="text-[11px] text-slate-500 mt-2">{{ t('trip_defaults_hint') }}</div>
+    {% endcall %}
+
   </div>
 
   <!-- ── Column 2 (4): Integrations — ABRP, Geocoder, Wallbox, MQTT ──── -->

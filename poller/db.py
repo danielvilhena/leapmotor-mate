@@ -46,6 +46,11 @@ _RECONSTRUCT_MAX_TRIP_KM = 1500.0
 _RECONSTRUCT_TRIP_MIN_KMH = 8.0
 _RECONSTRUCT_TRIP_MAX_KMH = 160.0
 
+# #119: drive mode / One-Pedal are NOT reported by the cloud (verified on-car) — they can only be
+# tagged manually. To spare drivers with a fixed habit from re-tagging every trip, two app-level
+# settings pre-fill new trips with a chosen default; "" (unset) keeps the current NULL / "not set".
+_DRIVE_MODES = ("comfort", "normal", "sport")
+
 
 def _wb_energy_ceiling(max_power_kw: Optional[float], hours: Optional[float]) -> float:
     """Max plausible wallbox energy for a session of `hours` at peak `max_power_kw`."""
@@ -389,6 +394,12 @@ class Database:
         # reliability, parking, weather, personal remarks). Display/context only, never computed on.
         if "note" not in ccols:
             self._conn.execute("ALTER TABLE charges ADD COLUMN note TEXT")
+        # migration: #120 — mark a HOME charge as FREE (e.g. self-produced solar, or any free home
+        # charge). The charge KEEPS its Home location (stays on the Home side of the Home-vs-Public
+        # split) but its cost is pinned to 0 and protected from every recompute (compute_cost returns
+        # 0 when is_free). "Free-away" stays the FREE location_type — this flag is HOME-only.
+        if "is_free" not in ccols:
+            self._conn.execute("ALTER TABLE charges ADD COLUMN is_free INTEGER DEFAULT 0")
         # migration: manual trip-merge link — a child trip points to the parent it was merged into
         tcols = {r[1] for r in self._conn.execute("PRAGMA table_info(trips)").fetchall()}
         if "merged_into_id" not in tcols:
@@ -976,13 +987,25 @@ class Database:
 
     # ── Trip ─────────────────────────────────────────────────────────────────
 
+    def _default_trip_tags(self) -> tuple:
+        """#119: the (drive_mode, one_pedal) a new trip is born with, from the user's app-level
+        defaults. Validated the same way the manual per-trip edit is (save_trip_note), so a stray
+        setting value can never land an invalid tag on a trip. Unset/invalid → None ("not set"),
+        which is the historical behaviour."""
+        dm = self.get_setting("default_drive_mode", "").strip().lower()
+        drive_mode = dm if dm in _DRIVE_MODES else None
+        op = self.get_setting("default_one_pedal", "").strip()
+        one_pedal = int(op) if op in ("0", "1") else None
+        return drive_mode, one_pedal
+
     def create_trip(self, vehicle_id: int, data) -> int:
+        drive_mode, one_pedal = self._default_trip_tags()
         cur = self._conn.execute(
             """INSERT INTO trips (vehicle_id, started_at, start_lat, start_lon,
-               start_soc, start_odometer_km)
-               VALUES (?,?,?,?,?,?)""",
+               start_soc, start_odometer_km, drive_mode, one_pedal)
+               VALUES (?,?,?,?,?,?,?,?)""",
             (vehicle_id, _now_iso(), data.latitude, data.longitude,
-             data.soc, data.odometer_km),
+             data.soc, data.odometer_km, drive_mode, one_pedal),
         )
         self._conn.commit()
         trip_id = cur.lastrowid
@@ -1019,13 +1042,15 @@ class Database:
             kmh = distance_km / (duration_min / 60.0)
             if kmh < _RECONSTRUCT_TRIP_MIN_KMH or kmh > _RECONSTRUCT_TRIP_MAX_KMH:
                 duration_min = None
+        drive_mode, one_pedal = self._default_trip_tags()   # #119: same default as a live trip
         cur = self._conn.execute(
             """INSERT INTO trips
                (vehicle_id, started_at, ended_at, start_soc, end_soc, start_odometer_km, end_odometer_km,
-                distance_km, duration_min, efficiency_kwh_100km, efficiency_soc, ec_stable, reconstructed)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,1,1)""",
+                distance_km, duration_min, efficiency_kwh_100km, efficiency_soc, drive_mode, one_pedal,
+                ec_stable, reconstructed)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,1,1)""",
             (vehicle_id, started_at, ended_at, start_soc, end_soc, start_odo, data.odometer_km,
-             distance_km, duration_min, efficiency, efficiency))
+             distance_km, duration_min, efficiency, efficiency, drive_mode, one_pedal))
         self._conn.commit()
         trip_id = cur.lastrowid
         log.info("Trip #%d reconstructed — %.1f km | SOC %.1f→%.1f%% | ~%.2f kWh (car was offline, no GPS)",
