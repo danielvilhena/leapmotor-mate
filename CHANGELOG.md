@@ -3,11 +3,6 @@
 All notable changes to LeapMotor Mate are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
-## [2.3.1] — 2026-07-06
-
-### Internal — no change for normal users
-- **The beta data-collection channel is now versioned.** The MateBetaTesterOnly add-on now runs the *same image and version* as the official release and turns on full-signal capture through an add-on option, instead of a separate static-tag build. This means it tracks every release and its testers get normal Home Assistant update prompts — previously the add-on was pinned to a fixed `beta` tag that never changed, so testers were frozen on whatever build they first installed. No effect on the official app: without that option the research code stays inert exactly as before.
-
 ## [2.3.0] — 2026-07-05
 
 ### Added
