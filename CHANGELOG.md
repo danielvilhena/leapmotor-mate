@@ -3,6 +3,14 @@
 All notable changes to LeapMotor Mate are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.5.1] — 2026-07-07
+
+### Added
+- **Trigger commands from scripts, Shortcuts or Home Assistant, and get a JSON reply.** Send `Accept: application/json` to `POST /api/command/{name}` and the endpoint answers with a structured result — `{"ok": true, "status": "done"}` on success, or `{"ok": false, "error": ..., "blocked"/"cooldown"/"retry_in": ...}` — instead of the HTML the web UI uses. So an iOS Shortcut, a smartwatch button, a shell script or a Home Assistant `rest_command` can fire a command and actually know whether it worked, was blocked while driving, or hit the anti-spam cooldown. The browser path is unchanged — JSON only when explicitly requested. Thanks @irek for the idea.
+
+### Fixed
+- **The Monthly report now shows the average consumption for a first, partial month too (#121, thanks @Wartopia).** When you install Mate part-way through a month, the report's window still started on the 1st — but the cloud energy figure (getEC) covers those earlier days too (the car reports to the cloud on its own), while Mate only has trips from when it was installed. Pairing the two would give a wrong average, so the report used to leave it blank ("—"). It now aligns the window to your first recorded trip, so the cloud energy and your trip distance cover the same period and the real average shows — the same logic an established month already used. Established months are unchanged.
+
 ## [2.5.0] — 2026-07-07
 
 ### Added
