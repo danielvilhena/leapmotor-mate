@@ -582,6 +582,13 @@ async def reev_page(request: Request):
     behaviour is validated against real REEV data. Live signal fetch (no pipeline storage)."""
     import asyncio
     is_research = research.research_enabled()
+    # REEV is capability-gated (is_reev) AND beta-only (research): a BEV owner must NEVER reach any REEV
+    # surface, on any build, and the official build exposes none of it. Redirect anyone who isn't a REEV
+    # car on a research build — the sole exception is the ?demo layout preview (research-only, no car).
+    is_reev_car = db_reader.get_setting("is_reev", "0") == "1"
+    demo = bool(is_research and request.query_params.get("demo"))
+    if not (is_reev_car and is_research) and not demo:
+        return RedirectResponse(request.headers.get("x-ingress-path", "") + "/")
     vehicle, _ = db_reader.get_vehicle()
     # Research-only preview: /reev?demo=1 renders the dashboard with sample REEV values (from a real
     # C10 REEV) so the layout can be reviewed without a range-extender car. Inert in the official build.

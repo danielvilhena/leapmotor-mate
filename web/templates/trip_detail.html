@@ -67,7 +67,7 @@
           {% else %}<div class="stat-value text-slate-500">—</div>{% endif %}
         </div>
       </div>
-      {% if (is_reev or research) and trip.engine_ran %}
+      {% if is_reev and research and trip.engine_ran %}
       <!-- REEV Phase C — the range-extender ran on this trip (the fuel level dropped) -->
       <div class="mt-3 rounded-lg" style="background:#f59e0b12;border:1px solid #f59e0b40;padding:10px 14px">
         <div class="flex items-center justify-between flex-wrap gap-2">
