@@ -3,6 +3,11 @@
 All notable changes to LeapMotor Mate are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.5.3] — 2026-07-08
+
+### Changed
+- **BetaTester channel now updates like any normal add-on.** The data-collection BetaTester add-on was pinned to a fixed `beta` version, so Home Assistant never offered it an update. It now runs the **exact same image and version number** as the regular release and enables its extra data capture through an add-on option instead — so it shows a real version, updates with the normal button, and stays in lockstep with every release. **No change for the normal add-on** (the option is absent there, so nothing is enabled).
+
 ## [2.5.2] — 2026-07-08
 
 ### Fixed

@@ -14,6 +14,22 @@ fi
 export DB_PATH="${DB_PATH:-/data/leapmotor_mate.db}"
 export CERT_DIR="/app/certs"
 
+# ── Research / data-collection mode (BetaTester add-on) ──────────────────────
+# MATE_RESEARCH gates the full-signal capture + REEV build; it's read at runtime
+# (web/research.py) and only baked into the image as a default (Dockerfile ARG→ENV,
+# default 0). The BetaTester add-on runs the SAME official image as prod and turns
+# research ON here via its own `research` add-on option — so beta and prod share ONE
+# image and ONE version number, differing only by this runtime switch. In add-on mode
+# the Supervisor writes the options to /data/options.json; read that and export the
+# flag so both children (poller + web) inherit it. Absent / false (the official add-on,
+# which has no such option, and standalone Docker) leaves the baked default untouched.
+# python3 is always present (python base image); a missing//invalid file fails closed.
+if [ -f /data/options.json ] && \
+   python3 -c 'import json,sys; sys.exit(0 if json.load(open("/data/options.json")).get("research") else 1)' 2>/dev/null; then
+  export MATE_RESEARCH=1
+  echo "[LeapMotor Mate] Research / data-collection mode ON (BetaTester add-on option)"
+fi
+
 # Make sure the data directory exists BEFORE anything opens the DB. A standalone
 # user (especially via Docker Desktop "Run", which mounts no volume by default)
 # would otherwise hit "sqlite3: unable to open database file" and the poller would

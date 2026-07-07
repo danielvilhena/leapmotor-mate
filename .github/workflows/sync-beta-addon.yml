@@ -1,0 +1,105 @@
+name: Sync beta add-on repo
+
+# Keeps the BetaTester add-on repo (ProtossBlaster/MateBetaTesterOnly) in lockstep with prod.
+# On every published release it bumps ONLY config.yaml `version:` to the SAME X.Y.Z as prod and
+# copies this repo's CHANGELOG — so the beta and the official add-on always show the identical
+# version number (Silvio's "no two different versions between prod and beta"). The beta runs the
+# SAME official image (config.yaml `image:` is unchanged, pointing at leapmotor-mate); research /
+# data-collection is turned on at runtime by the add-on's own `research: true` option (run.sh),
+# NOT by a separate image or a "beta" tag. So there is nothing "beta" left in the version.
+#
+# Reuses the ADDON_REPO_TOKEN secret (contents: write on the beta repo — same token
+# mirror-release-to-beta.yml already uses).
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Version tag to sync into the beta add-on (e.g. v2.5.3)"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  sync-beta-addon:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve version
+        id: ver
+        run: |
+          REF="${{ github.event.release.tag_name || github.event.inputs.ref }}"
+          if [[ ! "$REF" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.]+)?$ ]]; then
+            echo "::error::'$REF' is not a vX.Y.Z tag — refusing to sync."
+            exit 1
+          fi
+          echo "tag=$REF" >> "$GITHUB_OUTPUT"
+          echo "version=${REF#v}" >> "$GITHUB_OUTPUT"
+          echo "Syncing beta add-on to $REF (config version ${REF#v})"
+
+      - name: Checkout code repo (for CHANGELOG) at the release tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.ver.outputs.tag }}
+          path: code
+
+      - name: Checkout beta add-on repo
+        uses: actions/checkout@v4
+        with:
+          repository: ProtossBlaster/MateBetaTesterOnly
+          token: ${{ secrets.ADDON_REPO_TOKEN }}
+          path: beta
+
+      # The beta add-on pulls the SAME official GHCR image as prod (config.yaml `image:` =
+      # leapmotor-mate, no tag → Supervisor pulls image:version). So its `version:` IS the
+      # official image tag. Don't bump it until that exact tag is on GHCR, or the first tester
+      # to update races a pull against an image that isn't published yet. docker-publish.yml
+      # builds it on the same release; wait for it here (same gate as sync-addon.yml).
+      - name: Wait for the GHCR image to be published
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          owner=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          img="ghcr.io/${owner}/leapmotor-mate:${VERSION}"
+          echo "Waiting for ${img} …"
+          for i in $(seq 1 60); do
+            if docker manifest inspect "$img" >/dev/null 2>&1; then
+              echo "✓ ${img} is published."; exit 0
+            fi
+            echo "  not yet (attempt ${i}/60) — sleeping 15s"; sleep 15
+          done
+          echo "::error::Timed out after 15 min waiting for ${img} to be published by docker-publish.yml"
+          exit 1
+
+      - name: Bump beta add-on version and sync CHANGELOG
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          # Only the version moves. `image:` stays leapmotor-mate (same as prod) and the
+          # research option / schema are static in the beta config — never touched here.
+          sed -i -E "s|^version: .*|version: \"${VERSION}\"|"  beta/leapmotor_mate_beta/config.yaml
+          # Copy the code CHANGELOG, tidied for HA's plain renderer (same as sync-addon.yml).
+          sed -E -e 's/^(## )\[([^]]+)\]/\1\2/' -e '/^\[[0-9][^]]*\]: http/d' \
+            code/CHANGELOG.md > beta/leapmotor_mate_beta/CHANGELOG.md
+          echo "config.yaml: $(grep '^version:' beta/leapmotor_mate_beta/config.yaml)"
+          echo "image      : $(grep '^image:'   beta/leapmotor_mate_beta/config.yaml)"
+          echo "CHANGELOG  : $(grep -m1 '^## '   beta/leapmotor_mate_beta/CHANGELOG.md)"
+
+      - name: Commit and push if changed
+        env:
+          TAG: ${{ steps.ver.outputs.tag }}
+        working-directory: beta
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet; then
+            echo "Beta add-on already at ${TAG} — nothing to do."
+            echo "Beta add-on already at \`${TAG}\` — nothing to do." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          git add leapmotor_mate_beta/config.yaml leapmotor_mate_beta/CHANGELOG.md
+          git commit -m "release: ${TAG} (same version as prod; research via add-on option) + changelog"
+          git push
+          echo "Synced beta add-on repo to \`${TAG}\` (version match + changelog)." >> "$GITHUB_STEP_SUMMARY"
