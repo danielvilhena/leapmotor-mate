@@ -3,6 +3,11 @@
 All notable changes to LeapMotor Mate are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.5.2] — 2026-07-08
+
+### Fixed
+- **A charge is now tracked from when charging actually starts, not from when the cable is plugged in.** Mate used to open a charging session the moment the cable was connected. With a scheduled (deferred) charge the cable can stay plugged in for hours before any current flows, so the session started counting too early. It now begins only when real charging current is present — the car reporting "charging", or ≥ 2 A — which is the behaviour the state machine documented all along. This removes the empty session at plug-in and, if you meter AC energy with a wallbox counter or a Shelly, keeps the standby draw during those idle plugged-in hours out of the charge's energy and cost (the meter baseline is now taken when charging begins, so those hours fall below it). The cable still ends a trip immediately on plug-in and still keeps one physical charge from splitting across brief current dips.
+
 ## [2.5.1] — 2026-07-07
 
 ### Added

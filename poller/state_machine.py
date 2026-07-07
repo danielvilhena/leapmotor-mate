@@ -16,9 +16,9 @@ Transitions (all independent of HA and phone):
   PARKED_ACTIVE       → PARKED_SLEEP   no change for SLEEP_AFTER_S (30 min)
   PARKED_ALERT        → DRIVING        speed > 0 or gear D
   PARKED_ALERT        → PARKED_ACTIVE  no drive within ALERT_EXPIRES_S (5 min)
-  DRIVING             → PARKED_ACTIVE  gear P held ~1 min (6 × 10s)
-  ANY_PARKED          → CHARGING       charging_status > 0
-  CHARGING            → PARKED_ACTIVE  charging_status == 0
+  DRIVING             → PARKED_ACTIVE  gear P held ~1 min (6 × 10s), OR cable plugged (trip ends now)
+  ANY_PARKED          → CHARGING       charging_status > 0  (REAL current / 1149==2; NOT the cable alone)
+  CHARGING            → PARKED_ACTIVE  cable unplugged (1149→0) and no current — a current dip alone won't close
   ANY                 → OFFLINE        3 consecutive API errors
 """
 import logging
@@ -87,9 +87,17 @@ class StateMachine:
         # Gear-based like HA: at a red light the gear stays D, so the trip is NOT
         # split — only a sustained gear P ends it (see DRIVING branch below).
         is_driving  = data.gear in ("D", "R", "N") or data.speed_kmh > 1
-        # Plug inserted OR charging active = charge session
-        # plug_connected alone is enough to close the trip immediately
-        is_charging = data.charging_status > 0 or data.plug_connected
+        # A charge SESSION opens only on REAL charging current: charging_status = signal 1149==2
+        # ("charging") or a measured current ≥ 2 A. NEVER on the cable alone — plugging in with a
+        # scheduled/deferred charge reports 1149==1 ("connected", no current) while the car waits for
+        # the programmed time, and that must NOT start counting a charge (see _is_charging vs
+        # _is_plugged_in). This is the documented ANY_PARKED→CHARGING condition (charging_status>0).
+        charge_active = data.charging_status > 0
+        # The session STAYS open across brief current dips and only CLOSES when the cable is pulled
+        # (1149→0, which the car also reports at completion) — keeping the cable as the close/keep
+        # signal stops one physical charge fragmenting into many when the current modulates. The cable
+        # also ends the trip immediately on plug-in (DRIVING branch), before any current flows.
+        is_charging = charge_active or data.plug_connected
         # V2L (bidirectional discharge) is parked activity that changes with the load → poll fast.
         self._v2l_active = getattr(data, "ac_port_mode", 0) == 2
         fp          = data.fingerprint()
@@ -105,14 +113,14 @@ class StateMachine:
         if self.state in (State.UNKNOWN, State.OFFLINE):
             if is_driving:
                 events.append(self._go(State.DRIVING, data))
-            elif is_charging:
+            elif charge_active:
                 events.append(self._go(State.CHARGING, data))
             else:
                 events.append(self._go(State.PARKED_ACTIVE, data))
             return events
 
-        # ── Any parked → CHARGING ─────────────────────────────────────────
-        if self.state in _PARKED_STATES and is_charging:
+        # ── Any parked → CHARGING (real current only, not the cable alone) ─
+        if self.state in _PARKED_STATES and charge_active:
             events.append(self._go(State.CHARGING, data))
             return events
 
@@ -146,9 +154,16 @@ class StateMachine:
 
         # ── DRIVING ───────────────────────────────────────────────────────
         elif self.state == State.DRIVING:
-            if is_charging:
+            if charge_active:
                 self._parked_count = 0
                 events.append(self._go(State.CHARGING, data))
+            elif data.plug_connected:
+                # Cable inserted after the drive, but no current yet (e.g. a scheduled charge that
+                # will start later): end the trip NOW — don't wait the ~1 min gear-P confirmation —
+                # but do NOT open a charge. The charge opens later, from PARKED, when current flows.
+                self._parked_count = 0
+                self._alert_start_ts = now
+                events.append(self._go(State.PARKED_ACTIVE, data))
             elif data.gear == "P":
                 self._parked_count += 1
                 if self._parked_count >= PARKED_CONFIRM:
