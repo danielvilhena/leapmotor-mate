@@ -3399,11 +3399,29 @@ _CMD_COOLDOWN_S = 10     # match the HA integration's remote-action cooldown
 _last_command_at = 0.0
 
 
+def _wants_json(request: Request) -> bool:
+    """A caller that sends `Accept: application/json` gets structured JSON back from the command
+    endpoint instead of the HTML fragment the web UI (HTMX) uses — so a script, an iOS Shortcut, a
+    smartwatch HTTP button or a Home Assistant `rest_command` can fire a command and parse the
+    result. (Idea from irek's fork branch `fix/json-api-response`.)"""
+    return "application/json" in request.headers.get("accept", "")
+
+
+def _cmd_response(request: Request, *, html: str, payload: dict, status: int = 200):
+    """Content-negotiated command result: JSON when the client asked for it, else the HTML
+    fragment the browser uses — same status code either way."""
+    if _wants_json(request):
+        return JSONResponse(payload, status_code=status)
+    return HTMLResponse(html, status_code=status)
+
+
 @app.post("/api/command/{name}", response_class=HTMLResponse)
-async def run_command(name: str, background_tasks: BackgroundTasks):
+async def run_command(name: str, request: Request, background_tasks: BackgroundTasks):
     fn = _COMMANDS.get(name)
     if not fn:
-        return HTMLResponse('<span style="color:#ef4444">Unknown command</span>', status_code=400)
+        return _cmd_response(request, status=400,
+                             html='<span style="color:#ef4444">Unknown command</span>',
+                             payload={"ok": False, "error": "unknown_command"})
 
     # The car locks some controls (sunshade, trunk, windows, lock) while moving —
     # intercept the press and show the same notice the official app does, instead of
@@ -3412,7 +3430,8 @@ async def run_command(name: str, background_tasks: BackgroundTasks):
     warn = _blocked_while_driving(name, db_reader.get_latest_status() or {},
                                   i18n.get_t(db_reader.get_language()))
     if warn:
-        return HTMLResponse(f'<span data-warn="1" style="color:#fbbf24">⚠️ {warn}</span>')
+        return _cmd_response(request, payload={"ok": False, "error": warn, "blocked": True},
+                             html=f'<span data-warn="1" style="color:#fbbf24">⚠️ {warn}</span>')
 
     # Remote-action cooldown (like the HA integration's 10s): don't fire commands too
     # close together — the previous one may still be completing on the car.
@@ -3430,7 +3449,9 @@ async def run_command(name: str, background_tasks: BackgroundTasks):
         msg = _cooldown_msg.get(db_reader.get_language(), "Not sent — retry in {n}s").format(n=wait)
         # data-warn → the front-end leaves the notice up (and does NOT refresh the card, which would
         # wipe it in a flash and make the user think the command was sent).
-        return HTMLResponse(f'<span data-warn="1" data-cooldown="1" style="color:#fbbf24">⏳ {msg}</span>')
+        return _cmd_response(request,
+                             payload={"ok": False, "error": msg, "cooldown": True, "retry_in": wait},
+                             html=f'<span data-warn="1" data-cooldown="1" style="color:#fbbf24">⏳ {msg}</span>')
     _last_command_at = time.time()
     # Boost the poller so the car's REAL state is re-polled within a few seconds (not up to 30s).
     # We no longer fake an optimistic state, so the UI must catch up to reality quickly.
@@ -3475,7 +3496,8 @@ async def run_command(name: str, background_tasks: BackgroundTasks):
         if name in _COMFORT_CMD_OPTIMISTIC:
             _veh, _ = db_reader.get_vehicle()
             _optimistic_comfort(_veh.get("vin") if _veh else None, _COMFORT_CMD_OPTIMISTIC[name])
-        return HTMLResponse('<span style="color:#22c55e">✓ Done</span>')
+        return _cmd_response(request, payload={"ok": True, "status": "done"},
+                             html='<span style="color:#22c55e">✓ Done</span>')
 
     import asyncio
     ok, msg = await asyncio.get_event_loop().run_in_executor(None, fn)
@@ -3490,9 +3512,12 @@ async def run_command(name: str, background_tasks: BackgroundTasks):
         slow = name in _SLOW_COMMANDS or field is not None
         background_tasks.add_task(_post_command_refresh, expected, epoch, 12 if slow else 3)
         if slow:
-            return HTMLResponse('<span data-slow="1" style="color:#60a5fa;display:inline-flex;align-items:center;gap:4px"><svg style="animation:spin 1s linear infinite;width:14px;height:14px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg></span><style>@keyframes spin{to{transform:rotate(360deg)}}</style>')
-        return HTMLResponse('<span style="color:#22c55e">✓ Done</span>')
-    return HTMLResponse(_cmd_error_html(msg))
+            return _cmd_response(request, payload={"ok": True, "status": "pending"},
+                html='<span data-slow="1" style="color:#60a5fa;display:inline-flex;align-items:center;gap:4px"><svg style="animation:spin 1s linear infinite;width:14px;height:14px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg></span><style>@keyframes spin{to{transform:rotate(360deg)}}</style>')
+        return _cmd_response(request, payload={"ok": True, "status": "done"},
+                             html='<span style="color:#22c55e">✓ Done</span>')
+    return _cmd_response(request, payload={"ok": False, "error": msg},
+                         html=_cmd_error_html(msg))
 
 
 # ── Battery options — European models only (verified specs) ──────────────────
