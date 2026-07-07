@@ -1212,8 +1212,9 @@ def save_fresh_signals(signals: dict) -> None:
             windows_open_count,
             door_driver_open, door_passenger_open, door_rear_left_open, door_rear_right_open,
             window_fl_open, window_rl_open, ac_port_mode,
-            fan_level, recirculation, climate_mode
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            fan_level, recirculation, climate_mode,
+            fuel_level_pct, fuel_range_km, combined_range_km
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
             vehicle_id,
             datetime.now(timezone.utc).isoformat(),
@@ -1242,6 +1243,10 @@ def save_fresh_signals(signals: dict) -> None:
             sig("1941") or None,             # fan_level (1941 acAirVolume 1-7; 0 → NULL = no data)
             int(sig("1943") == 1),           # recirculation (1=recirc/in, 0=fresh/out)
             int(signals["3713"]) if signals.get("3713") is not None else None,  # climate_mode (3713)
+            # REEV dual-energy (mirror the poller's save_position): fuel level % (3235) MUST be None on a
+            # BEV — sigf() would coerce absent → 0.0 and wrongly trip the "has fuel" guard at 0%.
+            float(signals["3235"]) if signals.get("3235") is not None else None,
+            sigf("3259") or None, sigf("3261") or None,   # fuel range (3259) + combined range (3261)
         ),
     )
     db.commit()

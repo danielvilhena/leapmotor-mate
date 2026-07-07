@@ -359,6 +359,12 @@ class Database:
             self._conn.execute("ALTER TABLE positions ADD COLUMN recirculation INTEGER DEFAULT NULL")
         if "climate_mode" not in cols:
             self._conn.execute("ALTER TABLE positions ADD COLUMN climate_mode INTEGER DEFAULT NULL")
+        # migration: REEV dual-energy for the live Overview — fuel tank level % (3235), range on fuel
+        # alone (3259), and combined battery+fuel range (3261). All NULL on a BEV; the status card shows
+        # them only when present (range-extender models). range_km stays the EV-only range (3260).
+        for _c in ("fuel_level_pct", "fuel_range_km", "combined_range_km"):
+            if _c not in cols:
+                self._conn.execute(f"ALTER TABLE positions ADD COLUMN {_c} REAL DEFAULT NULL")
         # migration: the car's DECLARED ability codes (VehicleAbility ints, stored as a JSON list) —
         # lets the diagnostic + future capability-gating show ONLY what a model actually supports,
         # instead of assuming every car has the same commands (#67; also covers models we don't own
@@ -931,8 +937,9 @@ class Database:
                 windows_open_count,
                 door_driver_open, door_passenger_open, door_rear_left_open, door_rear_right_open,
                 window_fl_open, window_rl_open, ac_port_mode,
-                fan_level, recirculation, climate_mode)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                fan_level, recirculation, climate_mode,
+                fuel_level_pct, fuel_range_km, combined_range_km)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 vehicle_id, _now_iso(),
                 data.latitude, data.longitude, data.speed_kmh, data.odometer_km,
@@ -966,6 +973,7 @@ class Database:
                 data.fan_level or None,
                 1 if data.recirculation else 0,
                 data.climate_mode,
+                data.fuel_level_pct, data.fuel_range_km, data.combined_range_km,  # REEV dual-energy (NULL on BEV)
             ),
         )
         self._conn.commit()

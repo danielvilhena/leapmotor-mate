@@ -49,6 +49,8 @@ class VehicleData:
     charge_current_a: float   # charging current (signal 1178)
     is_reev: bool = False     # car reports a fuel tank (signal 3235) → range-extender model
     fuel_level_pct: float = None  # REEV fuel tank level % (signal 3235); None on a BEV
+    fuel_range_km: float = None       # REEV range on fuel alone (signal 3259); None on a BEV
+    combined_range_km: float = None   # REEV total range = battery + fuel (signal 3261); None on a BEV
     raw_signals: dict = None  # full raw signal dict — attached in research/beta mode for full-PID logging
     # Individual doors / windows / tyres — used by the optional MQTT → HA bridge
     door_driver_open: bool = False
@@ -544,6 +546,8 @@ def _parse_signal(vin: str, sig: dict) -> VehicleData:
         range_km=float(sig.get("3260") or 0),
         is_reev=(sig.get("3235") is not None),   # fuel level present → range-extender variant
         fuel_level_pct=(float(sig["3235"]) if sig.get("3235") is not None else None),  # REEV tank %
+        fuel_range_km=(float(sig["3259"]) if sig.get("3259") is not None else None),       # REEV fuel range
+        combined_range_km=(float(sig["3261"]) if sig.get("3261") is not None else None),   # REEV total range
         odometer_km=float(sig.get("1318") or 0),
         speed_kmh=speed_kmh,
         gear=gear,

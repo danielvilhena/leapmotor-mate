@@ -20,6 +20,36 @@
   <div class="soc-bar h-3 rounded-full" style="width:{{ soc }}%; background:{{ color }}"></div>
 </div>
 
+{% if (is_reev or research) and status.get('fuel_level_pct') is not none %}
+{# REEV dual-energy — the fuel tank shown alongside the battery (range-extender models). Beta-gated
+   AND only when the car actually reports fuel, so a BEV never sees an empty block. range_km above
+   stays the EV-only range (signal 3260); the combined figure is the REEV's real total reach. #}
+<div class="flex items-end justify-between mb-2 pt-4 border-t border-slate-700/60">
+  <div>
+    <div class="stat-label">⛽ {{ t('reev_fuel_level') }}</div>
+    <div class="text-4xl font-bold text-amber-400">{{ status.fuel_level_pct | nice }}<span class="text-2xl text-slate-400">%</span></div>
+  </div>
+  {% if status.get('fuel_range_km') %}
+  <div class="text-right">
+    <div class="stat-label">{{ t('reev_fuel_range') }}</div>
+    <div class="stat-value text-amber-300">{{ dist_val(status.fuel_range_km)|int }} <span class="text-base font-normal text-slate-400">{{ dist_unit() }}</span></div>
+  </div>
+  {% endif %}
+</div>
+<!-- Fuel level bar (amber, mirrors the SOC bar above) -->
+<div class="w-full bg-slate-700 rounded-full h-3 mb-3">
+  <div class="h-3 rounded-full" style="width:{{ status.fuel_level_pct }}%; background:linear-gradient(90deg,#d97706,#f59e0b)"></div>
+</div>
+{% if status.get('combined_range_km') %}
+<!-- Combined range = battery + fuel: the total distance a range-extender can cover, its headline number -->
+<div class="flex items-center justify-between rounded-lg px-3 py-2 mb-5"
+     style="background:#22c55e12;border:1px solid #22c55e33">
+  <span class="text-xs text-slate-300">🔋+⛽ {{ t('reev_combined_range') }}</span>
+  <span class="text-sm font-bold text-green-400">{{ dist_val(status.combined_range_km)|int }} {{ dist_unit() }}</span>
+</div>
+{% endif %}
+{% endif %}
+
 <!-- Status row -->
 <div class="grid grid-cols-3 gap-3 text-center mb-4">
   <div class="bg-slate-750 rounded-lg p-3">
