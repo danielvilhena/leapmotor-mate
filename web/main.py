@@ -2802,6 +2802,18 @@ def _enrich_eb_with_trip_totals(eb: "dict | None", begin_ts: int, end_ts: int) -
     return eb
 
 
+def _clamp_begin_to_first_trip(begin_ts: int) -> int:
+    """#121 — align a getEC window's start to the first-ever recorded trip. The cloud getEC covers
+    days before Mate was installed (the car reports to the cloud on its own), but Mate's trips don't,
+    so a calendar window that begins before the first trip (a fresh install mid-month) paired
+    full-window energy with partial trip distance and the average got blanked ("—"). Clamping the
+    start makes cloud energy and trip distance span the SAME period, so the real getEC average shows.
+    No-op once the first trip predates the window (max keeps the given start) — so an established
+    user's normal month is untouched."""
+    first_ts = db_reader.get_first_trip_ts()
+    return max(begin_ts, first_ts) if first_ts is not None else begin_ts
+
+
 @app.get("/api/energy-period", response_class=HTMLResponse)
 async def energy_period(request: Request, period: str = "", start: str = "", end: str = "",
                          month: str = "", refresh: int = 0):
@@ -2854,6 +2866,7 @@ async def energy_period(request: Request, period: str = "", start: str = "", end
         begin_ts, end_ts = int(b.timestamp()), int(e.timestamp())
     except Exception:
         return templates.TemplateResponse(request, "partials/energy_breakdown.html", _ctx(eb=None, eb_label=None))
+    begin_ts = _clamp_begin_to_first_trip(begin_ts)   # #121: month/custom windows before the first trip
     c = _period_cache.get(key)
     if refresh or not c or time.time() - c["ts"] >= 1800:
         data = await asyncio.get_event_loop().run_in_executor(
@@ -2934,6 +2947,7 @@ async def report_driving(request: Request, month: str, refresh: int = 0):
         begin_ts, end_ts = _report_month_bounds(month, now)
     except (ValueError, TypeError):
         return templates.TemplateResponse(request, "partials/report_driving_energy.html", _ctx(eb=None))
+    begin_ts = _clamp_begin_to_first_trip(begin_ts)   # #121: a first partial month starts before the first trip
     key = f"p:reportmonth:{month}:{end_ts}"
     c = _period_cache.get(key)
     if refresh or not c or time.time() - c["ts"] >= 1800:
