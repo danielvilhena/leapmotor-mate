@@ -3,6 +3,11 @@
 All notable changes to LeapMotor Mate are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.4.1] — 2026-07-07
+
+### Fixed
+- **The Charges page now shows your full history, not just the last 50 (#67, thanks @rossiadobe).** After importing a long charge history from CSV, the list appeared to stop part-way (older charges looked missing) — the grouped Charges view was capped at the 50 most recent charges. The charges were always safely in the database (the CSV export and the monthly report already showed every one); only the on-screen list was truncated. It now loads the complete history, grouped by year / month / day as before.
+
 ## [2.4.0] — 2026-07-06
 
 ### Added

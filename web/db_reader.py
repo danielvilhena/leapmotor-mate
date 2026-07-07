@@ -2459,7 +2459,11 @@ def _billed_kwh(c) -> float:
 
 def get_charges_grouped() -> list[dict]:
     """Return charges nested as year → month → day."""
-    charges = get_charges()
+    # #67 (rossiadobe): the grouped Charges page must show the FULL history — a default
+    # limit would silently hide older charges (his CSV-imported ones before the newest 50
+    # vanished, the list "stopped at October 2025"). The page is a collapsed accordion, so
+    # loading everything is fine — same unbounded read the CSV export and monthly report use.
+    charges = get_charges(limit=1_000_000)
     from collections import OrderedDict
     db = _get()
 
