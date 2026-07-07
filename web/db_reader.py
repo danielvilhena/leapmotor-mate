@@ -71,6 +71,31 @@ PRICE_KEYS = {
     "HPC":  "price_hpc_kwh",
 }
 
+# REEV Phase C — fuel tank litres (C10/B10 REEV both 50 L, confirmed) and the minimum fuel-% drop over
+# a trip that counts as the engine having run (the 3235 signal steps at 0.1% ≈ 50 mL; 0.2% guards the
+# single-tick noise). A real range-extender drive drops several %.
+_REEV_TANK_L = 50.0
+_REEV_FUEL_MIN_DROP = 0.2
+
+
+def _reev_trip_fuel(fuel_start_pct, fuel_end_pct, distance_km) -> dict:
+    """REEV Phase C — per-trip fuel from the tank-% drop over the distance. There's no 'engine on' PID:
+    the range-extender ran iff the fuel level dropped more than the signal-noise floor. Returns
+    {fuel_used_l, fuel_l_100km, engine_ran}; all inert (None/False) when there's no fuel data (BEV) or
+    the drive was pure-electric."""
+    out = {"fuel_used_l": None, "fuel_l_100km": None, "engine_ran": False}
+    if fuel_start_pct is None or fuel_end_pct is None:
+        return out
+    drop = fuel_start_pct - fuel_end_pct
+    if drop <= _REEV_FUEL_MIN_DROP:
+        return out
+    litres = round(drop / 100.0 * _REEV_TANK_L, 2)
+    out["fuel_used_l"] = litres
+    out["engine_ran"] = True
+    if distance_km and distance_km > 0.5:
+        out["fuel_l_100km"] = round(litres / distance_km * 100, 1)
+    return out
+
 def auto_location_type(max_power_kw: float) -> str:
     p = max_power_kw or 0
     if p <= 8:   return "HOME"
@@ -167,6 +192,19 @@ def count_raw_signals() -> int:
         return _get().execute("SELECT COUNT(*) c FROM raw_signals_log").fetchone()["c"]
     except Exception:  # noqa: BLE001
         return 0
+
+
+def latest_raw_signals() -> dict:
+    """Latest value per raw signal id from the research capture — {sig_key: value}. Lets the REEV
+    dashboard render from the last stored signals when a live cloud fetch isn't available (a replayed
+    tester bundle, or a transient hiccup). Empty when nothing was captured (the normal build)."""
+    try:
+        rows = _get().execute(
+            "SELECT sig_key, value FROM raw_signals_log "
+            "WHERE id IN (SELECT MAX(id) FROM raw_signals_log GROUP BY sig_key)").fetchall()
+        return {r["sig_key"]: r["value"] for r in rows}
+    except Exception:  # noqa: BLE001
+        return {}
 
 
 def get_raw_signal_rows():
@@ -1809,7 +1847,42 @@ def get_trips(limit: int = 500) -> list[dict]:
            LIMIT ?""",
         (_current_vehicle_id(), limit),
     ).fetchall()
-    return [_trip_group_stats(dict(r), kids.get(r["id"], [])) for r in rows]
+    out = []
+    for r in rows:
+        td = _trip_group_stats(dict(r), kids.get(r["id"], []))
+        # REEV Phase C — per-trip fuel so the list can flag engine-on trips (⛽) at a glance.
+        td.update(_reev_trip_fuel(td.get("fuel_start_pct"), td.get("fuel_end_pct"), td.get("distance_km")))
+        out.append(td)
+    return out
+
+
+def reev_fuel_summary() -> Optional[dict]:
+    """REEV — the range-extender's REAL fuel appetite, from the engine-on trips (on-board): total
+    litres burned, engine-on km, and the L/100km WHILE the engine ran. This is the number that
+    matters to a REEV owner — unlike the cloud's period average (fuel over ALL km), which a mostly
+    -electric REEV dilutes to near zero. None when the engine never ran (or no fuel data)."""
+    try:
+        rows = _get().execute(
+            "SELECT distance_km, fuel_start_pct, fuel_end_pct FROM trips "
+            "WHERE vehicle_id = COALESCE(?, vehicle_id) AND ended_at IS NOT NULL "
+            "AND fuel_start_pct IS NOT NULL AND fuel_end_pct IS NOT NULL "
+            "AND fuel_start_pct - fuel_end_pct > ?",
+            (_current_vehicle_id(), _REEV_FUEL_MIN_DROP)).fetchall()
+    except sqlite3.Error:
+        return None
+    total_l, engine_km, n = 0.0, 0.0, 0
+    for r in rows:
+        total_l += (r["fuel_start_pct"] - r["fuel_end_pct"]) / 100.0 * _REEV_TANK_L
+        engine_km += r["distance_km"] or 0
+        n += 1
+    if not n:
+        return None
+    return {
+        "engine_trips": n,
+        "total_l": round(total_l, 1),
+        "engine_km": round(engine_km, 1),
+        "avg_l_100km": round(total_l / engine_km * 100, 1) if engine_km > 0.5 else None,
+    }
 
 
 def get_trips_grouped() -> list[dict]:
@@ -2051,6 +2124,11 @@ def get_trip_detail(trip_id: int) -> Optional[dict]:
     eff = trip_d.get("efficiency_kwh_100km")
     dist = trip_d.get("distance_km") or 0
     trip_d["energy_kwh"] = round(eff * dist / 100, 2) if (eff and dist) else None
+
+    # REEV Phase C — per-trip fuel consumption from the fuel-tank % drop (signal 3235) over the distance.
+    _fs, _fe = _tp.get("fuel_start_pct"), _tp.get("fuel_end_pct")
+    trip_d["fuel_start_pct"], trip_d["fuel_end_pct"] = _fs, _fe
+    trip_d.update(_reev_trip_fuel(_fs, _fe, dist))
     # Cost = trip energy × the battery's BLENDED €/kWh at the trip's start (weighted-average-cost,
     # GitHub #53). Replaces the old "rate of the single last charge", which over-billed every trip
     # after an expensive top-up (a small public charge made all the cheaper home energy bill at the

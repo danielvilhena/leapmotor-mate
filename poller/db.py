@@ -422,6 +422,11 @@ class Database:
         for _c, _t in (("note", "TEXT"), ("drive_mode", "TEXT"), ("one_pedal", "INTEGER")):
             if _c not in tcols:
                 self._conn.execute(f"ALTER TABLE trips ADD COLUMN {_c} {_t}")
+        # migration: REEV Phase C — fuel tank level % (signal 3235) at trip start/end. The drop gives
+        # the fuel burned (× tank litres) → per-trip L/100km and the EV/fuel split. NULL on a BEV.
+        for _c, _t in (("fuel_start_pct", "REAL"), ("fuel_end_pct", "REAL")):
+            if _c not in tcols:
+                self._conn.execute(f"ALTER TABLE trips ADD COLUMN {_c} {_t}")
         self._conn.commit()
         self._backfill_vehicle_capacity()
         self._backfill_null_vehicle_id()
@@ -1002,10 +1007,11 @@ class Database:
         drive_mode, one_pedal = self._default_trip_tags()
         cur = self._conn.execute(
             """INSERT INTO trips (vehicle_id, started_at, start_lat, start_lon,
-               start_soc, start_odometer_km, drive_mode, one_pedal)
-               VALUES (?,?,?,?,?,?,?,?)""",
+               start_soc, start_odometer_km, drive_mode, one_pedal, fuel_start_pct)
+               VALUES (?,?,?,?,?,?,?,?,?)""",
             (vehicle_id, _now_iso(), data.latitude, data.longitude,
-             data.soc, data.odometer_km, drive_mode, one_pedal),
+             data.soc, data.odometer_km, drive_mode, one_pedal,
+             getattr(data, "fuel_level_pct", None)),   # REEV Phase C — fuel % at trip start (NULL on BEV)
         )
         self._conn.commit()
         trip_id = cur.lastrowid
@@ -1095,12 +1101,13 @@ class Database:
         self._conn.execute(
             """UPDATE trips SET ended_at=?, end_lat=?, end_lon=?, end_soc=?,
                end_odometer_km=?, distance_km=?, duration_min=?,
-               efficiency_kwh_100km=?, regen_kwh=?
+               efficiency_kwh_100km=?, regen_kwh=?, fuel_end_pct=?
                WHERE id=?""",
             (_now_iso(), data.latitude, data.longitude, data.soc,
              data.odometer_km, round(distance_km, 2) if distance_km is not None else None,
              round(duration_min, 1),
              round(efficiency, 2) if efficiency else None, round(regen_kwh, 3),
+             getattr(data, "fuel_level_pct", None),   # REEV Phase C — fuel % at trip end (NULL on BEV)
              trip_id),
         )
         self._conn.commit()

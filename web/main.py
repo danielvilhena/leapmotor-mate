@@ -560,6 +560,20 @@ async def battery_page(request: Request):
     ))
 
 
+# Sample REEV signals (from gm27271's real C10 REEV) for the research-only /reev?demo preview.
+# 3261=3259+3260 and 3258=3256+3257 hold (the confirmed range arithmetic).
+_REEV_DEMO_SIGNALS = {
+    "3235": "96.2",   # fuel level %
+    "3259": "796",    # fuel range (display)      3256 max
+    "3256": "830",    # fuel range (rated/max)
+    "3260": "54",     # EV range (display)        3257 max
+    "3257": "147",    # EV range (rated/max, ~WLTP)
+    "3261": "850",    # combined range (display)  = 796 + 54
+    "3258": "977",    # combined range (rated/max) = 830 + 147
+    "3262": "1",      # range mode
+}
+
+
 @app.get("/reev", response_class=HTMLResponse)
 async def reev_page(request: Request):
     """Dedicated, isolated REEV (range-extender) view. BETA / data-collection: it surfaces the
@@ -567,9 +581,18 @@ async def reev_page(request: Request):
     WITHOUT plumbing them into trips/charges/stats yet — those get touched only once the
     behaviour is validated against real REEV data. Live signal fetch (no pipeline storage)."""
     import asyncio
+    is_research = research.research_enabled()
     vehicle, _ = db_reader.get_vehicle()
-    signals = await asyncio.get_event_loop().run_in_executor(None, command_client.get_fresh_signals)
-    sig = signals or {}
+    # Research-only preview: /reev?demo=1 renders the dashboard with sample REEV values (from a real
+    # C10 REEV) so the layout can be reviewed without a range-extender car. Inert in the official build.
+    if is_research and request.query_params.get("demo"):
+        sig = _REEV_DEMO_SIGNALS
+    else:
+        live = await asyncio.get_event_loop().run_in_executor(None, command_client.get_fresh_signals)
+        # Fall back to the last stored raw signals (research capture) when a live fetch isn't available
+        # — e.g. a replayed tester bundle, or a transient cloud hiccup — so the dashboard stays populated.
+        sig = live or (db_reader.latest_raw_signals() if is_research else {})
+    signals = sig
 
     def f(key):
         v = sig.get(key)
@@ -579,17 +602,34 @@ async def reev_page(request: Request):
             return None
 
     reev = {
-        "has_fuel":          sig.get("3235") is not None,   # the REEV marker
-        "fuel_level_pct":    f("3235"),                     # fuel tank level %
-        "fuel_range_km":     f("3259"),                     # range on fuel
-        "combined_range_km": f("3261"),                     # battery + fuel
-        "battery_range_km":  f("3260"),                     # EV-only range (also Mate's range_km)
-        "range_mode":        f("3262"),                     # 1 on BEV; may vary on REEV
+        "has_fuel":              sig.get("3235") is not None,   # the REEV marker
+        "fuel_level_pct":        f("3235"),                     # fuel tank level %
+        "fuel_range_km":         f("3259"),                     # range on fuel (display/adaptive)
+        "combined_range_km":     f("3261"),                     # battery + fuel (display/adaptive)
+        "battery_range_km":      f("3260"),                     # EV-only range (display/adaptive)
+        "range_mode":            f("3262"),                     # 1 on BEV; may vary on REEV
+        # Phase A — the rated/max range trio (parallel to the display one, arithmetic 3256+3257=3258).
+        "fuel_range_max_km":     f("3256"),
+        "battery_range_max_km":  f("3257"),
+        "combined_range_max_km": f("3258"),
     }
+    # Battery side of the dual-energy picture (SoC + capacity) — from the pipeline, not a live signal.
+    status = db_reader.get_latest_status() or {}
+    reev["soc_pct"] = status.get("soc")
+    # Phase B — the cloud's own consumption (electric kWh/100km + fuel L/100km). Best-effort; only for a
+    # real REEV or the demo, so a BEV owner in research mode doesn't pay an extra cloud call for nothing.
+    consumption = None
+    if reev["has_fuel"] and request.query_params.get("demo") and is_research:
+        consumption = {"elec_kwh_100km": 17.8, "fuel_l_100km": 6.2, "fuel_mpg": 37.9}
+    elif reev["has_fuel"]:
+        consumption = await asyncio.get_event_loop().run_in_executor(
+            None, command_client.get_plugin_consumption)
     return templates.TemplateResponse(request, "reev.html", _ctx(
-        page="reev", vehicle=vehicle, reev=reev, signals_ok=bool(signals),
-        logbook_html=_logbook_list_html() if research.research_enabled() else "",
-        raw_count=db_reader.count_raw_signals() if research.research_enabled() else 0,
+        page="reev", vehicle=vehicle, reev=reev, consumption=consumption, signals_ok=bool(signals),
+        reev_summary=db_reader.reev_fuel_summary(),   # on-board range-extender consumption (from trips)
+        demo=bool(is_research and request.query_params.get("demo")),
+        logbook_html=_logbook_list_html() if is_research else "",
+        raw_count=db_reader.count_raw_signals() if is_research else 0,
     ))
 
 

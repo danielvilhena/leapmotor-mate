@@ -153,6 +153,43 @@ def _classify_ec_response(j) -> tuple[str, dict | None]:
     return "auth", None
 
 
+def _parse_plugin_consumption(raw) -> dict | None:
+    """REEV Phase B — pull the current-period consumption out of a getPlugInLastNweeks100kmEC body.
+    The exact nesting isn't documented, so we grab the first object carrying `oc100km` (the current
+    block: fuel L/100km `oc100km` + electric kWh/100km `ec100km`; the per-week series has only
+    `ec100km`). Values may be numbers or numeric strings. Returns {fuel_l_100km, elec_kwh_100km,
+    fuel_mpg} or None."""
+    def _find(obj):
+        if isinstance(obj, dict):
+            if "oc100km" in obj:
+                return obj
+            for v in obj.values():
+                r = _find(v)
+                if r is not None:
+                    return r
+        elif isinstance(obj, list):
+            for v in obj:
+                r = _find(v)
+                if r is not None:
+                    return r
+        return None
+
+    def _f(v):
+        try:
+            return round(float(v), 1)
+        except (TypeError, ValueError):
+            return None
+
+    block = _find(raw)
+    if not block:
+        return None
+    return {
+        "fuel_l_100km":   _f(block.get("oc100km")),
+        "elec_kwh_100km": _f(block.get("ec100km")),
+        "fuel_mpg":       _f(block.get("ocMpg")),
+    }
+
+
 class LeapmotorSession:
     """Login once, reuse token for all subsequent API calls."""
 
@@ -607,6 +644,21 @@ class LeapmotorSession:
                 self._reset()
                 return None
 
+    def get_plugin_consumption(self) -> dict | None:
+        """REEV Phase B — the cloud's OWN consumption from getPlugInLastNweeks100kmEC. The current-period
+        block carries `oc100km` (fuel L/100km) next to `ec100km` (electric kWh/100km). On a BEV oc100km is
+        0; on a range-extender it's the real fuel figure the car computed. Best-effort live read for the
+        REEV dashboard — returns {fuel_l_100km, elec_kwh_100km, fuel_mpg} or None."""
+        with self._lock:
+            for attempt in range(2):
+                try:
+                    self._connect()
+                    return _parse_plugin_consumption(self._raw_getplugin())
+                except Exception as e:  # noqa: BLE001
+                    log.warning("getPlugIn consumption (attempt %d): %s", attempt + 1, e)
+                    self._reset()
+            return None
+
 
     def get_cumulative_summary(self) -> dict | None:
         """Since-delivery cumulative totals from the cloud, via mileage/energy/detail — which needs a
@@ -682,6 +734,10 @@ def get_energy_breakdown() -> dict | None:
 
 def get_consumption_probe_raw() -> dict | None:
     return _session.get_consumption_probe_raw()
+
+
+def get_plugin_consumption() -> dict | None:
+    return _session.get_plugin_consumption()
 
 
 def get_cumulative_summary() -> dict | None:
