@@ -3,10 +3,23 @@ trip start/end; the web layer derives litres burned (Δ% × 50 L tank) and L/100
 'engine on' PID — the range-extender ran iff the fuel level dropped. All inert on a BEV (no fuel).
 
 Pure helper runs with no DB; the poller-capture tests use a tmp_path DB. CI-safe."""
+import sqlite3
 import types
 
 import db as D
 import db_reader
+
+
+def _pos_db(rows):
+    """In-memory positions table with (recorded_at, odometer_km, fuel_level_pct) for vehicle 1 —
+    the only columns _reev_engine_on reads. No ambient DB (CI-safe)."""
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.execute("CREATE TABLE positions (id INTEGER PRIMARY KEY, vehicle_id INT, "
+                 "recorded_at TEXT, odometer_km REAL, fuel_level_pct REAL)")
+    for i, (ts, odo, fuel) in enumerate(rows):
+        conn.execute("INSERT INTO positions VALUES (?,?,?,?,?)", (i, 1, ts, odo, fuel))
+    return conn
 
 
 def _vd(fuel=None, soc=80.0, odo=1000.0):
@@ -24,7 +37,43 @@ def test_engine_ran_gives_litres_and_l_per_100km():
 
 def test_no_fuel_data_is_inert():
     assert db_reader._reev_trip_fuel(None, None, 20) == {
-        "fuel_used_l": None, "fuel_l_100km": None, "engine_ran": False}
+        "fuel_used_l": None, "fuel_l_100km": None, "engine_ran": False, "engine_km": None}
+
+
+# ── the engine-on basis: L/100km over the generator-driving distance (matches the car) ─────────
+def test_engine_on_segments_exclude_ev_and_stationary_charge():
+    # A mixed trip: 10 km on the generator, 10 km pure-electric, then a stationary battery charge.
+    conn = _pos_db([
+        ("2026-07-07T20:00:00", 10.0, 96.0),
+        ("2026-07-07T20:05:00", 20.0, 95.0),   # +10 km, −1.0%  → generator DRIVING (counts)
+        ("2026-07-07T20:15:00", 30.0, 95.0),   # +10 km,  0%    → pure electric (excluded from km)
+        ("2026-07-07T20:30:00", 30.0, 94.0),   # +0 km,  −1.0%  → stationary charge (excluded from litres)
+    ])
+    eng = db_reader._reev_engine_on(conn, 1, "2026-07-07T20:00:00", "2026-07-07T20:30:00")
+    assert eng == {"engine_km": 10.0, "engine_fuel_pct": 1.0}
+
+
+def test_engine_on_basis_matches_car_not_whole_trip():
+    eng = {"engine_km": 10.0, "engine_fuel_pct": 1.0}       # from the trip above
+    out = db_reader._reev_trip_fuel(96.0, 94.0, 30.0, eng)  # total drop 2.0% over the whole 30 km
+    assert out["engine_ran"] is True
+    assert out["engine_km"] == 10.0
+    assert out["fuel_used_l"] == 1.0                        # total litres that left the tank (2.0% × 50)
+    assert out["fuel_l_100km"] == 5.0                       # 1.0% × 50 / 10 km — generator-on basis, realistic
+    # the OLD whole-trip method would have shown 1.0 L / 30 km = 3.3 → too low (diluted by the EV km)
+    assert db_reader._reev_trip_fuel(96.0, 94.0, 30.0)["fuel_l_100km"] == 3.3
+
+
+def test_falls_back_to_whole_trip_when_positions_pruned():
+    # No engine trail (old trip) → keep the whole-trip distance so history doesn't break.
+    out = db_reader._reev_trip_fuel(98.4, 96.2, 17.6, None)
+    assert out["fuel_l_100km"] == 6.2 and out["engine_km"] is None
+
+
+def test_engine_on_none_when_no_fuel_trail():
+    conn = _pos_db([("2026-07-07T20:00:00", 10.0, None),
+                    ("2026-07-07T20:05:00", 20.0, None)])   # BEV / no fuel column data
+    assert db_reader._reev_engine_on(conn, 1, "2026-07-07T20:00:00", "2026-07-07T20:05:00") is None
 
 
 def test_pure_electric_drive_engine_not_flagged():

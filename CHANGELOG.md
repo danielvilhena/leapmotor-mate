@@ -3,6 +3,11 @@
 All notable changes to LeapMotor Mate are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.5.5] — 2026-07-08
+
+### Fixed
+- **REEV per-trip fuel consumption (L/100 km) now matches the car.** On a mixed drive — part on the range-extender, part pure-electric — the litres were spread over the *whole* trip distance, which under-reported the figure. It's now measured over only the distance driven **while the generator was actually running** (the electric kilometres, and any fuel burned while stationary to charge the battery, are excluded), so the per-trip value, the trips list, and the REEV summary all line up with what the car itself shows. The trip card also shows the generator-on distance the figure is based on. Research / BetaTester builds on a REEV vehicle only — nothing changes for BEVs or the normal add-on.
+
 ## [2.5.4] — 2026-07-08
 
 ### Added

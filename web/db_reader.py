@@ -78,22 +78,62 @@ _REEV_TANK_L = 50.0
 _REEV_FUEL_MIN_DROP = 0.2
 
 
-def _reev_trip_fuel(fuel_start_pct, fuel_end_pct, distance_km) -> dict:
-    """REEV Phase C — per-trip fuel from the tank-% drop over the distance. There's no 'engine on' PID:
-    the range-extender ran iff the fuel level dropped more than the signal-noise floor. Returns
-    {fuel_used_l, fuel_l_100km, engine_ran}; all inert (None/False) when there's no fuel data (BEV) or
-    the drive was pure-electric."""
-    out = {"fuel_used_l": None, "fuel_l_100km": None, "engine_ran": False}
+def _reev_engine_on(db, vehicle_id, started_at, ended_at) -> Optional[dict]:
+    """REEV Phase C — the range-extender's DRIVING footprint over a trip, walked from the positions
+    log (per-sample odometer + fuel %). Sums only the intervals where the car was MOVING *and* the
+    generator was running — odometer rising AND fuel % falling. Deliberately excludes:
+      • pure-electric stretches (fuel % flat) → they'd dilute the L/100 km (this is the bug we fix), and
+      • stationary battery-charging (odometer flat, fuel % falling) → that fuel burned over zero km and
+        must NOT be blamed on the driving distance (it inflates the figure ~3× if counted).
+    So {engine_km, engine_fuel_pct} describe fuel-while-driving over distance-while-driving — the number
+    the car itself shows. Returns None when the trail lacks odometer/fuel (old, pruned trips) so the
+    caller can fall back to the whole-trip distance."""
+    if not (vehicle_id and started_at and ended_at):
+        return None
+    try:
+        rows = db.execute(
+            "SELECT odometer_km, fuel_level_pct FROM positions "
+            "WHERE vehicle_id = ? AND recorded_at BETWEEN ? AND ? ORDER BY recorded_at, id",
+            (vehicle_id, started_at, ended_at)).fetchall()
+    except sqlite3.Error:
+        return None
+    pts = [(r["odometer_km"], r["fuel_level_pct"]) for r in rows
+           if r["odometer_km"] is not None and r["fuel_level_pct"] is not None]
+    if len(pts) < 2:
+        return None
+    engine_km = engine_fuel_pct = 0.0
+    for (o0, f0), (o1, f1) in zip(pts, pts[1:]):
+        dkm, dfuel = o1 - o0, f0 - f1
+        if dkm > 0 and dfuel > 0:            # moving AND burning → generator driving the car
+            engine_km += dkm
+            engine_fuel_pct += dfuel
+    if engine_km <= 0.5:
+        return None
+    return {"engine_km": round(engine_km, 1), "engine_fuel_pct": round(engine_fuel_pct, 2)}
+
+
+def _reev_trip_fuel(fuel_start_pct, fuel_end_pct, distance_km, engine=None) -> dict:
+    """REEV Phase C — per-trip fuel from the tank-% drop. There's no 'engine on' PID: the range-extender
+    ran iff the fuel level dropped more than the signal-noise floor. `engine` (from _reev_engine_on) is
+    the generator's driving footprint; when present the L/100 km is fuel-burned-while-driving over
+    distance-while-driving — matching the car — instead of spreading the litres over the WHOLE trip
+    (which under-reports on a mixed EV+generator drive). Falls back to the whole-trip distance when the
+    per-position trail isn't available (old, pruned trips). Returns {fuel_used_l, fuel_l_100km,
+    engine_ran, engine_km}; all inert when there's no fuel data (BEV) or the drive was pure-electric."""
+    out = {"fuel_used_l": None, "fuel_l_100km": None, "engine_ran": False, "engine_km": None}
     if fuel_start_pct is None or fuel_end_pct is None:
         return out
     drop = fuel_start_pct - fuel_end_pct
     if drop <= _REEV_FUEL_MIN_DROP:
         return out
-    litres = round(drop / 100.0 * _REEV_TANK_L, 2)
-    out["fuel_used_l"] = litres
+    out["fuel_used_l"] = round(drop / 100.0 * _REEV_TANK_L, 2)   # total litres that left the tank
     out["engine_ran"] = True
-    if distance_km and distance_km > 0.5:
-        out["fuel_l_100km"] = round(litres / distance_km * 100, 1)
+    if engine and engine.get("engine_km", 0) > 0.5:
+        out["engine_km"] = engine["engine_km"]
+        out["fuel_l_100km"] = round((engine["engine_fuel_pct"] / 100.0 * _REEV_TANK_L)
+                                    / engine["engine_km"] * 100, 1)
+    elif distance_km and distance_km > 0.5:
+        out["fuel_l_100km"] = round(out["fuel_used_l"] / distance_km * 100, 1)
     return out
 
 def auto_location_type(max_power_kw: float) -> str:
@@ -1915,31 +1955,51 @@ def get_trips(limit: int = 500) -> list[dict]:
     ).fetchall()
     out = []
     for r in rows:
-        td = _trip_group_stats(dict(r), kids.get(r["id"], []))
-        # REEV Phase C — per-trip fuel so the list can flag engine-on trips (⛽) at a glance.
-        td.update(_reev_trip_fuel(td.get("fuel_start_pct"), td.get("fuel_end_pct"), td.get("distance_km")))
+        kids_r = kids.get(r["id"], [])
+        td = _trip_group_stats(dict(r), kids_r)
+        # REEV Phase C — per-trip fuel so the list can flag engine-on trips (⛽) at a glance. Same
+        # generator-on basis as the detail page; the positions walk runs only for trips that actually
+        # burned fuel (a REEV drives mostly electric), so the list stays cheap.
+        _fs, _fe = td.get("fuel_start_pct"), td.get("fuel_end_pct")
+        _eng = None
+        if _fs is not None and _fe is not None and (_fs - _fe) > _REEV_FUEL_MIN_DROP:
+            _seg = [r["id"]] + [k["id"] for k in kids_r]
+            _b = db.execute(
+                f"SELECT MIN(started_at) s, MAX(ended_at) e FROM trips WHERE id IN ({','.join('?' * len(_seg))})",
+                _seg).fetchone()
+            _eng = _reev_engine_on(db, r["vehicle_id"], _b["s"], _b["e"])
+        td.update(_reev_trip_fuel(_fs, _fe, td.get("distance_km"), _eng))
         out.append(td)
     return out
 
 
 def reev_fuel_summary() -> Optional[dict]:
     """REEV — the range-extender's REAL fuel appetite, from the engine-on trips (on-board): total
-    litres burned, engine-on km, and the L/100km WHILE the engine ran. This is the number that
-    matters to a REEV owner — unlike the cloud's period average (fuel over ALL km), which a mostly
-    -electric REEV dilutes to near zero. None when the engine never ran (or no fuel data)."""
+    litres burned, generator-on driving km, and the L/100km WHILE the generator drove the car. This is
+    the number that matters to a REEV owner — unlike the cloud's period average (fuel over ALL km), which
+    a mostly-electric REEV dilutes to near zero, and unlike spreading the litres over the whole trip. The
+    average uses fuel-while-driving over distance-while-driving (see _reev_engine_on); `total_l` stays the
+    full litres that left the tank. None when the engine never ran (or no fuel data)."""
+    db = _get()
     try:
-        rows = _get().execute(
-            "SELECT distance_km, fuel_start_pct, fuel_end_pct FROM trips "
-            "WHERE vehicle_id = COALESCE(?, vehicle_id) AND ended_at IS NOT NULL "
+        rows = db.execute(
+            "SELECT id, vehicle_id, started_at, ended_at, distance_km, fuel_start_pct, fuel_end_pct "
+            "FROM trips WHERE vehicle_id = COALESCE(?, vehicle_id) AND ended_at IS NOT NULL "
             "AND fuel_start_pct IS NOT NULL AND fuel_end_pct IS NOT NULL "
             "AND fuel_start_pct - fuel_end_pct > ?",
             (_current_vehicle_id(), _REEV_FUEL_MIN_DROP)).fetchall()
     except sqlite3.Error:
         return None
-    total_l, engine_km, n = 0.0, 0.0, 0
+    total_l, engine_km, engine_l, n = 0.0, 0.0, 0.0, 0
     for r in rows:
         total_l += (r["fuel_start_pct"] - r["fuel_end_pct"]) / 100.0 * _REEV_TANK_L
-        engine_km += r["distance_km"] or 0
+        eng = _reev_engine_on(db, r["vehicle_id"], r["started_at"], r["ended_at"])
+        if eng:
+            engine_km += eng["engine_km"]
+            engine_l += eng["engine_fuel_pct"] / 100.0 * _REEV_TANK_L
+        else:  # positions pruned → fall back to the whole-trip distance + full drop
+            engine_km += r["distance_km"] or 0
+            engine_l += (r["fuel_start_pct"] - r["fuel_end_pct"]) / 100.0 * _REEV_TANK_L
         n += 1
     if not n:
         return None
@@ -1947,7 +2007,7 @@ def reev_fuel_summary() -> Optional[dict]:
         "engine_trips": n,
         "total_l": round(total_l, 1),
         "engine_km": round(engine_km, 1),
-        "avg_l_100km": round(total_l / engine_km * 100, 1) if engine_km > 0.5 else None,
+        "avg_l_100km": round(engine_l / engine_km * 100, 1) if engine_km > 0.5 else None,
     }
 
 
@@ -2191,10 +2251,14 @@ def get_trip_detail(trip_id: int) -> Optional[dict]:
     dist = trip_d.get("distance_km") or 0
     trip_d["energy_kwh"] = round(eff * dist / 100, 2) if (eff and dist) else None
 
-    # REEV Phase C — per-trip fuel consumption from the fuel-tank % drop (signal 3235) over the distance.
+    # REEV Phase C — per-trip fuel consumption from the fuel-tank % drop (signal 3235). L/100 km is over
+    # the generator-on DRIVING distance (across every merged segment), not the whole trip → matches the car.
     _fs, _fe = _tp.get("fuel_start_pct"), _tp.get("fuel_end_pct")
     trip_d["fuel_start_pct"], trip_d["fuel_end_pct"] = _fs, _fe
-    trip_d.update(_reev_trip_fuel(_fs, _fe, dist))
+    _fbounds = db.execute(f"SELECT MIN(started_at) s, MAX(ended_at) e FROM trips WHERE id IN ({ph})",
+                          seg_ids).fetchone()
+    _feng = _reev_engine_on(db, trip["vehicle_id"], _fbounds["s"], _fbounds["e"])
+    trip_d.update(_reev_trip_fuel(_fs, _fe, dist, _feng))
     # Cost = trip energy × the battery's BLENDED €/kWh at the trip's start (weighted-average-cost,
     # GitHub #53). Replaces the old "rate of the single last charge", which over-billed every trip
     # after an expensive top-up (a small public charge made all the cheaper home energy bill at the

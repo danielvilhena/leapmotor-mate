@@ -84,6 +84,9 @@
             <div class="text-xl font-bold text-amber-400">{% if trip.fuel_l_100km is not none %}{{ trip.fuel_l_100km | nice }}<span class="text-sm font-normal text-slate-400"> L/100km</span>{% else %}—{% endif %}</div>
           </div>
         </div>
+        {% if trip.engine_km %}
+        <div class="text-[10px] text-slate-500 mt-2 leading-snug">⛽ {{ t('reev_engine_km') }}: {{ trip.engine_km | nice }} km — {{ t('reev_engine_km_hint') }}</div>
+        {% endif %}
       </div>
       {% endif %}
       {% if trip.ec_pending %}
