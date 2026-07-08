@@ -25,7 +25,7 @@ import mqtt_check
 import auth
 import update_check
 
-MATE_VERSION = "2.5.3"  # bump together with the git tag + add-on config.yaml at release
+MATE_VERSION = "2.5.4"  # bump together with the git tag + add-on config.yaml at release
 
 import diagnostics
 import demo
@@ -2075,6 +2075,37 @@ async def export_database():
         pass
     return FileResponse(db_reader.DB_PATH, media_type="application/octet-stream",
                         filename="leapmotor_mate.db")
+
+
+@app.post("/api/import/database", response_class=HTMLResponse)
+async def import_database(request: Request):
+    """Restore a `leapmotor_mate.db` downloaded from Export → replace the current DB with it (losing
+    ZERO data) while keeping the login you just entered, then restart so the app reopens the restored
+    data + runs migrations. This is how you carry ALL your data across a reinstall (e.g. moving an old
+    BetaTester install onto the numbered add-on) without losing a single row — and normal disaster
+    recovery for everyone."""
+    t = i18n.get_t(db_reader.get_language())
+    form = await request.form()
+    up = form.get("file")
+    if up is None or not hasattr(up, "read"):
+        return HTMLResponse("<div class='text-sm text-red-400'>⚠️ " + t("restore_db_nofile") + "</div>",
+                            status_code=400)
+    blob = await up.read()
+    try:
+        res = db_reader.restore_database(blob)
+    except ValueError as e:
+        return HTMLResponse("<div class='text-sm text-red-400'>⚠️ " + str(e) + "</div>", status_code=400)
+    except Exception as e:  # noqa: BLE001
+        return HTMLResponse("<div class='text-sm text-red-400'>⚠️ " + str(e) + "</div>", status_code=500)
+    _restart_container()   # exit 42 → run.sh relaunches poller + web → both reopen the restored DB
+    n = res["counts"]
+    return HTMLResponse(
+        "<div class='text-sm text-emerald-400'>✓ " + t("restore_db_ok") + "</div>"
+        "<div class='text-xs text-slate-400 mt-1'>"
+        + f"{n['raw_signals_log']} · {n['trips']} " + t("trips_title").lower()
+        + f" · {n['charges']} " + t("charges_title").lower()
+        + f" · {n['positions']} pos</div>"
+        "<script>setTimeout(function(){location.reload();}, 20000);</script>")
 
 
 @app.post("/api/settings/mqtt", response_class=HTMLResponse)

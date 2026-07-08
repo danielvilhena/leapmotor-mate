@@ -564,6 +564,28 @@
         <a href="api/export/database" download
            class="border border-slate-600 text-slate-200 text-sm font-medium rounded-lg px-4 py-2 hover:border-brand">{{ t('export_db') }}</a>
       </div>
+      <!-- What the full backup contains — so you're sure it's all there before you download it -->
+      <div class="text-[11px] text-slate-500 mt-2">{{ t('export_db_contains') }}:
+        <span class="text-slate-300">{{ diag.counts.trips }}</span> {{ t('trips_title') | lower }} ·
+        <span class="text-slate-300">{{ diag.counts.charges }}</span> {{ t('charges_title') | lower }} ·
+        <span class="text-slate-300">{{ diag.counts.positions }}</span> pos · {{ diag.db_size_mb }} MB</div>
+
+      <!-- Restore: replace this install's DB with a backup (used to carry all data across a reinstall) -->
+      <div class="mt-5 pt-4 border-t border-slate-700/60">
+        <div class="text-xs font-medium text-slate-300 mb-1">↩︎ {{ t('restore_db') }}</div>
+        <p class="text-[11px] text-slate-500 mb-2 leading-relaxed">{{ t('restore_db_hint') }}</p>
+        <form hx-post="api/import/database" hx-encoding="multipart/form-data"
+              hx-target="#restore-result" hx-swap="innerHTML"
+              hx-confirm="{{ t('restore_db_confirm') }}"
+              hx-indicator="#restore-spin" class="flex flex-wrap items-center gap-2">
+          <input type="file" name="file" accept=".db" required
+                 class="text-xs text-slate-300 file:mr-2 file:rounded-lg file:border file:border-slate-600 file:bg-slate-800 file:text-slate-200 file:px-3 file:py-1.5 file:text-xs file:cursor-pointer">
+          <button type="submit"
+                  class="border border-amber-600/70 text-amber-300 text-sm font-medium rounded-lg px-4 py-2 hover:bg-amber-600/10">{{ t('restore_db_btn') }}</button>
+          <span id="restore-spin" class="htmx-indicator text-xs text-slate-400">…</span>
+        </form>
+        <div id="restore-result" class="mt-2"></div>
+      </div>
     {% endcall %}
 
     <!-- Diagnostics / debug -->

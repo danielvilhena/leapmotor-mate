@@ -11,19 +11,18 @@ name: Sync beta add-on repo
 # Reuses the ADDON_REPO_TOKEN secret (contents: write on the beta repo — same token
 # mirror-release-to-beta.yml already uses).
 #
-# ⚠️ DISABLED on release (2026-07-08): a tester already installed on the legacy "beta" tag CANNOT
-# be updated in-place to a numbered version — Home Assistant classifies "beta" as SPECIALCONTAINER
-# and `beta < 2.5.3` is False, so the Update button stays greyed (verified with awesomeversion).
-# Bumping the beta config to a semver therefore STRANDS the existing install. The beta repo is now
-# on `version: "latest"` instead (one-click in-place update for those installs). This workflow is
-# kept for reference / manual re-sync only (workflow_dispatch), and no longer fires automatically.
-# Do NOT re-enable the `release:` trigger without a plan to migrate existing installs off "beta".
+# NB on the legacy "beta" tag: HA classifies "beta" as SPECIALCONTAINER, so an install already on
+# "beta" will NOT update in-place to a numbered version (verified with awesomeversion). Those installs
+# migrate ONCE via Mate's own Backup → reinstall → Restore (Settings → Export / Backup), which carries
+# ALL data across losslessly (verified). From a NUMBERED install onward, updates are the normal button.
 
 on:
+  release:
+    types: [published]
   workflow_dispatch:
     inputs:
       ref:
-        description: "Version tag to sync into the beta add-on (e.g. v2.5.3)"
+        description: "Version tag to sync into the beta add-on (e.g. v2.5.4)"
         required: true
 
 permissions:

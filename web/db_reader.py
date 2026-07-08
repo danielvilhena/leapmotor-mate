@@ -253,6 +253,67 @@ def checkpoint() -> None:
         c.close()
 
 
+_SECRET_PREFIX = "enc:v1:"                                    # marks Fernet-encrypted secrets (crypto._PREFIX)
+_RESTORE_REQUIRED_TABLES = frozenset({"settings", "vehicles", "positions"})
+
+
+def _safe_unlink(path: str) -> None:
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
+def restore_database(blob: bytes) -> dict:
+    """Replace the live DB with an uploaded `leapmotor_mate.db` backup — losing ZERO data — while
+    KEEPING the current install's freshly-entered credentials, so the user stays logged in.
+
+    Why the secret-splice: the backup's own secrets were sealed with a DIFFERENT `/data/secret.key`
+    (never exported, for security), so they'd be unreadable on this install. We therefore carry over
+    the CURRENT encrypted secrets (the login the user just did) into the restored DB; EVERYTHING else
+    — every row of research signals, trips, charges, positions, logbook, settings — comes from the
+    backup byte-for-byte. If the user restored BEFORE logging in, there are no fresh secrets to keep
+    and they simply log in afterwards.
+
+    Raises ValueError on a bad/foreign file WITHOUT touching the live DB. The caller restarts the app
+    (exit 42 → run.sh) so both processes reopen the restored DB and run migrations."""
+    if blob[:16] != b"SQLite format 3\x00":
+        raise ValueError("not a valid SQLite database file")
+    tmp = DB_PATH + ".restore.tmp"
+    with open(tmp, "wb") as f:
+        f.write(blob)
+    try:
+        con = sqlite3.connect(tmp)
+        con.row_factory = sqlite3.Row
+        tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        missing = _RESTORE_REQUIRED_TABLES - tables
+        if missing:
+            raise ValueError("not a LeapMotor Mate backup (missing tables: %s)" % ", ".join(sorted(missing)))
+        # Carry over the CURRENT (fresh) encrypted secrets so the just-entered login survives the swap.
+        rw = _conn_rw()
+        try:
+            fresh = rw.execute("SELECT key, value FROM settings WHERE value LIKE ?",
+                               (_SECRET_PREFIX + "%",)).fetchall()
+        finally:
+            rw.close()
+        con.execute("DELETE FROM settings WHERE value LIKE ?", (_SECRET_PREFIX + "%",))
+        for r in fresh:
+            con.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (r["key"], r["value"]))
+        con.commit()
+        counts = {}
+        for t in ("raw_signals_log", "positions", "trips", "charges", "research_logbook"):
+            counts[t] = con.execute("SELECT COUNT(*) c FROM \"%s\"" % t).fetchone()["c"] if t in tables else 0
+        con.close()
+    except Exception:
+        _safe_unlink(tmp)
+        raise
+    # Atomic swap, then drop the OLD WAL sidecars so the new file is never read with a stale WAL.
+    os.replace(tmp, DB_PATH)
+    for ext in ("-wal", "-shm"):
+        _safe_unlink(DB_PATH + ext)
+    return {"counts": counts, "secrets_preserved": len(fresh)}
+
+
 def get_secret(key: str, default: str = "") -> str:
     """Read a secret setting, decrypting transparently (plaintext passes through)."""
     return crypto.decrypt(get_setting(key, default))

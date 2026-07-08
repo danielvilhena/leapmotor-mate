@@ -3,6 +3,11 @@
 All notable changes to LeapMotor Mate are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.5.4] — 2026-07-08
+
+### Added
+- **Restore a database backup — carry ALL your data to a new install.** Settings → *Export / Backup* now has a **Restore database** option next to the existing backup download: export your database, reinstall the add-on, sign in, then upload that backup to bring **everything** back — trips, charges, positions, research history, settings — without losing a single row (verified end-to-end). The login you just entered is kept: the backup's own encrypted secrets can't be read on a different install, so you sign in once and Restore preserves that. The backup line also now shows what it contains (trips · charges · positions · size), so you can be sure it's complete before downloading. Foreign or corrupt files are refused without touching your data.
+
 ## [2.5.3] — 2026-07-08
 
 ### Changed
