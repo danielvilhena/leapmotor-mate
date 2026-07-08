@@ -3159,18 +3159,24 @@ def _charge_temp_odo(db, start: str, end: str | None):
     return (min(temps) if temps else None), (max(odos) if odos else None)
 
 
-def get_battery_health(min_soc_delta: float = 12.0, temp_min_c: float | None = None) -> dict:
+def get_battery_health(min_soc_delta: float = 12.0, temp_min_c: float | None = None,
+                       min_start_soc: float = 15.0) -> dict:
     """Estimate usable battery capacity / state-of-health over time from charge sessions. For
     each charge with a meaningful SoC rise we integrate the measured DC energy and divide by the
     SoC delta → estimated full-pack capacity.
 
-    Two LFP-specific refinements keep the trend honest:
+    Three LFP-specific refinements keep the trend honest — two guard the *ends* of the SoC scale,
+    where the flat LFP voltage curve makes the BMS SoC least reliable:
     - **Cold charges are shown but excluded** from the headline/trend. A cold LFP pack delivers
       less and its BMS SoC drifts, so a winter session reads low — that's temperature, not ageing.
       Charges whose min battery temp is below `temp_min_c` (Settings `soh_temp_min_c`, default 15°C)
       get `excluded: True` and don't feed the figure, but stay in `points` for the chart.
-    - **Charges ending near 100% weigh most** in the headline: the BMS recalibrates SoC near full,
+    - **Charges ending near 100% weigh most** (the *top* guard): the BMS recalibrates SoC near full,
       so their SoC delta — and therefore the estimate — is the most trustworthy.
+    - **Charges STARTING below `min_start_soc` (default 15%) are shown but excluded** (the *bottom*
+      guard). Near-empty, each 1% holds less energy than capacity/100, so the BMS over-reports the
+      SoC rise → `energy / ΔSoC` under-estimates capacity and the point plunges as an isolated
+      outlier (reported by riri19, #125). Same treatment as cold: on the chart, out of the figure.
 
     Single sessions are noisy, so the headline is a weighted mean over the most recent valid ones.
     Charges with no stored telemetry (pruned) are skipped entirely."""
@@ -3209,12 +3215,16 @@ def get_battery_health(min_soc_delta: float = 12.0, temp_min_c: float | None = N
             continue
         temp, odo = _charge_temp_odo(db, r["started_at"], r["ended_at"])
         cold = temp is not None and temp < temp_min_c
+        # Bottom guard: a charge that STARTED near-empty over-reports its SoC rise → capacity
+        # under-estimate (the isolated low outlier riri19 saw). Excluded like cold; still charted.
+        low_start = r["start_soc"] is not None and r["start_soc"] < min_start_soc
         soc_jump = (not cold and r["charge_type"] in _AC_CHARGE_TYPES
                     and _charge_has_soc_jump(db, r["started_at"], r["ended_at"]))
         active_use = (not cold and not soc_jump
                       and _charge_has_active_use(db, r["started_at"], r["ended_at"]))
-        excluded = cold or soc_jump or active_use
-        exclude_reason = ("cold" if cold else ("soc_jump" if soc_jump else "active_use")) if excluded else None
+        excluded = cold or soc_jump or active_use or low_start
+        exclude_reason = ("cold" if cold else "soc_jump" if soc_jump
+                          else "active_use" if active_use else "low_start" if low_start else None)
         dt = _local_dt(r["started_at"])
         points.append({
             "charge_id": r["id"],
@@ -3254,7 +3264,9 @@ def get_battery_health(min_soc_delta: float = 12.0, temp_min_c: float | None = N
         "cold_count": sum(1 for p in points if p.get("exclude_reason") == "cold"),
         "active_use_count": sum(1 for p in points if p.get("exclude_reason") == "active_use"),
         "soc_jump_count": sum(1 for p in points if p.get("exclude_reason") == "soc_jump"),
+        "low_start_count": sum(1 for p in points if p.get("exclude_reason") == "low_start"),
         "temp_min_c": round(temp_min_c, 1),
+        "min_start_soc": round(min_start_soc, 1),
         "latest_capacity_kwh": latest_cap,
         "latest_soh_pct": latest_soh,
     }

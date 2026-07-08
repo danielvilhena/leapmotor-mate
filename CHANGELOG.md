@@ -3,6 +3,11 @@
 All notable changes to LeapMotor Mate are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.5.6] — 2026-07-08
+
+### Fixed
+- **Battery health (SoH) — ignore charges that started from a near-empty battery.** A charge begun at a very low state of charge shows up as an isolated low dip in the health graph: near empty, the BMS over-reports the SoC rise, so "energy ÷ SoC gain" under-estimates the pack capacity. Charges starting below 15% are now drawn on the chart in violet but **excluded from the health figure and its average** — the same treatment already given to cold charges and BMS-recalibration jumps. This adds the *bottom* guard to complement the existing *top* one (charges ending near 100%, where the BMS is most accurate, already weigh most), so the trend stays honest at both ends of the LFP curve. Thanks to @riri19 for the precise report (#125).
+
 ## [2.5.5] — 2026-07-08
 
 ### Fixed

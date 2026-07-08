@@ -49,9 +49,10 @@ def test_cold_charge_is_shown_but_excluded(tmp_path, monkeypatch):
 
 def test_full_charges_weigh_more_in_headline(tmp_path, monkeypatch):
     db = _seed(tmp_path)
-    # X ends at 100% (weight 1.0), est 67.0 ; Y ends at 70% (weight 0.4), est 42/0.7 = 60.0
+    # X ends at 100% (weight 1.0), est 67.0 ; Y ends at 70% (weight 0.4), est 33/0.55 = 60.0.
+    # Y starts at 15% (not below the low-start guard) so this test isolates the end-SoC weighting.
     _charge(db, 1, "06-01", 20, 100, amps=268, temp=25, odo=1000)
-    _charge(db, 2, "06-05", 0,  70,  amps=210, temp=25, odo=2000)
+    _charge(db, 2, "06-05", 15, 70,  amps=165, temp=25, odo=2000)
     monkeypatch.setattr(db_reader, "DB_PATH", str(tmp_path / "t.db"))
 
     h = db_reader.get_battery_health()
@@ -111,6 +112,35 @@ def test_soc_jump_charge_is_shown_but_excluded(tmp_path, monkeypatch):
     assert pts[1]["excluded"] is False
     assert pts[2]["excluded"] is True and pts[2]["exclude_reason"] == "soc_jump"
     assert h["sample_count"] == 1 and h["soc_jump_count"] == 1
+
+
+def test_low_start_charge_is_shown_but_excluded(tmp_path, monkeypatch):
+    """A charge that STARTED near-empty over-reports its SoC rise (each % near empty holds less
+    energy), so energy/ΔSoC under-estimates capacity → an isolated low outlier. Must be excluded
+    from the figure but still charted (riri19 #125). The charge is otherwise perfectly valid."""
+    db = _seed(tmp_path)
+    _charge(db, 1, "06-01", 20, 100, amps=268, temp=25, odo=1000)   # normal start → included
+    _charge(db, 2, "06-05", 5,  85,  amps=268, temp=25, odo=1500)   # start 5% (<15) → low_start
+    monkeypatch.setattr(db_reader, "DB_PATH", str(tmp_path / "t.db"))
+
+    h = db_reader.get_battery_health()
+    pts = {p["charge_id"]: p for p in h["points"]}
+    assert pts[1]["excluded"] is False
+    assert pts[2]["excluded"] is True and pts[2]["exclude_reason"] == "low_start"
+    assert h["sample_count"] == 1 and h["low_start_count"] == 1
+    assert h["latest_capacity_kwh"] == 67.0        # headline = the normal-start one only
+    assert h["min_start_soc"] == 15.0              # threshold surfaced for the chart note
+
+
+def test_start_soc_at_threshold_is_included(tmp_path, monkeypatch):
+    """Boundary: start_soc == the threshold is NOT low-start (guard is strictly below)."""
+    db = _seed(tmp_path)
+    _charge(db, 1, "06-01", 15, 95, amps=268, temp=25, odo=1000)    # start exactly 15% → kept
+    monkeypatch.setattr(db_reader, "DB_PATH", str(tmp_path / "t.db"))
+
+    h = db_reader.get_battery_health()
+    assert h["low_start_count"] == 0 and h["sample_count"] == 1
+    assert h["points"][0]["excluded"] is False
 
 
 def test_cold_cutoff_setting_is_honoured(tmp_path, monkeypatch):

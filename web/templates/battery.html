@@ -50,6 +50,9 @@
 {% if health.soc_jump_count %}
 <p class="text-xs text-slate-500 leading-relaxed mb-2">{{ t('battery_soh_soc_jump_note') }}</p>
 {% endif %}
+{% if health.low_start_count %}
+<p class="text-xs text-slate-500 leading-relaxed mb-2">{{ t('battery_soh_low_start_note').format(n=health.min_start_soc|int) }}</p>
+{% endif %}
 <p class="text-xs text-slate-500 leading-relaxed">{{ t('battery_method') }}</p>
 
 <script>
@@ -61,6 +64,7 @@
   var typeColor = { HOME: '#22c55e', AC: '#60a5fa', FAST: '#fb923c', DC: '#fb923c', HPC: '#e879f9', FREE: '#a3e635' };
   var COLD   = 'rgba(100,116,139,0.5)';  // faded slate — cold charges, excluded from the figure
   var ACTIVE = 'rgba(251,146,60,0.55)';  // faded amber — car-on / BMS-recalibration charges, excluded from the figure
+  var LOWSTART = 'rgba(168,85,247,0.55)'; // faded violet — near-empty start, SoC over-reported, excluded
   var mode = 'time', curData = [];
   function dataFor(m) {
     return pts.map(function (p) {
@@ -86,7 +90,8 @@
       colors: ['#38bdf8'],
       markers: { size: 6, strokeWidth: 0,
                  discrete: curData.map(function (d, i) {
-                   var fc = d.excl ? (d.excl_reason === 'cold' ? COLD : ACTIVE)
+                   var fc = d.excl ? (d.excl_reason === 'cold' ? COLD
+                                     : d.excl_reason === 'low_start' ? LOWSTART : ACTIVE)
                                    : (typeColor[d.type] || '#38bdf8');
                    return { seriesIndex: 0, dataPointIndex: i, size: 6, fillColor: fc };
                  }) },
