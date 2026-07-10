@@ -3,6 +3,11 @@
 All notable changes to LeapMotor Mate are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.5.9] — 2026-07-11
+
+### Fixed
+- **REEV: a trip's electric kWh/100 km is no longer shown when the range-extender ran.** On a range-extender car the generator recharges the battery *while you drive*, so the trip's net SoC change isn't the motor's traction energy — the old per-trip electricity figure (from SoC delta, or from getEC spread over the full distance) came out diluted or near-zero (e.g. 0.5 kWh/100 km where the car itself reported ~19). Mate now **withholds** that figure whenever the extender ran during the trip — at trip close, in the getEC conversion, in merged-trip stats, and via a one-time cleanup of already-recorded trips — so no misleading number shows and no average is polluted. **Pure-electric REEV trips** (fuel level flat) keep a valid figure, and **battery-electric cars are entirely unaffected** (they have no fuel signal). The trip still shows its **fuel** L/100 km (measured over the generator-on distance). Thanks to @gm27271 for the sharp report (MateBetaTesterOnly #10).
+
 ## [2.5.8] — 2026-07-10
 
 ### Fixed

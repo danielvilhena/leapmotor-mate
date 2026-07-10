@@ -1636,10 +1636,15 @@ def store_trip_ec(trip_id: int, ec: Optional[dict], distance_km, apply_energy: b
     # is written incrementally, so applying an early partial read would show a wrong figure. Back up
     # the SoC efficiency at the same moment so the override stays exactly reversible.
     if apply_energy and stable and tot and distance_km and distance_km > 0:
+        # REEV: never let getEC (electric energy spread over the FULL distance) become the trip's
+        # efficiency when the range-extender ran — that's exactly the diluted ~0.5 figure we suppress
+        # (beta #10). The AND-NOT self-gates to REEV engine-on trips; BEV/pure-EV trips override as before.
         db.execute(
             """UPDATE trips SET efficiency_soc = COALESCE(efficiency_soc, efficiency_kwh_100km),
-                   efficiency_kwh_100km=? WHERE id=?""",
-            (round(tot / distance_km * 100, 1), trip_id))
+                   efficiency_kwh_100km=? WHERE id=?
+               AND NOT (fuel_start_pct IS NOT NULL AND fuel_end_pct IS NOT NULL
+                        AND fuel_start_pct - fuel_end_pct > ?)""",
+            (round(tot / distance_km * 100, 1), trip_id, _REEV_FUEL_MIN_DROP))
     db.commit()
 
 
@@ -1649,7 +1654,9 @@ def apply_ec_trip_energy() -> int:
     cur = db.execute(
         """UPDATE trips SET efficiency_soc = COALESCE(efficiency_soc, efficiency_kwh_100km),
                efficiency_kwh_100km = ROUND(ec_kwh / distance_km * 100, 1)
-           WHERE ec_kwh IS NOT NULL AND ec_stable = 1 AND distance_km > 0""")
+           WHERE ec_kwh IS NOT NULL AND ec_stable = 1 AND distance_km > 0
+             AND NOT (fuel_start_pct IS NOT NULL AND fuel_end_pct IS NOT NULL
+                      AND fuel_start_pct - fuel_end_pct > ?)""", (_REEV_FUEL_MIN_DROP,))
     db.commit()
     return cur.rowcount
 
@@ -1816,13 +1823,20 @@ def _trip_group_stats(parent: dict, children: list) -> dict:
     d["duration_min"] = round(sum((s.get("duration_min") or 0) for s in segs), 1)   # DRIVING only
     d["regen_kwh"] = round(sum((s.get("regen_kwh") or 0) for s in segs), 3)
     ssoc, esoc, dist = d["start_soc"], d["end_soc"], d.get("distance_km") or 0
-    if ssoc is not None and esoc is not None and dist > 0:
+    # REEV: if the range-extender ran anywhere in the group (fuel dropped from first-start to last-end),
+    # net SoC ≠ traction energy, so a combined electric kWh/100km is meaningless — leave it blank (beta
+    # #10); the fuel figure is shown instead. Self-gates to REEV engine-on groups (BEV fuel is NULL).
+    _fs, _fe = first.get("fuel_start_pct"), last.get("fuel_end_pct")
+    _reev_engine = (_fs is not None and _fe is not None and (_fs - _fe) > _REEV_FUEL_MIN_DROP)
+    if _reev_engine:
+        d["efficiency_kwh_100km"] = None
+    elif ssoc is not None and esoc is not None and dist > 0:
         energy = max((ssoc - esoc) / 100.0 * get_battery_capacity_kwh(), 0)
         d["efficiency_kwh_100km"] = round(energy / dist * 100, 1) if energy > 0 else None
     # If the group was converted to the official cloud EC (stored on the parent over the COMBINED
     # distance, e.g. convert-on-merge), prefer it over the SoC estimate so the headline matches the
-    # breakdown card.
-    if d.get("ec_stable") and d.get("ec_kwh") and dist > 0:
+    # breakdown card. (Skipped for a REEV engine-on group — same reason as above.)
+    if not _reev_engine and d.get("ec_stable") and d.get("ec_kwh") and dist > 0:
         d["efficiency_kwh_100km"] = round(d["ec_kwh"] / dist * 100, 1)
     d["merged_count"] = len(segs)
     d["is_merged"] = True

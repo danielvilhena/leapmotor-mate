@@ -37,6 +37,19 @@ _WB_FLOOR_KWH = 1.0
 # is never rejected.
 _RECONSTRUCT_MAX_KW = 250.0
 
+# REEV: the range-extender ran during a trip iff the fuel level dropped more than this noise floor
+# (matches web/db_reader _REEV_FUEL_MIN_DROP). When it ran, the generator recharges the pack mid-drive,
+# so the trip's NET SoC change ≠ the motor's traction energy → a SoC- (or getEC-over-full-distance)
+# electric kWh/100km is a meaningless "consumption" and must NOT be stored (GitHub beta #10, gm27271).
+# Detected purely by the fuel drop, so BEVs (fuel NULL) and pure-electric REEV trips (fuel flat) are
+# never touched. The trip still shows its fuel L/100 km (computed over the generator-on distance).
+_REEV_FUEL_MIN_DROP = 0.2
+
+
+def _reev_extender_ran(fuel_start, fuel_end) -> bool:
+    return (fuel_start is not None and fuel_end is not None
+            and (fuel_start - fuel_end) > _REEV_FUEL_MIN_DROP)
+
 # Robustness for flaky car↔cloud links (#118): a reconstructed TRIP above this distance is an odometer
 # glitch, not a drive — reject it so it can't poison the (now stats-counted) history. And a
 # reconstructed trip's duration is only the offline GAP (an upper bound); keep it only when it implies a
@@ -442,6 +455,7 @@ class Database:
         self._drop_phantom_charges()
         self._repair_phantom_zero_soc_charges()
         self._repair_negative_efficiency()
+        self._repair_reev_engine_efficiency()
         self._repair_bogus_wallbox_energy()
         self.migrate_secrets()
         self._check_decryption()
@@ -624,6 +638,24 @@ class Database:
         self._conn.commit()
         if n:
             log.info("Negative-efficiency repair: nulled %d trip(s) with efficiency < 0", n)
+
+    def _repair_reev_engine_efficiency(self) -> None:
+        """One-time cleanup (GitHub beta #10): a REEV trip where the range-extender RAN has no valid
+        electric kWh/100km — the generator recharges the pack mid-drive, so the trip's net SoC change
+        isn't the motor's traction energy, and the stored figure (SoC- or getEC-over-full-distance) came
+        out diluted/near-zero (gm27271's 0.5 vs the car's ~19). NULL the efficiency AND its SoC backup so
+        nothing misleading shows and every stat skips them. Detected purely by a fuel-level drop, so BEVs
+        (fuel NULL) and pure-electric REEV trips (fuel flat) are untouched. Runs once."""
+        if self.get_setting("trips_reev_engine_eff_repair_v1") == "1":
+            return
+        n = self._conn.execute(
+            "UPDATE trips SET efficiency_kwh_100km = NULL, efficiency_soc = NULL "
+            "WHERE fuel_start_pct IS NOT NULL AND fuel_end_pct IS NOT NULL "
+            "AND fuel_start_pct - fuel_end_pct > ?", (_REEV_FUEL_MIN_DROP,)).rowcount
+        self.set_setting("trips_reev_engine_eff_repair_v1", "1")
+        self._conn.commit()
+        if n:
+            log.info("REEV engine-on efficiency repair: nulled %d trip(s) (beta #10)", n)
 
     def _repair_bogus_wallbox_energy(self) -> None:
         """One-time cleanup mirroring the live finalize_charge guard (GitHub #46): fix charges whose
@@ -1102,6 +1134,11 @@ class Database:
         # Withhold efficiency when net energy is <= 0 (SOC rose over the trip — regen
         # or a cloud SOC blip): a negative kWh/100km is meaningless, don't store it.
         efficiency = (energy_used_kwh / distance_km * 100) if (distance_km and distance_km > 0.5 and energy_used_kwh > 0) else None
+        # REEV: if the range-extender ran (fuel dropped), the pack was recharged mid-drive, so this
+        # SoC-based number isn't a real electric consumption — withhold it (beta #10). Fuel L/100 km
+        # still shows in the trip detail. BEVs (fuel NULL) are unaffected.
+        if _reev_extender_ran(trip["fuel_start_pct"], getattr(data, "fuel_level_pct", None)):
+            efficiency = None
 
         started_at = datetime.fromisoformat(trip["started_at"])
         duration_min = (datetime.now(timezone.utc) - started_at).total_seconds() / 60
@@ -1368,6 +1405,16 @@ class Database:
 
                 started_at   = datetime.fromisoformat(trip["started_at"])
                 ended_at_iso = last_pos["recorded_at"]
+                # REEV: if the range-extender ran over this trip (fuel % dropped in the positions trail),
+                # the SoC-based efficiency is meaningless — the generator recharges the pack mid-drive —
+                # so withhold it (beta #10). trip_positions carries no fuel, so read it from positions.
+                if efficiency is not None:
+                    _fr = self._conn.execute(
+                        "SELECT fuel_level_pct FROM positions WHERE vehicle_id=? AND recorded_at BETWEEN ? AND ? "
+                        "AND fuel_level_pct IS NOT NULL ORDER BY recorded_at",
+                        (vehicle_id, trip["started_at"], ended_at_iso)).fetchall()
+                    if len(_fr) >= 2 and (_fr[0]["fuel_level_pct"] - _fr[-1]["fuel_level_pct"]) > _REEV_FUEL_MIN_DROP:
+                        efficiency = None
                 ended_at_dt  = datetime.fromisoformat(ended_at_iso)
                 duration_min = (ended_at_dt - started_at).total_seconds() / 60
 
