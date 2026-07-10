@@ -181,6 +181,34 @@ def read_log_tail(which: str, lines: int = 200) -> str:
         return f"(could not read log: {e})"
 
 
+def read_full_log(which: str) -> str:
+    """The COMPLETE rotating set for `which` — active file + its .1/.2 backups, oldest→newest,
+    redacted. Unlike read_log_tail (a 200-line screenful) this carries the full retained window
+    (~days of driving), so a shared bundle holds the whole run-up to a problem, not just the tail.
+    Missing backups are skipped; a read error on one file degrades to a marker, never an exception."""
+    name = _LOG_FILES.get(which)
+    if not name:
+        return f"(unknown log '{which}')"
+    base = data_dir() / name
+    # RotatingFileHandler backups: <file>.1 is the newest backup, <file>.2 older → read .2, .1, then
+    # the active file so the result reads oldest → newest.
+    paths = [base.with_name(f"{name}.{i}") for i in (2, 1)] + [base]
+    chunks = []
+    for p in paths:
+        if not p.exists():
+            continue
+        try:
+            with p.open("r", errors="replace") as fh:
+                chunks.append(fh.read())
+        except Exception as e:  # noqa: BLE001
+            chunks.append(f"(could not read {p.name}: {e})\n")
+    if not chunks:
+        return ("(no log file yet — it appears after the next restart, once the file logger is "
+                "active. Until then, see the container / Home Assistant add-on log.)")
+    vehicle, _ = db_reader.get_vehicle()
+    return _redact("".join(chunks), (vehicle or {}).get("vin")).strip() or "(log is empty)"
+
+
 # ── shareable bundle ─────────────────────────────────────────────────────────
 _BUNDLE_PARTS = ("info", "poller", "web", "signals")   # user-selectable sections
 
@@ -379,9 +407,9 @@ def build_bundle(version: str, parts=_BUNDLE_PARTS, lines: int = 300, signals: d
         out += ["", "----- cost & wallbox config -----", _cost_wallbox_section()]
         out += ["", "----- vehicle abilities (what the car DECLARES it can do) -----", _abilities_section()]
     if "poller" in want:
-        out += ["", "----- poller log (recent) -----", read_log_tail("poller", lines)]
+        out += ["", "----- poller log (full retained window) -----", read_full_log("poller")]
     if "web" in want:
-        out += ["", "----- web log (recent) -----", read_log_tail("web", lines)]
+        out += ["", "----- web log (full retained window) -----", read_full_log("web")]
     if "signals" in want:
         vehicle, _ = db_reader.get_vehicle()
         out += ["", "----- raw signals (GPS removed) -----",

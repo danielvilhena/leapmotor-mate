@@ -3,6 +3,14 @@
 All notable changes to LeapMotor Mate are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.5.7] — 2026-07-10
+
+### Changed
+- **Diagnostics bundle is now a ZIP and carries days of logs, not minutes.** The downloadable diagnostics used to include only the last ~300 log lines (≈50 minutes of driving) as a plain-text file — too short to cover a long trip. It now bundles the **full retained poller/web logs** (the active file plus its rotated backups) and ships them **zipped** (plain text compresses ~10×, so the attachment stays small). The poller log also keeps a wider window on disk (≈3 days of continuous driving, longer when parked), so when someone reports a problem a few days later their bundle still spans the whole run-up. VIN and credentials are still masked and GPS is still stripped — the bundle stays safe to share publicly.
+
+### Added
+- **Each poll now logs the age of the cloud's telemetry frame.** Every poller status line carries a `Frame age` field (and the odometer) — how old the frame the cloud actually served is. Fresh data reads a few seconds; if the car enters a connectivity dead zone and the cloud keeps re-serving its last frame, the age climbs without bound. That is the signal that tells a *stale* reading apart from the car *genuinely* being stopped — making problems like a trip that stays "in progress" after a border crossing (#128) diagnosable from a single bundle.
+
 ## [2.5.6] — 2026-07-08
 
 ### Fixed

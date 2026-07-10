@@ -25,7 +25,7 @@ import mqtt_check
 import auth
 import update_check
 
-MATE_VERSION = "2.5.6"  # bump together with the git tag + add-on config.yaml at release
+MATE_VERSION = "2.5.7"  # bump together with the git tag + add-on config.yaml at release
 
 import diagnostics
 import demo
@@ -2453,8 +2453,14 @@ async def diagnostics_bundle(parts: str = "info,poller,web,signals"):
         import asyncio
         signals = await asyncio.get_event_loop().run_in_executor(None, command_client.get_fresh_signals)
     body = diagnostics.build_bundle(MATE_VERSION, parts=sel, signals=signals)
-    return Response(content=body, media_type="text/plain; charset=utf-8",
-                    headers={"Content-Disposition": "attachment; filename=leapmotor-mate-diagnostics.txt"})
+    # The bundle is now days of logs; ship it zipped (plain text → ~10× smaller) so it stays a small
+    # attachment on a GitHub issue. One entry, same redaction already applied to `body`.
+    import io, zipfile
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("leapmotor-mate-diagnostics.txt", body)
+    return Response(content=buf.getvalue(), media_type="application/zip",
+                    headers={"Content-Disposition": "attachment; filename=leapmotor-mate-diagnostics.zip"})
 
 
 def _missed_charges_preview_html(t, cands: list[dict]) -> str:

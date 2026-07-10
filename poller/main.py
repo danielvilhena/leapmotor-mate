@@ -31,8 +31,10 @@ def _add_file_log() -> None:
     try:
         from logging.handlers import RotatingFileHandler
         data_dir = pathlib.Path(os.environ.get("DB_PATH", "/data/leapmotor_mate.db")).parent
+        # ~3 MB active + 2 rotated backups ≈ 9 MB retained → covers ≥72 h of continuous driving
+        # (~127 h worst-case, right after a rotation), so a shared bundle spans days not minutes.
         fh = RotatingFileHandler(str(data_dir / "mate-poller.log"),
-                                 maxBytes=1_000_000, backupCount=2)
+                                 maxBytes=3_000_000, backupCount=2)
         fh.setFormatter(logging.Formatter(
             "%(asctime)s [%(levelname)s] %(name)s: %(message)s", "%Y-%m-%d %H:%M:%S"))
         logging.getLogger().addHandler(fh)
@@ -560,10 +562,16 @@ def main():
             boosting = time.time() < boost_until and interval > 10
             if boosting:
                 interval = 10
+            # Frame age = wall-clock − the cloud frame's own timestamp (sig sts/1). Fresh ≈ a few
+            # seconds; if the cloud re-serves a stale frame (car in a 4G dead zone) it climbs without
+            # bound — the one signal that tells "stale re-serve" from "genuinely stopped here".
+            frame_age = (f"{(int(time.time() * 1000) - data.timestamp_ms) / 1000:.0f}s"
+                         if data.timestamp_ms else "?")
             log.info(
-                "SOC %.1f%% | Range %d km | Speed %.0f km/h | State: %-8s | Gear: %s | Next poll: %ds%s",
-                data.soc, data.range_km, data.speed_kmh,
-                recorder.state.value, data.gear, interval,
+                "SOC %.1f%% | Range %d km | Speed %.0f km/h | Odo %.0f km | State: %-8s | "
+                "Gear: %s | Frame age: %s | Next poll: %ds%s",
+                data.soc, data.range_km, data.speed_kmh, data.odometer_km,
+                recorder.state.value, data.gear, frame_age, interval,
                 " (boost)" if boosting else "",
             )
             recorder.mark_online()
