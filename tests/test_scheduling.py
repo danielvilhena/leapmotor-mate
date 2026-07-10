@@ -104,3 +104,52 @@ def test_save_charge_schedule_uses_provided_cycles(monkeypatch):
                             end_time="07:00", cycles="0,1,1,1,1,1,0")
     assert captured["cycles"] == "0,1,1,1,1,1,0"  # weekdays only, not the car's all-days
     assert captured["circulation"] == 1            # still preserved
+
+
+def _fake_session_returning(schedule, captured):
+    class FakeApi:
+        def set_charge_schedule(self, vin, **kw):
+            captured.update(kw)
+
+    class FakeSession:
+        def get_charge_schedule(self):
+            return dict(schedule)
+
+        def execute(self, fn):
+            fn(FakeApi(), "VIN")
+            return True, "OK"
+
+    return FakeSession()
+
+
+def test_set_charge_limit_preserves_enabled_start_time_only_plan(monkeypatch):
+    """#18 regression: setting the charge limit on an ENABLED, start-time-only plan (the cloud
+    omits cycles/endtime/recharge) must change ONLY the SoC — never disable the plan or reset the
+    start time. The lib's api.set_charge_limit guarded on `cycles` and wiped both; Mate now
+    round-trips the plan."""
+    captured = {}
+    # enabled, only a start time — the exact shape that tripped the lib's `cycles` guard
+    monkeypatch.setattr(cc, "_session",
+                        _fake_session_returning({"chargeEnable": 1, "chargesoc": 80,
+                                                 "starttime": "22:00"}, captured))
+    ok, _ = cc.set_charge_limit(90)
+    assert ok
+    assert captured["soc_limit"] == 90            # the one field we meant to change
+    assert captured["enabled"] is True            # NOT disabled (was the #18 bug)
+    assert captured["start_time"] == "22:00"      # NOT reset to 00:00 (was the #18 bug)
+    assert captured["cycles"] == "1,1,1,1,1,1,1"  # missing mask → all-days, never empty
+
+
+def test_set_charge_limit_keeps_a_disabled_plan_disabled(monkeypatch):
+    """The inverse guard: changing the limit must not silently ENABLE a plan the user left off."""
+    captured = {}
+    monkeypatch.setattr(cc, "_session",
+                        _fake_session_returning({"chargeEnable": 0, "chargesoc": 80,
+                                                 "cycles": "1,0,1,0,1,0,1", "starttime": "01:00",
+                                                 "endtime": "06:00"}, captured))
+    cc.set_charge_limit(70)
+    assert captured["soc_limit"] == 70
+    assert captured["enabled"] is False           # stays off
+    assert captured["start_time"] == "01:00"      # window preserved
+    assert captured["end_time"] == "06:00"
+    assert captured["cycles"] == "1,0,1,0,1,0,1"  # custom mask preserved

@@ -785,7 +785,22 @@ def get_charge_plan() -> dict | None:
     return _session.get_charge_plan()
 
 def set_charge_limit(percent: int):
-    return _session.execute(lambda api, vin: api.set_charge_limit(vin, percent))
+    """Change ONLY the charge-limit SoC, preserving the car's existing charge plan.
+
+    NOT the lib's api.set_charge_limit (0.3.1): that guards on `cycles`, so for an ENABLED
+    start-time-only plan — where the cloud omits cycles/endtime/recharge — it falls into an
+    all-defaults branch that silently resets starttime to 00:00 and DISABLES the schedule
+    (leapmotor-api #18). We round-trip the current plan through save_charge_schedule, which
+    preserves cycles/circulation/recharge, and keep the plan's own enable state + start/end
+    window — touching only the SoC."""
+    cur = _session.get_charge_schedule() or {}
+    return save_charge_schedule(
+        enabled=bool(int(cur.get("chargeEnable", 0) or 0)),
+        soc_limit=int(percent),
+        start_time=cur.get("starttime") or "00:00",
+        end_time=cur.get("endtime") or "08:00",
+        cycles=cur.get("cycles"),   # None → save_charge_schedule re-reads & defaults to all-days
+    )
 
 
 # ── Scheduling (native B10 support) ───────────────────────────────────────────
