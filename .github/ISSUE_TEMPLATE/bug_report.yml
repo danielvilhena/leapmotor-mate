@@ -1,0 +1,61 @@
+name: "🐛 Bug report"
+description: "Something in LeapMotor Mate isn't working. Attaching the diagnostics bundle gets it fixed fastest."
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting 🙏
+
+        > **📎 The single most useful thing you can attach is the diagnostics bundle — a small `.zip`.**
+        > It's **redacted** (your VIN is masked, GPS is stripped) and carries several days of logs, so it
+        > usually shows exactly what went wrong. Reproduce the problem first, then grab it and drop it
+        > below — most bugs get solved in one round when it's attached.
+  - type: dropdown
+    id: model
+    attributes:
+      label: Vehicle
+      options:
+        - "B10"
+        - "C10"
+        - "B05"
+        - "T03"
+        - "Other / not sure"
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Mate version
+      description: "Shown at the top of the Mate sidebar."
+      placeholder: "v2.5.10"
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How is Mate installed?
+      options:
+        - "Home Assistant add-on"
+        - "Docker"
+        - "Other / not sure"
+    validations:
+      required: false
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: "What you did, what you expected, and what happened instead. **Rough times help a lot** — they let us find the moment in the logs."
+      placeholder: "e.g. Pressed “Open windows” with the car parked (P) around 15:00 — nothing happened, no error."
+    validations:
+      required: true
+  - type: textarea
+    id: bundle
+    attributes:
+      label: "📎 Diagnostics bundle (please attach — it's the fastest fix)"
+      description: |
+        In Mate: **Settings → 🩺 Diagnostics → “⬇ Download diagnostics”** (a `.zip`).
+        **Reproduce the problem first**, then download it so the logs cover the moment it happened, and **drag the `.zip` into this box**.
+        It's safe to share publicly — VIN masked, GPS stripped.
+      placeholder: "Drag & drop leapmotor-mate-diagnostics.zip here"
+    validations:
+      required: false
