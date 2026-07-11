@@ -3,6 +3,11 @@
 All notable changes to LeapMotor Mate are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.5.10] — 2026-07-11
+
+### Changed
+- **Translations moved to per-language JSON files (internal cleanup — no user-facing change).** The UI strings used to live in a single ~4,500-line Python module; they now sit in `web/locales/{en,it,fr,de,pl}.json`, loaded by a small 56-line `i18n` loader with the exact same behaviour. This makes adding or correcting a translation a simple JSON edit (and opens the door to community translations) without touching code. Every string was carried over verbatim — the app looks and behaves identically in all five languages.
+
 ## [2.5.9] — 2026-07-11
 
 ### Fixed
