@@ -153,7 +153,8 @@
 </script>
 {% endif %}
 
-<!-- Regen KPI row -->
+{% if not is_reev %}
+<!-- Regen KPI row — hidden for REEVs (generator charging is indistinguishable from braking regen) -->
 <div class="grid grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
   <div class="card">
     <div class="stat-label">{{ t('total_regen') }}</div>
@@ -182,6 +183,7 @@
     </div>
   </div>
 </div>
+{% endif %}
 
 {% if grouped %}
 <script src="static/vendor/chart.umd.min.js"></script>
@@ -250,10 +252,12 @@
             <div class="text-xs text-slate-500 uppercase tracking-wide mb-2">{{ t('efficiency_trend') }}</div>
             <canvas id="chart-eff-{{ mo_key }}" height="160"></canvas>
           </div>
+          {% if not is_reev %}
           <div style="background:#0a1628;border:1px solid #1a2438;border-radius:10px;padding:12px">
             <div class="text-xs text-slate-500 uppercase tracking-wide mb-2">{{ t('regen_trend') }}</div>
             <canvas id="chart-regen-{{ mo_key }}" height="160"></canvas>
           </div>
+          {% endif %}
         </div>
         <script>
         (function () {
@@ -304,6 +308,7 @@
             }
           });
 
+          {% if not is_reev %}
           new Chart(document.getElementById('chart-regen-{{ mo_key }}'), {
             type: 'bar',
             data: { labels, datasets: [{
@@ -321,6 +326,7 @@
               }
             }
           });
+          {% endif %}
         })();
         </script>
 

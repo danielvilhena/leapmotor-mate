@@ -73,6 +73,7 @@
       <div class="hero-label">{{ t('avg_efficiency') }}</div>
     </div>
   </div>
+  {% if not is_reev %}
   <div class="hero-tile t-regen">
     <div class="hero-ico">♻️</div>
     <div>
@@ -80,6 +81,7 @@
       <div class="hero-label">{{ t('total_regen') }}</div>
     </div>
   </div>
+  {% endif %}
 </div>
 {% endif %}
 
@@ -106,7 +108,7 @@
         <div class="flex items-center flex-wrap justify-end gap-x-4 gap-y-1 text-sm">
           <span class="text-slate-500 whitespace-nowrap">{{ year.count }} {{ t('trips_plural') }}</span>
           <span class="text-white font-semibold whitespace-nowrap">{{ year.km | dist(1) }}</span>
-          {% if year.regen %}
+          {% if year.regen and not is_reev %}
           <span class="text-green-400/90 font-medium whitespace-nowrap" title="{{ t('total_regen') }}">♻️ {{ year.regen | nice }} kWh</span>
           {% endif %}
           {% if year.cost %}
@@ -134,7 +136,7 @@
             <div class="flex items-center flex-wrap justify-end gap-x-4 gap-y-1 text-xs">
               <span class="text-slate-500 whitespace-nowrap">{{ month.count }} {{ t('trips_plural') }}</span>
               <span class="text-slate-200 font-semibold whitespace-nowrap">{{ month.km | dist(1) }}</span>
-              {% if month.regen %}
+              {% if month.regen and not is_reev %}
               <span class="text-green-400/90 font-medium whitespace-nowrap" title="{{ t('total_regen') }}">♻️ {{ month.regen | nice }} kWh</span>
               {% endif %}
               {% if month.cost %}
@@ -162,7 +164,7 @@
                 </div>
                 <div class="flex items-center flex-wrap justify-end gap-x-3 gap-y-1 text-xs">
                   <span class="text-slate-400 font-medium whitespace-nowrap">{{ day.km | dist(1) }}</span>
-                  {% if day.regen %}
+                  {% if day.regen and not is_reev %}
                   <span class="text-green-400/90 font-medium whitespace-nowrap" title="{{ t('total_regen') }}">♻️ {{ day.regen | nice }} kWh</span>
                   {% endif %}
                   {% if day.cost %}

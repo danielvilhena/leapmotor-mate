@@ -103,6 +103,24 @@
   <div class="text-[11px] text-slate-500 mb-6">{{ t('reev_consumption_note') }}</div>
   {% endif %}
 
+  <!-- Absolute ELECTRIC energy (last 7 days) — the metered getEC kWh, the counterpart to the fuel
+       litres in the range-extender block above. Driving / climate / other split, all from getEC. -->
+  {% if energy_abs and energy_abs.total_kwh %}
+  <div style="background:#1e293b;border:1px solid #334155;border-radius:14px;padding:16px 18px;margin-bottom:16px">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+      <div>
+        <div style="font-size:10px;color:#64748b;text-transform:uppercase;letter-spacing:.06em">🔋 {{ t('reev_elec_7d') }}</div>
+        <div style="font-size:2rem;font-weight:800" class="text-blue-400">{{ energy_abs.total_kwh | nice }}<span style="font-size:1rem;color:#94a3b8;font-weight:400"> kWh</span></div>
+      </div>
+      <div class="text-right text-xs text-slate-400" style="line-height:1.8">
+        <div>🚗 {{ energy_abs.driving_kwh | nice }} · ❄️ {{ energy_abs.ac_kwh | nice }} · ⚙️ {{ energy_abs.other_kwh | nice }} kWh</div>
+        <div class="text-slate-500">{{ energy_abs.driving_pct | nice }}% {{ t('reev_elec_driving') }}</div>
+      </div>
+    </div>
+    <div class="text-[11px] text-slate-500 mt-2">{{ t('reev_elec_7d_note') }}</div>
+  </div>
+  {% endif %}
+
   <!-- Raw signal reference — for cross-checking against the official-app screenshots -->
   {% macro rawrow(pid, label, val, unit='') %}
   <div class="flex justify-between border-b border-slate-800 pb-1.5">

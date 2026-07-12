@@ -3,6 +3,14 @@
 All notable changes to LeapMotor Mate are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.5.11] — 2026-07-12
+
+### Changed
+- **REEV: regen is no longer shown.** Mate infers regen from "battery charging while driving" — but on a range-extender that is indistinguishable from the **generator** charging the battery, and the cloud API exposes no dedicated regen signal to tell the two apart. Rather than display an inflated, misleading number, the regen field is now hidden on range-extender cars everywhere it appeared (trip detail, statistics, trip list, monthly report). **Battery-electric cars are unaffected.**
+
+### Added
+- **REEV: per-trip dual-energy view, and the electric side now comes only from the cloud (beta).** An engine-on range-extender trip now shows both of its energies side by side — the **electric** consumption from the car's own metered cloud figure (getEC) and the **fuel** used (L + L/100 km). The electric side is sourced **only from getEC, never from the battery SoC**: on a REEV the generator recharges the pack *while you drive*, so the net SoC change isn't the motor's consumption — it can even go *up*. getEC counts real consumption regardless of where it comes from, so it stays correct even then; a trip that ends fuller than it started now reads **"battery recharged by generator"** instead of a nonsensical negative number. The REEV page also gains the absolute electric **kWh over the last 7 days** (driving / climate / other) next to the fuel litres. Visible on the REEV research build; battery-electric cars are unaffected. Thanks to @gm27271 and @michapr for the reports and reasoning (MateBetaTesterOnly #10).
+
 ## [2.5.10] — 2026-07-11
 
 ### Changed

@@ -25,7 +25,7 @@ import mqtt_check
 import auth
 import update_check
 
-MATE_VERSION = "2.5.10"  # bump together with the git tag + add-on config.yaml at release
+MATE_VERSION = "2.5.11"  # bump together with the git tag + add-on config.yaml at release
 
 import diagnostics
 import demo
@@ -631,8 +631,24 @@ async def reev_page(request: Request):
     elif reev["has_fuel"]:
         consumption = await asyncio.get_event_loop().run_in_executor(
             None, command_client.get_plugin_consumption)
+    # Absolute ELECTRIC energy (last 7 days), driver/A·C/other split — the metered getEC kWh, the
+    # counterpart to the fuel litres shown above. Reuses the 6h Statistics cache, so it only hits the
+    # cloud on a cold/stale cache (never an extra call per REEV page view).
+    energy_abs = None
+    if demo:
+        energy_abs = {"driving_kwh": 12.4, "ac_kwh": 1.9, "other_kwh": 0.8, "total_kwh": 15.1,
+                      "driving_pct": 82.1, "ac_pct": 12.6, "other_pct": 5.3}
+    elif reev["has_fuel"]:
+        import time as _t
+        if not _energy_cache["data"] or _t.time() - _energy_cache["ts"] >= 6 * 3600:
+            eb = await asyncio.get_event_loop().run_in_executor(None, command_client.get_energy_breakdown)
+            if eb:
+                _energy_cache["data"] = eb
+                _energy_cache["ts"] = _t.time()
+        energy_abs = _energy_cache["data"]
     return templates.TemplateResponse(request, "reev.html", _ctx(
         page="reev", vehicle=vehicle, reev=reev, consumption=consumption, signals_ok=bool(signals),
+        energy_abs=energy_abs,                        # absolute electric kWh (7-day getEC split)
         reev_summary=db_reader.reev_fuel_summary(),   # on-board range-extender consumption (from trips)
         demo=bool(is_research and request.query_params.get("demo")),
         logbook_html=_logbook_list_html() if is_research else "",

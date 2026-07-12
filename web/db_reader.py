@@ -136,6 +136,21 @@ def _reev_trip_fuel(fuel_start_pct, fuel_end_pct, distance_km, engine=None) -> d
         out["fuel_l_100km"] = round(out["fuel_used_l"] / distance_km * 100, 1)
     return out
 
+
+def _reev_trip_elec(ec_driving, distance_km, engine_ran) -> dict:
+    """REEV Phase D (beta #10 step 2) — the ELECTRIC side of an engine-on trip, from the cloud's METERED
+    getEC (driverEC), NOT from ΔSoC. On a series hybrid the generator recharges the pack mid-drive, so the
+    net SoC change isn't the motor's appetite (that's the diluted ~0.5 the SoC path yields and we suppress);
+    getEC counts real consumption, generator-proof. Over the FULL distance — the electric motor drives the
+    whole trip, so (unlike fuel) there's no generator-on sub-distance to normalise over. Inert on a BEV /
+    pure-electric / not-yet-enriched trip (returns None, None → the UI shows a 'getEC pending' hint)."""
+    out = {"reev_elec_kwh": None, "reev_elec_kwh_100km": None}
+    if engine_ran and ec_driving and distance_km and distance_km > 0:
+        out["reev_elec_kwh"] = round(ec_driving, 2)
+        out["reev_elec_kwh_100km"] = round(ec_driving / distance_km * 100, 1)
+    return out
+
+
 def auto_location_type(max_power_kw: float) -> str:
     p = max_power_kw or 0
     if p <= 8:   return "HOME"
@@ -2273,6 +2288,10 @@ def get_trip_detail(trip_id: int) -> Optional[dict]:
                           seg_ids).fetchone()
     _feng = _reev_engine_on(db, trip["vehicle_id"], _fbounds["s"], _fbounds["e"])
     trip_d.update(_reev_trip_fuel(_fs, _fe, dist, _feng))
+    # REEV Phase D — the electric counterpart, from the metered getEC (driverEC) not ΔSoC. Shown
+    # research-only next to the fuel so REEV testers can validate it against the car's own dashboard
+    # before we ever promote it to the headline efficiency (see _reev_trip_elec).
+    trip_d.update(_reev_trip_elec(_tp.get("ec_driving"), dist, trip_d.get("engine_ran")))
     # Cost = trip energy × the battery's BLENDED €/kWh at the trip's start (weighted-average-cost,
     # GitHub #53). Replaces the old "rate of the single last charge", which over-billed every trip
     # after an expensive top-up (a small public charge made all the cheaper home energy bill at the

@@ -112,3 +112,31 @@ def test_finalize_trip_stores_fuel_end(tmp_path):
     row = db._conn.execute(
         "SELECT fuel_start_pct, fuel_end_pct FROM trips WHERE id=?", (tid,)).fetchone()
     assert row["fuel_start_pct"] == 98.4 and row["fuel_end_pct"] == 96.2
+
+
+# ── REEV Phase D — per-trip ELECTRIC from getEC (beta #10 step 2) ──────────────────────────────
+
+def test_reev_elec_from_getec_over_full_distance():
+    # gm27271's real getEC driving energy (2.1 kWh) over the whole 19 km the motor drove.
+    out = db_reader._reev_trip_elec(2.1, 19.0, True)
+    assert out["reev_elec_kwh"] == 2.1
+    assert out["reev_elec_kwh_100km"] == 11.1          # 2.1 / 19 * 100, over the FULL distance
+
+
+def test_reev_elec_uses_full_distance_not_a_generator_subset():
+    # Unlike fuel (normalised over the generator-on km), the motor drives the WHOLE trip → full distance.
+    assert db_reader._reev_trip_elec(5.0, 40.0, True)["reev_elec_kwh_100km"] == 12.5
+
+
+def test_reev_elec_inert_without_engine():
+    # Pure-electric REEV trip (generator never ran) → this block doesn't apply.
+    assert db_reader._reev_trip_elec(2.1, 19.0, False) == {"reev_elec_kwh": None, "reev_elec_kwh_100km": None}
+
+
+def test_reev_elec_inert_without_getec():
+    # BEV, or an engine-on trip the cloud hasn't enriched yet → no getEC → 'pending', not a fake number.
+    assert db_reader._reev_trip_elec(None, 19.0, True) == {"reev_elec_kwh": None, "reev_elec_kwh_100km": None}
+
+
+def test_reev_elec_zero_distance_is_safe():
+    assert db_reader._reev_trip_elec(2.1, 0, True) == {"reev_elec_kwh": None, "reev_elec_kwh_100km": None}

@@ -182,10 +182,12 @@
         {% if c.has_cost and c.total_km > 0 %}{{ (c.charge_cost / dist_val(c.total_km) * 100) | money }}{% else %}<span class="text-slate-500">—</span>{% endif %}
       </div>
     </div>
+    {% if not is_reev %}
     <div>
       <div class="stat-label">{{ t('total_regen') }}</div>
       <div class="stat-value text-xl text-green-400">{{ c.regen_kwh }}<span class="text-sm font-normal text-slate-400"> kWh</span></div>
     </div>
+    {% endif %}
     <div>
       <div class="stat-label">{{ t('drive_time') }}</div>
       <div class="stat-value text-xl">
