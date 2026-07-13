@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block autorefresh %}0{% endblock %}{# manual entry form — don't refresh under the user #}
+{% block title %}{{ t('fuel_title') }} — LeapMotor Mate{% endblock %}
+
+{% block content %}
+<div class="mb-6">
+  <h1 class="text-2xl font-bold text-white">🛢️ {{ t('fuel_title') }}</h1>
+  <p class="text-sm text-slate-400 mt-1">{{ t('fuel_desc') }}</p>
+</div>
+
+<div class="max-w-3xl space-y-5">
+
+  <!-- ── Add a refuel ─────────────────────────────────────────────── -->
+  <div class="card">
+    <h2 class="font-semibold text-white mb-1">➕ {{ t('fuel_add_title') }}</h2>
+    <p class="text-xs text-slate-400 mb-4">{{ t('fuel_add_hint') }}</p>
+    <form hx-post="api/fuel/add" hx-target="#fuel-content" hx-swap="innerHTML" style="margin:0">
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <label class="block">
+          <span class="text-xs text-slate-400">🕒 {{ t('fuel_when') }}</span>
+          <input type="datetime-local" name="ts" value="{{ now_local }}"
+                 class="mt-1 w-full bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-white text-sm focus:outline-none focus:border-brand">
+        </label>
+        <label class="block">
+          <span class="text-xs text-slate-400">⛽ {{ t('fuel_liters') }}</span>
+          <input type="number" name="liters" step="0.01" min="0" required inputmode="decimal" placeholder="0.00"
+                 class="mt-1 w-full bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-white text-sm text-right focus:outline-none focus:border-brand">
+        </label>
+        <label class="block">
+          <span class="text-xs text-slate-400">💶 {{ t('fuel_price_per_l') }} <span class="text-slate-600">({{ currency.symbol }}/L)</span></span>
+          <input type="number" name="price_per_l" step="0.001" min="0" inputmode="decimal" placeholder="—"
+                 class="mt-1 w-full bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-white text-sm text-right focus:outline-none focus:border-brand">
+        </label>
+        <label class="block">
+          <span class="text-xs text-slate-400">🧾 {{ t('fuel_total') }} <span class="text-slate-600">({{ currency.symbol }})</span></span>
+          <input type="number" name="total_cost" step="0.01" min="0" inputmode="decimal" placeholder="—"
+                 class="mt-1 w-full bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-white text-sm text-right focus:outline-none focus:border-brand">
+        </label>
+      </div>
+      <p class="text-[11px] text-slate-500 mt-2">💡 {{ t('fuel_either_hint') }}</p>
+      <label class="block mt-3">
+        <span class="text-xs text-slate-400">📝 {{ t('fuel_note') }}</span>
+        <input type="text" name="note" maxlength="120" placeholder="{{ t('fuel_note_ph') }}"
+               class="mt-1 w-full bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-white text-sm focus:outline-none focus:border-brand">
+      </label>
+      <div class="flex items-center justify-end mt-4">
+        <button type="submit"
+                class="bg-brand text-white text-sm font-semibold rounded-lg px-5 py-2">
+          {{ t('fuel_add_btn') }}
+        </button>
+      </div>
+    </form>
+  </div>
+
+  <!-- Tank state + refuel history (also returned by the add/delete endpoints) -->
+  <div id="fuel-content">
+    {% include "partials/fuel_content.html" %}
+  </div>
+
+</div>
+
+<script>
+  // Clear the entry fields once a refuel is saved (keep the date for the next quick entry).
+  document.body.addEventListener('htmx:afterRequest', function (e) {
+    var cfg = e.detail && e.detail.requestConfig;
+    if (e.detail && e.detail.successful && cfg && /api\/fuel\/add$/.test(cfg.path)) {
+      ['liters', 'price_per_l', 'total_cost', 'note'].forEach(function (n) {
+        var i = document.querySelector('form[hx-post$="fuel/add"] [name="' + n + '"]');
+        if (i) i.value = '';
+      });
+    }
+  });
+</script>
+{% endblock %}

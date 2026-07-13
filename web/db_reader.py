@@ -1183,6 +1183,104 @@ def add_manual_charge(started_at: str, energy_kwh: float, cost: Optional[float] 
         db.close()
 
 
+# ── REEV fuel purchases (user-logged refuels → the fuel WAC €/L blend) ────────────
+# A REEV's per-trip fuel COST needs a price for the litres it burned. There's no price in the cloud,
+# so the user logs each refuel here (litres + €/L, or total + litres). Web-owned table (create-if-
+# missing, like command_log) because the data is entered from the web UI — no poller round-trip.
+def _ensure_fuel_purchases(db: sqlite3.Connection) -> None:
+    db.execute(
+        "CREATE TABLE IF NOT EXISTS fuel_purchases ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT, vehicle_id INTEGER, ts TEXT NOT NULL, "
+        "liters REAL NOT NULL, price_per_l REAL NOT NULL, total_cost REAL, "
+        "fuel_before_pct REAL, note TEXT, created_at TEXT)")
+
+
+def _fuel_before_pct(db: sqlite3.Connection, vehicle_id, ts: str):
+    """The tank % measured just BEFORE `ts` — the residual fuel the WAC weights the refuel against
+    (the fuel twin of a charge's start_soc). Snapshotted at insert time so the blend survives the
+    positions log being pruned. None when the car logged no fuel level before then."""
+    try:
+        r = db.execute(
+            "SELECT fuel_level_pct FROM positions WHERE vehicle_id = ? AND recorded_at <= ? "
+            "AND fuel_level_pct IS NOT NULL ORDER BY recorded_at DESC LIMIT 1",
+            (vehicle_id, ts)).fetchone()
+        return r["fuel_level_pct"] if r else None
+    except sqlite3.Error:
+        return None
+
+
+def add_fuel_purchase(ts: str, liters: float, price_per_l: Optional[float] = None,
+                      total_cost: Optional[float] = None, note: Optional[str] = None) -> int:
+    """Log one REEV refuel. Either `price_per_l` or `total_cost` is enough — the other is derived
+    (€/L = total/litres, or total = €/L·litres). Snapshots the tank % just before `ts` so the WAC
+    weight is frozen against pruning. Feeds fuel_blended_price_at → the per-trip fuel cost."""
+    liters = float(liters)
+    if liters <= 0:
+        raise ValueError("liters must be > 0")
+    ppl = None if price_per_l in (None, "") else float(price_per_l)
+    tot = None if total_cost in (None, "") else float(total_cost)
+    if ppl is None and tot is None:
+        raise ValueError("need price_per_l or total_cost")
+    if ppl is None:
+        ppl = tot / liters
+    if tot is None:
+        tot = ppl * liters
+    if ppl <= 0:
+        raise ValueError("price must be > 0")
+    db = _conn_rw()
+    try:
+        _ensure_fuel_purchases(db)
+        vrow = db.execute("SELECT id FROM vehicles ORDER BY id LIMIT 1").fetchone()
+        vehicle_id = vrow["id"] if vrow else None
+        fb = _fuel_before_pct(db, vehicle_id, ts)
+        cur = db.execute(
+            "INSERT INTO fuel_purchases (vehicle_id, ts, liters, price_per_l, total_cost, "
+            "fuel_before_pct, note, created_at) VALUES (?,?,?,?,?,?,?,?)",
+            (vehicle_id, ts, liters, round(ppl, 4), round(tot, 2), fb, note,
+             datetime.now(timezone.utc).isoformat()))
+        db.commit()
+        return cur.lastrowid
+    finally:
+        db.close()
+
+
+def list_fuel_purchases(limit: int = 200) -> list:
+    """The user's refuels, newest first — for the Rifornimenti page and the tank state."""
+    db = _conn_rw()
+    try:
+        _ensure_fuel_purchases(db)
+        rows = db.execute(
+            "SELECT id, ts, liters, price_per_l, total_cost, fuel_before_pct, note "
+            "FROM fuel_purchases ORDER BY ts DESC, id DESC LIMIT ?", (int(limit),)).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        db.close()
+
+
+def delete_fuel_purchase(purchase_id: int) -> bool:
+    db = _conn_rw()
+    try:
+        _ensure_fuel_purchases(db)
+        cur = db.execute("DELETE FROM fuel_purchases WHERE id = ?", (int(purchase_id),))
+        db.commit()
+        return cur.rowcount > 0
+    finally:
+        db.close()
+
+
+def latest_fuel_pct(vehicle_id: Optional[int] = None) -> Optional[float]:
+    """Most recent tank % the car reported — for the Rifornimenti page's live tank state."""
+    try:
+        db = _get()
+        r = db.execute(
+            "SELECT fuel_level_pct FROM positions WHERE vehicle_id = COALESCE(?, vehicle_id) "
+            "AND fuel_level_pct IS NOT NULL ORDER BY recorded_at DESC LIMIT 1",
+            (vehicle_id if vehicle_id is not None else _current_vehicle_id(),)).fetchone()
+        return r["fuel_level_pct"] if r else None
+    except sqlite3.Error:
+        return None
+
+
 def upsert_vehicle(vin: str, car_type: str) -> None:
     """Pre-populate vehicles table from setup wizard (before first poller run)."""
     db = _conn_rw()
@@ -2234,6 +2332,55 @@ def blended_price_at(vehicle_id: int, ts: str) -> Optional[float]:
     return _wac_blend([dict(r) for r in rows])
 
 
+def _fuel_wac_blend(purchases) -> Optional[float]:
+    """Weighted-average-cost blended €/L of the tank after a chronological list of refuels — the FUEL
+    twin of _wac_blend (#53). Pure (no DB) so it's simulation/unit-testable. Each item is a dict with
+    fuel_before_pct (tank % just before this refuel), liters (added), price_per_l (€/L paid).
+
+    Same reservoir model as the battery: the tank is ONE blend, only a refuel moves the price and
+    driving never does. Each refuel mixes the RESIDUAL (fuel_before_pct, at the running blend) with the
+    ADDED litres (as a % of the tank, liters/50·100, at the paid rate):
+
+        p' = (fs·p + add_pct·rate) / (fs + add_pct)
+
+    Litres CANCEL (fuel-% ratios) so it's tank-size-free. Bootstrap: the first refuel sets the blend to
+    its own €/L (pre-existing fuel is valued at the first thing we can price). A refuel whose residual
+    is unknown (fuel_before_pct=None — e.g. no car data before it) can't weight the mix → it only
+    bootstraps if it's the first, else carries the blend forward unchanged."""
+    p = None
+    for pur in purchases:
+        rate = pur.get("price_per_l")
+        liters = pur.get("liters")
+        if rate is None or rate <= 0 or not liters or liters <= 0:
+            continue                         # unpriced / empty → can't price, must not move the blend
+        fs = pur.get("fuel_before_pct")
+        if fs is None or fs < 0:
+            if p is None:
+                p = rate                     # first refuel, unknown residual → bootstrap to its rate
+            continue                         # else carry-forward (an unknown residual can't weight)
+        add_pct = liters / _REEV_TANK_L * 100.0
+        p = rate if p is None else (fs * p + add_pct * rate) / (fs + add_pct)
+    return p
+
+
+def fuel_blended_price_at(vehicle_id: int, ts: str) -> Optional[float]:
+    """Blended €/L of the tank (fuel WAC) for `vehicle_id` at instant `ts` — the price in effect for an
+    engine-on trip starting then, set by every refuel logged at/before `ts`. None until the first
+    refuel (engine trips before it stay uncosted, like the battery before its first priced charge).
+    Recomputed from history each call (no stored state) → self-corrects when a refuel is added/edited.
+    The FUEL twin of blended_price_at."""
+    db = _conn_rw()
+    try:
+        _ensure_fuel_purchases(db)
+        rows = db.execute(
+            "SELECT fuel_before_pct, liters, price_per_l FROM fuel_purchases "
+            "WHERE (vehicle_id = ? OR vehicle_id IS NULL) AND ts <= ? ORDER BY ts, id",
+            (vehicle_id, ts)).fetchall()
+        return _fuel_wac_blend([dict(r) for r in rows])
+    finally:
+        db.close()
+
+
 def get_trip_detail(trip_id: int) -> Optional[dict]:
     db = _get()
     row = db.execute("SELECT * FROM trips WHERE id = ? AND vehicle_id = COALESCE(?, vehicle_id)",
@@ -2292,6 +2439,16 @@ def get_trip_detail(trip_id: int) -> Optional[dict]:
     # research-only next to the fuel so REEV testers can validate it against the car's own dashboard
     # before we ever promote it to the headline efficiency (see _reev_trip_elec).
     trip_d.update(_reev_trip_elec(_tp.get("ec_driving"), dist, trip_d.get("engine_ran")))
+    # REEV — fuel COST of this engine-on trip: litres burned × the tank's BLENDED €/L at the trip's
+    # start (fuel WAC, the twin of the battery's blended_price_at / #53). None until the user logs a
+    # refuel. It's an allocation of what that fuel cost, not a price measured at the pump.
+    trip_d["fuel_cost"] = None
+    trip_d["fuel_price_per_l"] = None
+    if trip_d.get("fuel_used_l"):
+        _fp = fuel_blended_price_at(trip["vehicle_id"], trip["started_at"])
+        if _fp and _fp > 0:
+            trip_d["fuel_price_per_l"] = round(_fp, 3)
+            trip_d["fuel_cost"] = round(trip_d["fuel_used_l"] * _fp, 2)
     # Cost = trip energy × the battery's BLENDED €/kWh at the trip's start (weighted-average-cost,
     # GitHub #53). Replaces the old "rate of the single last charge", which over-billed every trip
     # after an expensive top-up (a small public charge made all the cheaper home energy bill at the

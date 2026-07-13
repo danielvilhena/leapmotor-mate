@@ -3,6 +3,11 @@
 All notable changes to LeapMotor Mate are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.5.12] — 2026-07-13
+
+### Added
+- **REEV: fuel cost — log your refuels and see what each engine-on trip cost (beta).** A new **Rifornimenti** page lets you record each refuel (litres + price per litre, *or* the total paid — the other is computed). Mate keeps a **weighted-average price** of the fuel currently in the tank — a big cheap fill drags it down, a small pricey top-up nudges it up, exactly like a tank that's "part bought at price X, part at price Y" — and prices each engine-on trip's fuel at the average in effect **at the time of that trip**. The per-trip dual-energy view now shows the **fuel cost** next to the litres, and the page shows the live tank state (level from the car, average €/L, estimated value). Prices are shown to 3 decimals with the UI's decimal separator. Visible on the REEV research build only, and only on range-extender cars; battery-electric cars and the official build are unaffected.
+
 ## [2.5.11] — 2026-07-12
 
 ### Changed

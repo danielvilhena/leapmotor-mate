@@ -25,7 +25,7 @@ import mqtt_check
 import auth
 import update_check
 
-MATE_VERSION = "2.5.11"  # bump together with the git tag + add-on config.yaml at release
+MATE_VERSION = "2.5.12"  # bump together with the git tag + add-on config.yaml at release
 
 import diagnostics
 import demo
@@ -97,6 +97,21 @@ def _money(x) -> str:
     return f"{sym}{s}" if cur["pos"] == "before" else f"{s}\u00a0{sym}"
 
 templates.env.filters["money"] = _money
+
+
+def _price_l(x) -> str:
+    """A per-litre fuel price: fixed 3 decimals with the UI-language decimal separator (comma for
+    it/fr/de, dot for en), no currency symbol \u2014 the template appends ' <sym>/L'. Fuel is quoted to
+    3 decimals (1,858 \u20ac/L): unlike `nice` this keeps them, and unlike a bare number it follows the
+    same comma/dot rule as `money` (a price is a monetary value)."""
+    if x is None:
+        return "\u2014"
+    s = f"{float(x):,.3f}"
+    if db_reader.get_language() != "en":
+        s = s.translate(str.maketrans({",": ".", ".": ","}))
+    return s
+
+templates.env.filters["pricel"] = _price_l
 
 
 def _localdate(s) -> str:
@@ -740,6 +755,89 @@ async def research_consent_page(request: Request):
 async def research_consent_accept(request: Request):
     db_reader.set_setting("research_consent", "1")
     return RedirectResponse(request.headers.get("x-ingress-path", "") + "/", status_code=303)
+
+
+def _fuel_blocked() -> bool:
+    """REEV+research gate, mirroring reev_page: a BEV / non-research visitor must never reach fuel data,
+    on any build. Applied to the page AND the write endpoints."""
+    return not (db_reader.get_setting("is_reev", "0") == "1" and research.research_enabled())
+
+
+def _fuel_local_to_utc(ts_str: str) -> str:
+    """A <input type=datetime-local> value ('YYYY-MM-DDTHH:MM', naive LOCAL) → UTC ISO for storage, so
+    a refuel sits on the same UTC timeline as trips/positions (the WAC orders by it). Blank/garbage → now."""
+    from datetime import datetime, timezone
+    try:
+        dt = datetime.fromisoformat(ts_str)
+    except (ValueError, TypeError):
+        return datetime.now(timezone.utc).isoformat()
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=db_reader._LOCAL_TZ) if db_reader._LOCAL_TZ else dt.astimezone()
+    return dt.astimezone(timezone.utc).isoformat()
+
+
+def _fuel_ctx(request: Request):
+    """Shared context for the Rifornimenti page + its HTMX partials: the refuel log and the live tank
+    state (level from the car's fuel %, blended €/L from the fuel WAC)."""
+    from datetime import datetime, timezone
+    vehicle, _ = db_reader.get_vehicle()
+    vid = vehicle["id"] if vehicle else None
+    purchases = db_reader.list_fuel_purchases()
+    for p in purchases:                       # localise the timestamp for display (DB is UTC)
+        _ld = db_reader._local_dt(p.get("ts"))
+        p["ts_local"] = _ld.strftime("%d/%m/%Y %H:%M") if _ld else (p.get("ts") or "")
+    fuel_pct = db_reader.latest_fuel_pct(vid)
+    liters = round(fuel_pct / 100.0 * db_reader._REEV_TANK_L, 1) if fuel_pct is not None else None
+    blend = db_reader.fuel_blended_price_at(vid, datetime.now(timezone.utc).isoformat()) if vid is not None else None
+    tank = {"fuel_pct": fuel_pct, "liters": liters,
+            "eur_per_l": round(blend, 3) if blend else None,
+            "value": round(liters * blend, 2) if (liters and blend) else None}
+    now_local = datetime.now(timezone.utc).astimezone(db_reader._LOCAL_TZ).strftime("%Y-%m-%dT%H:%M")
+    return _ctx(page="fuel", vehicle=vehicle, purchases=purchases, tank=tank, now_local=now_local)
+
+
+@app.get("/fuel", response_class=HTMLResponse)
+async def fuel_page(request: Request):
+    if _fuel_blocked():
+        return RedirectResponse(request.headers.get("x-ingress-path", "") + "/")
+    return templates.TemplateResponse(request, "fuel.html", _fuel_ctx(request))
+
+
+@app.post("/api/fuel/add", response_class=HTMLResponse)
+async def fuel_add(request: Request):
+    if _fuel_blocked():
+        return RedirectResponse(request.headers.get("x-ingress-path", "") + "/", status_code=303)
+    form = await request.form()
+    try:
+        liters = float(form.get("liters"))
+    except (TypeError, ValueError):
+        liters = 0.0
+    ppl = (form.get("price_per_l") or "").strip()
+    tot = (form.get("total_cost") or "").strip()
+    note = (form.get("note") or "").strip() or None
+    ts = _fuel_local_to_utc((form.get("ts") or "").strip())
+    if liters > 0 and (ppl or tot):
+        try:
+            # €/L wins if both are given (keeps the pair consistent — total is then derived from it).
+            if ppl:
+                db_reader.add_fuel_purchase(ts, liters, price_per_l=float(ppl), note=note)
+            else:
+                db_reader.add_fuel_purchase(ts, liters, total_cost=float(tot), note=note)
+        except (ValueError, TypeError):
+            pass
+    return templates.TemplateResponse(request, "partials/fuel_content.html", _fuel_ctx(request))
+
+
+@app.post("/api/fuel/delete", response_class=HTMLResponse)
+async def fuel_delete(request: Request):
+    if _fuel_blocked():
+        return RedirectResponse(request.headers.get("x-ingress-path", "") + "/", status_code=303)
+    form = await request.form()
+    try:
+        db_reader.delete_fuel_purchase(int(form.get("id")))
+    except (TypeError, ValueError):
+        pass
+    return templates.TemplateResponse(request, "partials/fuel_content.html", _fuel_ctx(request))
 
 
 def _maint_ctx(request: Request):

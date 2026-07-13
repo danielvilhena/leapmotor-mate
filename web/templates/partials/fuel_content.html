@@ -1,0 +1,60 @@
+{# Tank state + refuel history. Included by fuel.html and returned by /api/fuel/add|delete (HTMX). #}
+<div class="space-y-5">
+
+  <!-- ── Tank state ─────────────────────────────────────────────── -->
+  <div class="card">
+    <h2 class="font-semibold text-white mb-3">🛢️ {{ t('fuel_tank_title') }}</h2>
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div class="bg-slate-950 rounded-xl p-3 border border-slate-900">
+        <div class="stat-label" style="font-size:10px">⛽ {{ t('fuel_tank_level') }}</div>
+        <div class="text-xl font-bold text-amber-400">{% if tank.fuel_pct is not none %}{{ tank.fuel_pct | nice }}<span class="text-sm font-normal text-slate-400">%</span>{% else %}—{% endif %}</div>
+        {% if tank.liters is not none %}<div class="text-[11px] text-slate-500 mt-0.5">≈ {{ tank.liters | nice }} L</div>{% endif %}
+      </div>
+      <div class="bg-slate-950 rounded-xl p-3 border border-slate-900">
+        <div class="stat-label" style="font-size:10px">💶 {{ t('fuel_avg_price') }}</div>
+        <div class="text-xl font-bold text-emerald-400">{% if tank.eur_per_l is not none %}{{ tank.eur_per_l | pricel }}<span class="text-sm font-normal text-slate-400"> {{ currency.symbol }}/L</span>{% else %}—{% endif %}</div>
+        <div class="text-[11px] text-slate-500 mt-0.5">{{ t('fuel_wac_note') }}</div>
+      </div>
+      <div class="bg-slate-950 rounded-xl p-3 border border-slate-900">
+        <div class="stat-label" style="font-size:10px">🧾 {{ t('fuel_tank_value') }}</div>
+        <div class="text-xl font-bold text-white">{% if tank.value is not none %}{{ tank.value | money }}{% else %}—{% endif %}</div>
+        <div class="text-[11px] text-slate-500 mt-0.5">{{ t('fuel_tank_value_note') }}</div>
+      </div>
+      <div class="bg-slate-950 rounded-xl p-3 border border-slate-900">
+        <div class="stat-label" style="font-size:10px">🔢 {{ t('fuel_count') }}</div>
+        <div class="text-xl font-bold text-white">{{ purchases | length }}</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Refuel history ─────────────────────────────────────────── -->
+  <div class="card">
+    <h2 class="font-semibold text-white mb-3">📒 {{ t('fuel_history_title') }}</h2>
+    {% if purchases %}
+    <div class="space-y-2">
+      {% for p in purchases %}
+      <div class="flex items-center gap-3 bg-slate-950 rounded-xl p-3 border border-slate-900">
+        <div class="text-2xl flex-shrink-0">⛽</div>
+        <div class="flex-1 min-w-0">
+          <div class="text-sm font-semibold text-white">
+            {{ p.liters | nice }} L · {{ p.price_per_l | pricel }} {{ currency.symbol }}/L
+          </div>
+          <div class="text-[11px] text-slate-400 truncate">
+            {{ p.ts_local }} · {{ t('fuel_total') }}: {{ p.total_cost | money }}{% if p.note %} · {{ p.note }}{% endif %}
+          </div>
+        </div>
+        <form hx-post="api/fuel/delete" hx-target="#fuel-content" hx-swap="innerHTML"
+              hx-confirm="{{ t('fuel_delete_confirm') }}" style="margin:0" class="flex-shrink-0">
+          <input type="hidden" name="id" value="{{ p.id }}">
+          <button type="submit" class="text-slate-500 hover:text-red-400 px-2 text-base"
+                  title="{{ t('fuel_delete') }}">🗑</button>
+        </form>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="text-sm text-slate-500">{{ t('fuel_empty') }}</p>
+    {% endif %}
+  </div>
+
+</div>
