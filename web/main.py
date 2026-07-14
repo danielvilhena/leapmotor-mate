@@ -2406,7 +2406,7 @@ async def set_language(request: Request):
     (HX-Refresh) so every server-rendered string switches to the new language."""
     form = await request.form()
     lang = form.get("language", "en")
-    db_reader.set_setting("language", lang if lang in ("en", "it", "fr", "de", "pl") else "en")
+    db_reader.set_setting("language", lang if lang in ("en", "it", "fr", "de", "pl", "pt-PT") else "en")
     return Response(status_code=204, headers={"HX-Refresh": "true"})
 
 
