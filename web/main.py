@@ -3871,7 +3871,7 @@ async def setup_submit(request: Request):
     db_reader.set_secret("leapmotor_pin", pin)
     db_reader.set_setting("battery_capacity_kwh", str(battery_kwh))
     db_reader.set_setting("is_reev", is_reev)   # REEV variant selected in the wizard → gates fuel features
-    db_reader.set_setting("language", lang if lang in ("en", "it", "fr", "de", "pl") else "en")
+    db_reader.set_setting("language", lang if lang in ("en", "it", "fr", "de", "pl", "pt-PT") else "en")
 
     # Pre-populate vehicles table so the UI shows model info before the first poller run
     if vin and car_type:

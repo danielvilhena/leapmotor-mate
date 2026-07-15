@@ -45,11 +45,8 @@
         🇵🇱 Polski
       </button>
       <button type="button" onclick="setLang('pt-PT')" id="btn-pt-PT"
-
               class="px-4 py-1.5 rounded-full text-sm font-medium border transition-all cursor-pointer">
-
         🇵🇹 Português (Portugal)
-
       </button>
     </div>
     <h1 id="setup-title" class="text-2xl font-bold text-white mb-1">Welcome to LeapMotor Mate</h1>
@@ -505,7 +502,6 @@ async function saveCert() {
 
 // ── Language switch ───────────────────────────────────────────────────────────
 function setLang(lang) {
-
   currentLang = lang;
   const s = strings[lang];
   document.getElementById('lang-input').value            = lang;
