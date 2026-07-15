@@ -44,6 +44,10 @@
               class="px-4 py-1.5 rounded-full text-sm font-medium border transition-all cursor-pointer">
         🇵🇱 Polski
       </button>
+      <button type="button" onclick="setLang('pt-PT')" id="btn-pt-PT"
+              class="px-4 py-1.5 rounded-full text-sm font-medium border transition-all cursor-pointer">
+        🇵🇹 Português (Portugal)
+      </button>
     </div>
     <h1 id="setup-title" class="text-2xl font-bold text-white mb-1">Welcome to LeapMotor Mate</h1>
     <p id="setup-subtitle" class="text-slate-400 text-sm">Configure your vehicle connection to get started</p>
@@ -402,6 +406,44 @@ const strings = {
     demoNote:      "Tylko przykładowe dane — nic nie jest prawdziwe. Możesz wyjść w każdej chwili.",
     demoStarting:  "Uruchamianie demo…",
   },
+'pt-PT': {
+    title:         "Bem-vindo ao LeapMotor Mate",
+    subtitle:      "Escolha como pretende começar",
+    acctWarn:      "⚠️ Utilize uma conta Leapmotor dedicada exclusivamente ao Mate. Não utilize esta conta em qualquer outra aplicação, add-on, Docker ou integração ao mesmo tempo, pois as sessões anulam-se mutuamente e poderá obter dados em falta ou inconsistentes.",
+    email:         "Email da conta Leapmotor",
+    emailPh:       "utilizador@exemplo.com",
+    password:      "Palavra-passe",
+    pin:           "PIN de operação",
+    pinPh:         "PIN de 4 dígitos",
+    detectBtn:     "🔍 Detetar o meu veículo",
+    detecting:     "⏳ A detetar…",
+    detected:      "Veículo detetado",
+    carLine:       (model, vin) => `Leapmotor ${model} · VIN ···${vin.slice(-6)}`,
+    batteryLabel:  "Bateria",
+    batteryHint:   "Selecione a variante da bateria",
+    batteryAutoSet:"Bateria detetada (especificação europeia)",
+    detectFail:    "Não foi possível detetar o veículo",
+    manualEntry:   "Introduza manualmente a capacidade da bateria (kWh)",
+    manualHint:    "B10 Pro: 56.2 · B10 Pro Max: 67.1 · T03: 37.3 · C10 RWD: 69.9 · C10 AWD: 81.9",
+    submit:        "Ligar e iniciar",
+    required:      "O email, a palavra-passe e o PIN são obrigatórios.",
+    noBattery:     "Selecione primeiro a variante da bateria.",
+    certTitle:     "Passo 1 — Certificado da aplicação",
+    certDesc:      "O Mate necessita do certificado TLS da aplicação Leapmotor (é igual para todos os utilizadores, não é específico da sua conta). Transfira os ficheiros app.crt e app.key em:",
+    certBtn:       "Guardar certificado",
+    certSaving:    "⏳ A guardar…",
+    certToPaste:   "Colar o conteúdo PEM em vez disso",
+    certToFile:    "Carregar os ficheiros em vez disso",
+    certBoth:      "Os ficheiros app.crt e app.key são obrigatórios.",
+    certSaved:     "✓ Certificado guardado",
+    certCrtLabel:  "app.crt (certificado)",
+    certKeyLabel:  "app.key (chave privada)",
+    setupChoice:   "Configurar o meu carro",
+    back:          "Voltar",
+    demoBtn:       "Experimentar a demonstração",
+    demoNote:      "Apenas dados de demonstração — nada é real. Pode sair a qualquer momento.",
+    demoStarting:  "A iniciar a demonstração…",
+},
 };
 
 let currentLang = 'en';
@@ -491,6 +533,7 @@ function setLang(lang) {
   document.getElementById('btn-fr').className = lang === 'fr' ? active : inactive;
   document.getElementById('btn-de').className = lang === 'de' ? active : inactive;
   document.getElementById('btn-pl').className = lang === 'pl' ? active : inactive;
+  document.getElementById('btn-pt-PT').className = lang === 'pt-PT' ? active : inactive;
 }
 
 // ── Demo mode ─────────────────────────────────────────────────────────────────
@@ -742,7 +785,9 @@ function toggleVisibility(inputId, btn) {
 const initLang = navigator.language.startsWith('it') ? 'it'
                : navigator.language.startsWith('fr') ? 'fr'
                : navigator.language.startsWith('de') ? 'de'
-               : navigator.language.startsWith('pl') ? 'pl' : 'en';
+               : navigator.language.startsWith('pl') ? 'pl'
+               : navigator.language.startsWith('pt') ? 'pt-PT'
+               : 'en';
 setLang('{{ prefill.language if prefill else "" }}' || initLang);
 
 // ── Landing choice ────────────────────────────────────────────────────────────
