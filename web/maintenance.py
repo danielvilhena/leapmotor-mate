@@ -96,8 +96,6 @@ _CHROME = {
 
 
 def _loc(d: dict, lang: str) -> str:
-    if lang == "pt":
-        lang = "pt-PT"
     return d.get(lang) or d.get("en") or ""
 
 
