@@ -102,6 +102,21 @@ def _climate_ctx_from_db(db):
     return mode, circle, fan, temp
 
 
+# Windows open %→native scale (mirrors web/command_client._windows_native): the B10/C10/B05
+# report "fully open" as 10, the T03 as 100. The quick MQTT "Open" button vents to 20%.
+_WINDOWS_SCALE = {"B10": 10, "C10": 10, "B05": 10}   # car_type → native "fully open"; default 100
+
+
+def _mqtt_windows_native(client, pct: int) -> str:
+    ct = (getattr(getattr(client, "_vehicle", None), "car_type", "") or "").upper()
+    full = _WINDOWS_SCALE.get(ct, 100)
+    try:
+        pct = max(0, min(int(pct), 100))
+    except (TypeError, ValueError):
+        pct = 0
+    return str(round(pct / 100 * full))
+
+
 def _handle_mqtt_command(client, service, db, vin: str, cmd: str, value):
     """Execute a remote MQTT command, then keep HA in sync the same way the web UI
     does: publish the expected state immediately (optimistic) and trigger a fast
@@ -117,6 +132,10 @@ def _handle_mqtt_command(client, service, db, vin: str, cmd: str, value):
             elif cmd == "unlock":      api.unlock_vehicle(vin)
             elif cmd == "open_trunk":  api.open_trunk(vin)
             elif cmd == "close_trunk": api.close_trunk(vin)
+            elif cmd == "open_windows":   api.windows(vin, value=_mqtt_windows_native(client, 20))
+            elif cmd == "close_windows":  api.windows(vin, value=_mqtt_windows_native(client, 0))
+            elif cmd == "open_sunshade":  api.open_sunshade(vin)
+            elif cmd == "close_sunshade": api.close_sunshade(vin)
             elif cmd == "find_car":    api.find_vehicle(vin)
             elif cmd == "unlock_charger": api.unlock_charger(vin)
             elif cmd == "charge_limit":   # writable HA number (#77): value = target SoC %

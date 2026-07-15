@@ -3,6 +3,11 @@
 All notable changes to LeapMotor Mate are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.5.14] — 2026-07-15
+
+### Added
+- **Windows and sunshade/roof commands over MQTT.** Open/close the windows (a quick vent to 20%) and the sunshade roof directly from Home Assistant — four new buttons that until now existed only in the web UI. Ideal for automations, e.g. auto-close the sunshade when the car arrives home. Like every physical command, the car only acts on them while parked. Thanks to @SgtMajorSnipr for the request (#138).
+
 ## [2.5.13] — 2026-07-15
 
 ### Added

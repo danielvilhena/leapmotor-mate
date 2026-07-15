@@ -387,6 +387,11 @@ class MqttService:
             # + Door Lock Toggle switch above (their retained configs are cleared below);
             # the raw "lock"/"unlock" command payloads STAY accepted for existing automations.
             ("open_trunk", "Open Trunk", "mdi:car-back"), ("close_trunk", "Close Trunk", "mdi:car-back"),
+            # Windows (quick vent to 20%) + sunshade/roof — physical, so the car only acts on them in Park.
+            ("open_windows", "Open Windows", "mdi:window-open-variant"),
+            ("close_windows", "Close Windows", "mdi:window-closed-variant"),
+            ("open_sunshade", "Open Sunshade", "mdi:window-shutter-open"),
+            ("close_sunshade", "Close Sunshade", "mdi:window-shutter"),
             ("find_car", "Find Car", "mdi:car-search"),
             ("unlock_charger", "Unlock Charge Cable", "mdi:ev-plug-type2"),
             # Climate is exposed as momentary buttons (not a switch): the API has no
